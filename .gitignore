@@ -1,0 +1,62 @@
+# ── VoxVoice repository ignore rules (root) ──────────────────────────────────
+# Established at milestone M0 (foundation freeze). Governance: .voxvoice/SECURITY_POLICY.md
+# and .voxvoice/GIT_WORKFLOW.md §8 (repository hygiene).
+# Rule: secrets, databases, virtualenvs/toolchains, caches, and generated
+# artifacts are NEVER tracked. Verified empirically at M0 via `git status`.
+
+# ── Secrets & local configuration (SECURITY_POLICY §1) ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!**/certs/.gitkeep
+
+# ── Databases & data artifacts ──
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Python: virtualenvs, toolchains, caches, build ──
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Vendored language toolchains / package caches (e.g. voicebot/tools/) — never commit
+**/tools/python/
+**/tools/cache/
+platform/voicebot/tools/
+
+# ── Recordings, audio fixtures, model files (GIT_WORKFLOW §8: use storage/LFS) ──
+*.wav
+*.mp3
+*.ogg
+*.webm
+*.task
+*.onnx
+*.bin
+!evals/**/*.wav
+
+# ── Node / SDK (future sdk/ workspace) ──
+node_modules/
+sdk/**/dist/
+*.tsbuildinfo
+
+# ── OS / editor noise ──
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
