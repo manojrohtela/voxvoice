@@ -13,7 +13,8 @@
 | **M2A — Session Worker foundation** | `SessionWorker` lifecycle owner (start/stop/cancel/cleanup, deterministic FSM, DI seam, health) — no conversation/provider logic | ✅ Done (branch `feat/m2a-session-worker`) |
 | **M2B.1 — Conversation State Machine** | Deterministic conversation-lifecycle FSM over `core.states.SessionState` (validation, guards, immutable history, typed errors, notifications) — no orchestration | ✅ Done (branch `feat/m2b1-conversation-state-machine`) |
 | **M2B.2 — Conversation Orchestrator** | Sole-writer orchestrator drives the state machine (begin/run/end/cancel + failure routing); hosted by SessionWorker; providers via interfaces only — no provider execution/turn/AI | ✅ Done (branch `feat/m2b2-conversation-orchestrator`) |
-| **M2C — Provider wiring + turn loop** | Wire first STT/TTS/LLM/transport plugins into the orchestrator; port the voicebot turn loop; transcripts live via events; restore session start | ⏳ Next (awaiting approval) |
+| **M2C.1 — Provider Registry** | Capability-based provider reference management (register/unregister/resolve/list, validation, hot-swap, thread-safe) — manages references only, no execution | ✅ Done (branch `feat/m2c1-provider-registry`) |
+| **M2C.2 — Provider wiring + turn loop** | Implement first STT/TTS/LLM/transport plugins; wire the orchestrator's `_open_providers`/`_close_providers` to resolve them via the registry; port the voicebot turn loop; transcripts live via events; restore session start | ⏳ Next (awaiting approval) |
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
 | **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |

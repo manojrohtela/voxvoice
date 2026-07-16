@@ -52,3 +52,36 @@ class OrchestrationError(PlatformError):
 
 class OrchestrationStartupError(OrchestrationError):
     """Conversation startup (begin) failed; the conversation is left FAILED."""
+
+
+# ── Provider Registry (M2C.1) ────────────────────────────────────────────────
+# Rooted directly in PlatformError — these are registration/resolution-time
+# errors, distinct from core.errors.ProviderError (execution-time vendor
+# failures wrapped by the fault-tolerance layer, Constitution §A10).
+class ProviderRegistryError(PlatformError):
+    """Base for Provider Registry errors."""
+
+
+class DuplicateProviderRegistration(ProviderRegistryError):
+    """A provider is already registered for this (capability, name), or a
+    default is already set for this capability."""
+
+
+class ProviderCapabilityMismatch(ProviderRegistryError):
+    """The provider instance does not implement the declared capability
+    contract (fails the isinstance check against the capability ABC)."""
+
+
+class CapabilityNotRegistered(ProviderRegistryError):
+    """No provider is registered for the requested capability/name, or
+    resolution is ambiguous (multiple providers, no default, no name given)."""
+
+
+class InvalidProviderRegistration(ProviderRegistryError):
+    """The provider instance is None, or is missing required identity (`name`)
+    or declared capability metadata (`capabilities`)."""
+
+
+class UnsupportedCapabilityKind(ProviderRegistryError):
+    """The capability kind is not one the registry currently knows how to
+    validate (Constitution §A12: new kinds are an additive extension)."""
