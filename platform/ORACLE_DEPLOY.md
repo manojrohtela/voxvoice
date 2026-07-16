@@ -1,5 +1,9 @@
 # Deploy Dograh (remote mode) on a 2nd Oracle Cloud VM
 
+> ⚠️ **SUPERSEDED (M1, 2026-07-16).** Deploys the retired **Dograh** engine
+> (ADR-0001/0007). Kept for reusable Oracle/coturn/TLS deployment knowledge for
+> the first-party runtime (M2+); not the current deploy path.
+
 Goal: a public-IP host where WebRTC voice actually works, isolated from your
 VoxHire prod box. Uses Dograh's official `remote` profile (nginx HTTPS + coturn).
 Dograh images are multi-arch, so the free **ARM A1** shape is fine.

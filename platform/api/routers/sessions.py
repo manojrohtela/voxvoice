@@ -1,6 +1,12 @@
-"""Sessions (SPEC §4). Starting a session loads the (org-scoped) agent, asks
-the engine adapter to create the call/room, persists the Session, and returns
-the engine connection details. Org-scoping applies to every read."""
+"""Sessions (SPEC §4). Org-scoping applies to every read.
+
+At M1 the engine-adapter axis was removed (ADR-0001/0007): there is no engine to
+start a call, and the Runtime Plane arrives at M2. Per the Constitution migration
+plan, `POST /v1/sessions` therefore returns **503** for now (honest gap) after
+validating agent ownership. The read/end endpoints operate on persisted sessions
+and remain available. `session.ended` webhooks fan out via the decoupled
+`events` module.
+"""
 
 from __future__ import annotations
 
@@ -10,20 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session as DBSession
 from sqlmodel import select
 
-from adapters import EngineError, get_adapter
-from webhooks import emit_event
+from events import emit_event
 
+from ..config import get_settings
 from ..db import get_session
-from ..ingest import maybe_start_transcript_poller
 from ..models import Agent, Org, Session, Transcript
-from ..schemas import (
-    PhoneConn,
-    SessionCreate,
-    SessionCreateResponse,
-    SessionRead,
-    TranscriptItem,
-    WebConn,
-)
+from ..schemas import SessionRead, TranscriptItem
 from ..security import get_org
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
@@ -38,60 +36,33 @@ def _get_owned_session(session_id: str, org: Org, db: DBSession) -> Session:
     return session
 
 
-@router.post("", response_model=SessionCreateResponse, status_code=status.HTTP_201_CREATED)
+def _webhook_target(org: Org) -> tuple[str | None, str | None]:
+    """Per-org webhook config, falling back to platform defaults (SPEC §10.4).
+    Resolved in the Control Plane so the `events` infra never imports `api`."""
+    settings = get_settings()
+    return (
+        org.webhook_url or settings.default_webhook_url,
+        org.webhook_secret or settings.default_webhook_secret,
+    )
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_session(
-    body: SessionCreate,
+    body: dict,
     org: Org = Depends(get_org),
     db: DBSession = Depends(get_session),
-) -> SessionCreateResponse:
-    agent = db.get(Agent, body.agent_id)
+) -> dict:
+    # Validate agent ownership first so org-scoping is preserved (cross-org -> 404).
+    agent = db.get(Agent, body.get("agent_id"))
     if agent is None or agent.org_id != org.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
-    adapter = get_adapter()
-    session = Session(
-        org_id=org.id,
-        agent_id=agent.id,
-        engine=adapter.name,
-        channel=body.channel,
-        status="created",
-        meta=body.metadata,
+    # No engine exists after the M1 adapter-axis removal; the Runtime Plane that
+    # starts live sessions lands at M2 (Constitution migration M1 — honest gap).
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Session start is unavailable until the Runtime Plane lands (M2).",
     )
-
-    try:
-        engine_session = await adapter.start_session(agent, session)
-    except EngineError as exc:
-        # Persist the failure for observability; never leak the raw engine error.
-        session.status = "failed"
-        db.add(session)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
-
-    session.engine_ref = engine_session.engine_ref
-    session.status = "active"
-    session.started_at = datetime.now(UTC)
-    db.add(session)
-    # The adapter may have lazily created the engine workflow and stamped its id
-    # onto the agent; persist that so we reuse the same workflow next time.
-    db.add(agent)
-    db.commit()
-    db.refresh(session)
-
-    await emit_event(org, "session.started", SessionRead.from_model(session).model_dump())
-
-    # Dograh has no transcript push, so drain the run report in the background.
-    maybe_start_transcript_poller(adapter, session.engine_ref)
-
-    resp = SessionCreateResponse(
-        session_id=session.id, engine=session.engine, channel=session.channel
-    )
-    if engine_session.web is not None:
-        resp.web = WebConn(**engine_session.web.__dict__)
-    if engine_session.phone is not None:
-        resp.phone = PhoneConn(**engine_session.phone.__dict__)
-    return resp
 
 
 @router.post("/{session_id}/end")
@@ -102,18 +73,17 @@ async def end_session(
 ) -> dict[str, str]:
     session = _get_owned_session(session_id, org, db)
     if session.status != "ended":
-        try:
-            await get_adapter().end_session(session)
-        except EngineError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-            ) from exc
         session.status = "ended"
         session.ended_at = datetime.now(UTC)
         db.add(session)
         db.commit()
+        url, secret = _webhook_target(org)
         await emit_event(
-            org, "session.ended", {"session_id": session.id, "status": "ended"}
+            url=url,
+            secret=secret,
+            org_id=org.id,
+            event="session.ended",
+            data={"session_id": session.id, "status": "ended"},
         )
     return {"session_id": session.id, "status": "ended"}
 

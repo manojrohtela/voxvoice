@@ -20,16 +20,23 @@ dev = [
     "ruff>=0.4",
 ]
 
-# Run everything from inside platform/ so the top-level packages are
-# `api`, `adapters`, `webhooks`, `tests`. NOTE: the directory is intentionally
-# named `platform` per SPEC §8, but it is the project root, *not* a Python
-# package — that avoids shadowing the stdlib `platform` module.
-[tool.setuptools]
-packages = ["api", "adapters", "webhooks"]
+# Run everything from inside platform/. NOTE: the directory is intentionally
+# named `platform` per Constitution §A14, but it is the project root, *not* a
+# Python package — that avoids shadowing the stdlib `platform` module.
+# Package set follows the Constitution §A14 layer map (M1 reshape):
+#   core · api · runtime · providers · events · observability
+# (`tests` and the `voicebot` prototype are not installed packages.)
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "api*", "runtime*", "providers*", "events*", "observability*"]
+exclude = ["tests*", "voicebot*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Never collect the vendored voicebot toolchain/venv (prototype; ~1.5 GB) or
+# build/cache dirs, even if pytest is pointed at the tree from the repo root.
+norecursedirs = ["voicebot", ".venv", "*.egg-info", ".git", ".ruff_cache", ".pytest_cache"]
 
 [tool.ruff]
 target-version = "py311"

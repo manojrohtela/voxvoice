@@ -1,4 +1,10 @@
-"""Application settings, all sourced from the environment (never hardcoded)."""
+"""Application settings, all sourced from the environment (never hardcoded).
+
+The engine-adapter settings (ENGINE, DOGRAH_*, ENGINE_CALLBACK_SECRET) were
+removed at M1 with the adapter axis (ADR-0001/0007). Runtime and provider
+configuration is introduced with the Runtime Plane (M2+), per agent, and
+validated at write time (Constitution §A2.6 — no dead config, AR-25).
+"""
 
 from __future__ import annotations
 
@@ -12,21 +18,10 @@ class Settings(BaseSettings):
 
     app_env: str = "dev"
 
-    # Engine selection is config-driven (SPEC §7 Phase 1 acceptance).
-    engine: str = "dograh"  # "dograh" | "livekit"
-
+    # Database. SQLite locally; a Postgres/Supabase URL in prod with NO model
+    # changes (Constitution Part B / ADR-0006), e.g.
+    # postgresql+psycopg://USER:PASS@HOST:5432/postgres
     database_url: str = "sqlite:///./voxvoice.db"
-
-    # Dograh self-hosted instance (VERIFIED v1.35.0).
-    # REST API host root — `/api/v1` is appended by the adapter. The official
-    # compose maps the api service to host port 8000; this repo verified against
-    # a remapped 8010 (8000 was already in use). The UI/embed host is :3010.
-    dograh_base_url: str = "http://localhost:8000"
-    dograh_ui_base_url: str = "http://localhost:3010"
-    dograh_api_key: str | None = None  # `dgr_…` from Dograh's /user/api-keys
-
-    # Secret the engine must present when calling our event-ingestion endpoint.
-    engine_callback_secret: str = "change-me-engine-callback-secret"
 
     # Fallback webhook config (used only when an Org has none of its own).
     default_webhook_url: str | None = None

@@ -1,5 +1,10 @@
 # VoxVoice — Deploy runbook (getting a real voice call working)
 
+> ⚠️ **SUPERSEDED (M1, 2026-07-16).** This runbook deploys the retired **Dograh**
+> engine (ADR-0001/0007). It is kept for its Oracle/TURN/WebRTC deployment
+> knowledge, which will inform the first-party Runtime Plane deploy (M2+). It is
+> **not** the current deploy path. See [`docs/research/dograh-api-notes.md`](../docs/research/dograh-api-notes.md).
+
 ## TL;DR
 Everything in this repo is built and verified. The **only** thing that does not
 work on a local Mac is an actual spoken WebRTC call, because Docker Desktop on

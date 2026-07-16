@@ -1,8 +1,13 @@
 """Pydantic request/response schemas (the public API contract, SPEC §4).
 
-These are deliberately separate from the SQLModel tables so the wire contract
-stays stable even if storage changes. Note `metadata` on the wire maps to the
-`meta` model attribute (`metadata` is reserved by SQLAlchemy)."""
+Deliberately separate from the SQLModel tables so the wire contract stays stable
+even if storage changes. `metadata` on the wire maps to the `meta` model
+attribute (`metadata` is reserved by SQLAlchemy).
+
+At M1 the Dograh-specific engine-event schema and web-connection extras were
+removed with the adapter axis (ADR-0007). The session web-connection shape is
+finalised when the Runtime Plane + client SDK land (M2/M4).
+"""
 
 from __future__ import annotations
 
@@ -20,8 +25,8 @@ class AgentCreate(BaseModel):
     system_prompt: str
     first_message: str | None = None
     language: str = "en-IN"
-    stt_provider: str = "dograh_default"
-    tts_provider: str = "dograh_default"
+    stt_provider: str = "default"
+    tts_provider: str = "default"
     tts_voice: str | None = None
     llm_model: str | None = None
     allow_interruptions: bool = True
@@ -81,15 +86,11 @@ class SessionCreate(BaseModel):
 
 
 class WebConn(BaseModel):
-    # SPEC §4 fields (stable contract)…
+    # Web connection details returned to the client SDK. Finalised with the
+    # Runtime Plane transport + SDK (M2/M4).
     token: str
     url: str
     room: str
-    # …plus Dograh-honest extras (superset, owner decision). None for engines
-    # that don't provide them.
-    embed_script: str | None = None
-    turn_url: str | None = None
-    run_id: str | None = None
 
 
 class PhoneConn(BaseModel):
@@ -126,14 +127,3 @@ class TranscriptItem(BaseModel):
     role: str
     text: str
     ts: float
-
-
-# ─── Engine event ingestion (Dograh -> us) ─────────────────────────────────
-class EngineTranscriptEvent(BaseModel):
-    """Shape Dograh POSTs to /v1/engine/dograh/events for each transcript item.
-    engine_ref identifies the call; we resolve it back to our Session."""
-
-    engine_ref: str
-    role: str
-    text: str
-    ts: float = 0.0

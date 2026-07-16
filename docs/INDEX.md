@@ -70,6 +70,7 @@ _Currently lives beside the code (to be migrated or cross-linked here):_
 
 | Document | Date | Status | Description |
 |---|---|---|---|
+| [roadmap/migration-progress.md](roadmap/migration-progress.md) | 2026-07-16 | Living | M0–M6 migration tracker. M0 ✅, M1 ✅ (repo reshape; engine-adapter axis removed; session-start → 503; structure now matches Constitution §A14). M2 next. |
 | [roadmap/baseline-M0.md](roadmap/baseline-M0.md) | 2026-07-16 | Baseline (immutable) | M0 Foundation Freeze snapshot — structure, dependencies, architecture/governance/documentation posture, statistics, known debt, deferred items, open risks. Git tag `foundation-v1`. The state every future milestone starts from. |
 
 ## Planned sections (created when first document lands)
