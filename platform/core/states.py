@@ -1,14 +1,19 @@
 """Session- and turn-state definitions and legal transition tables
 (Constitution §A4.4 / ADR-0003).
 
-Definitions only — the state *machine* (the component that runs these tables and
-emits transition events) is part of the Conversation Orchestrator, built at M2+.
-The transition tables here are the single source of truth the orchestrator and
-its tests assert against (TESTING_POLICY: state-machine tests).
+Definitions only — the runnable state *machine* (validation, history,
+notifications) lives in `runtime.conversation` (the machine is a Runtime-Plane
+concern; the definitions stay on the core floor). These tables + metadata are the
+single source of truth the machine and its tests assert against.
+
+`SessionState` IS the conversation lifecycle: the glossary (§A0) defines a
+Session as "one conversation instance". The finer-grained turn phases
+(listening / speaking / …) are `TurnState`, driven by Turn Intelligence (M3).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -52,4 +57,60 @@ TURN_TRANSITIONS: dict[TurnState, frozenset[TurnState]] = {
     TurnState.THINKING: frozenset({TurnState.TOOL_WAIT, TurnState.SPEAKING}),
     TurnState.TOOL_WAIT: frozenset({TurnState.THINKING}),
     TurnState.SPEAKING: frozenset({TurnState.LISTENING, TurnState.USER_SPEAKING}),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class StateMeta:
+    """Descriptive metadata for a conversation (session) state."""
+
+    description: str
+    terminal: bool
+    recovery: str  # recovery policy (human-readable; enforced by the transition table)
+
+
+# Terminal conversation states — no transitions out; the machine is immutable here.
+TERMINAL_SESSION_STATES: frozenset[SessionState] = frozenset(
+    {SessionState.ENDED, SessionState.FAILED}
+)
+
+# Per-state metadata for the conversation lifecycle. Data only; the runnable
+# machine (runtime.conversation.ConversationStateMachine) consumes this.
+SESSION_STATE_META: dict[SessionState, StateMeta] = {
+    SessionState.CREATED: StateMeta(
+        "Session created; no transport connected yet.",
+        terminal=False,
+        recovery="On failure -> FAILED.",
+    ),
+    SessionState.CONNECTED: StateMeta(
+        "Transport connected; greeting / first audio pending.",
+        terminal=False,
+        recovery="On failure -> FAILED.",
+    ),
+    SessionState.IN_CONVERSATION: StateMeta(
+        "Active conversation; the turn machine (TurnState) runs within this state.",
+        terminal=False,
+        recovery="On transport drop -> SUSPENDED (recoverable); on end -> ENDING.",
+    ),
+    SessionState.SUSPENDED: StateMeta(
+        "Transport dropped; within the reconnect grace window (recoverable).",
+        terminal=False,
+        recovery="Resume -> IN_CONVERSATION within grace; on grace expiry -> ENDING.",
+    ),
+    SessionState.ENDING: StateMeta(
+        "Teardown in progress (flush transcripts, snapshot, close providers).",
+        terminal=False,
+        recovery="No recovery; proceeds to ENDED.",
+    ),
+    SessionState.ENDED: StateMeta(
+        "Terminal: conversation ended (reason carried on the transition: "
+        "completed | cancelled | …).",
+        terminal=True,
+        recovery="None (terminal).",
+    ),
+    SessionState.FAILED: StateMeta(
+        "Terminal: unrecoverable failure.",
+        terminal=True,
+        recovery="None (terminal); the owning host discards the session.",
+    ),
 }

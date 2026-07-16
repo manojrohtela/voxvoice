@@ -71,6 +71,7 @@ _Currently lives beside the code (to be migrated or cross-linked here):_
 | Document | Date | Status | Description |
 |---|---|---|---|
 | [runtime/session-worker.md](runtime/session-worker.md) | 2026-07-16 | Implemented (M2A) | `SessionWorker` — owns one session's execution lifecycle (start/stop/cancel/cleanup, deterministic FSM, DI seam, health). No conversation/provider/AI logic (later milestones). |
+| [runtime/conversation-state-machine.md](runtime/conversation-state-machine.md) | 2026-07-16 | Implemented (M2B.1) | `ConversationStateMachine` — deterministic conversation-lifecycle FSM over `core.states.SessionState` (validation, guards, immutable history, typed errors, notifications). Single source of truth for conversation state; consumed by the Orchestrator at M2B.2. Reconciliation of the milestone's example states in DL-0007. |
 
 ## Roadmap
 

@@ -7,7 +7,7 @@ SessionWorker transitions to FAILED and raises one of these.
 
 from __future__ import annotations
 
-from core.errors import PlatformError
+from core.errors import PlatformError, RuntimeConflict
 
 
 class WorkerError(PlatformError):
@@ -24,3 +24,22 @@ class WorkerShutdownError(WorkerError):
 
 class InvalidWorkerTransition(WorkerError):
     """An illegal worker state transition was attempted (deterministic guard)."""
+
+
+# ── Conversation state machine (M2B.1) ──────────────────────────────────────
+# Rooted in core.errors.RuntimeConflict (defined for "illegal state-machine
+# transition or lifecycle violation") — reused, not duplicated.
+class ConversationTransitionError(RuntimeConflict):
+    """Base for illegal conversation-state transitions."""
+
+
+class InvalidConversationTransition(ConversationTransitionError):
+    """Target is not a legal transition from the current state."""
+
+
+class TerminalConversationError(ConversationTransitionError):
+    """Attempted to transition out of a terminal state (immutable)."""
+
+
+class DuplicateConversationTransition(ConversationTransitionError):
+    """Attempted to transition into the already-active state (no self-loops)."""
