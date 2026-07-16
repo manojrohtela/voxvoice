@@ -43,3 +43,12 @@ class TerminalConversationError(ConversationTransitionError):
 
 class DuplicateConversationTransition(ConversationTransitionError):
     """Attempted to transition into the already-active state (no self-loops)."""
+
+
+# ── Conversation Orchestrator (M2B.2) ───────────────────────────────────────
+class OrchestrationError(PlatformError):
+    """Base for Conversation Orchestrator failures."""
+
+
+class OrchestrationStartupError(OrchestrationError):
+    """Conversation startup (begin) failed; the conversation is left FAILED."""

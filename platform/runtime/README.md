@@ -11,7 +11,7 @@ and no behaviour yet. Each component gets its full specification (Constitution
 | `worker.py` | **SessionWorker: owns one session's execution lifecycle** (start/stop/cancel/cleanup, health, DI) — **implemented M2A** (spec: [`docs/runtime/session-worker.md`](../../docs/runtime/session-worker.md)). Conversation execution wires in at M2B. | M2A ✅ |
 | `state.py` · `contracts.py` · `errors.py` | Worker state machine, runtime contracts (SessionContext/RuntimeContext/RuntimeDependencies/…), typed worker errors | M2A ✅ |
 | `conversation.py` | **ConversationStateMachine: deterministic conversation-lifecycle FSM** over `core.states.SessionState` (validation, guards, immutable history, typed errors, notifications) — **implemented M2B.1** (spec: [`docs/runtime/conversation-state-machine.md`](../../docs/runtime/conversation-state-machine.md)) | M2B.1 ✅ |
-| `orchestrator/` | Sole writer of conversation state; drives the state machine; lifecycle policy; emits `session.*` | M2B.2 |
+| `orchestrator/` | **ConversationOrchestrator: sole writer of conversation state**; drives the state machine; coordinates begin/run/end/cancel + failure routing; providers via interfaces only — **implemented M2B.2** (spec: [`docs/runtime/conversation-orchestrator.md`](../../docs/runtime/conversation-orchestrator.md)). Hosted by `SessionWorker`. | M2B.2 ✅ |
 | `turn/` | Turn Intelligence: activity detection, endpoint scoring, interruption policy, timing | M3 |
 | `ai/` | Context assembly, prompt runtime, response validation/formatting, tool scheduling | M5 |
 | `memory/` | Layered token-budgeted context; snapshots; recovery | M5 |

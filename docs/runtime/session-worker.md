@@ -81,6 +81,13 @@ instance (no fire-and-forget) and always awaited/cancelled on teardown. No
 blocking calls. (Sequential lifecycle calls assumed; concurrent start/stop on one
 instance is out of scope for M2A.)
 
+## Update (M2B.2 — hosts the Conversation Orchestrator)
+As of M2B.2 the worker **hosts one `ConversationOrchestrator`** (created + begun in
+`_initialize`, driven via `_run` → `orchestrator.run()`, ended in `stop`/`cancel`)
+and exposes `conversation_state` read-only. The worker still owns only the worker
+lifecycle (`WorkerState`); it never writes conversation state — the orchestrator is
+the sole writer. See [`conversation-orchestrator.md`](conversation-orchestrator.md).
+
 ## Not in scope (later milestones)
-Conversation orchestration (M2B) · providers/transport wiring in `_initialize`
-(M2B) · Turn Intelligence (M3) · Event Bus emission (M4) · memory/snapshots (M5).
+Provider/transport wiring + the turn loop (M2C) · Turn Intelligence (M3) · Event
+Bus emission (M4) · memory/snapshots (M5).

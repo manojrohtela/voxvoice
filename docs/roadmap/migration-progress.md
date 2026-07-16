@@ -12,7 +12,8 @@
 | **M1 — Repo reshape** | Create `core/`; runtime/providers/events/observability skeletons; delete engine-adapter axis; session-start → 503; break `api⇄webhooks` cycle | ✅ Done (branch `chore/m1-repo-reshape`) |
 | **M2A — Session Worker foundation** | `SessionWorker` lifecycle owner (start/stop/cancel/cleanup, deterministic FSM, DI seam, health) — no conversation/provider logic | ✅ Done (branch `feat/m2a-session-worker`) |
 | **M2B.1 — Conversation State Machine** | Deterministic conversation-lifecycle FSM over `core.states.SessionState` (validation, guards, immutable history, typed errors, notifications) — no orchestration | ✅ Done (branch `feat/m2b1-conversation-state-machine`) |
-| **M2B.2 — Conversation Orchestrator + Runtime seed** | Orchestrator drives the state machine; wire providers/transport into the worker; port voicebot loop; transcripts live via events; restore session start | ⏳ Next (awaiting approval) |
+| **M2B.2 — Conversation Orchestrator** | Sole-writer orchestrator drives the state machine (begin/run/end/cancel + failure routing); hosted by SessionWorker; providers via interfaces only — no provider execution/turn/AI | ✅ Done (branch `feat/m2b2-conversation-orchestrator`) |
+| **M2C — Provider wiring + turn loop** | Wire first STT/TTS/LLM/transport plugins into the orchestrator; port the voicebot turn loop; transcripts live via events; restore session start | ⏳ Next (awaiting approval) |
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
 | **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |

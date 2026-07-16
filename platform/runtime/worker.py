@@ -1,37 +1,37 @@
-"""SessionWorker — the Runtime Plane's per-session lifecycle owner (M2A).
+"""SessionWorker — the Runtime Plane's per-session lifecycle owner (M2A; M2B.2).
 
 Component specification (Constitution §A11.3):
   responsibilities : own the execution lifecycle of exactly ONE voice session —
                      startup, run, graceful shutdown, cancellation, cleanup, and
-                     health/metadata exposure. NOTHING else (no conversation
-                     orchestration, turn detection, memory, providers, audio, or
-                     AI — those are later milestones).
-  inputs           : a RuntimeContext (the injected session identity, capability
-                     providers, and configuration) and an optional lifecycle
-                     observer.
-  outputs          : lifecycle signals; health status; a RuntimeMetadata snapshot.
-  dependencies     : core (errors); runtime contracts + state. Never imports
-                     `api`; never instantiates a provider (AR-20/21).
-  lifecycle        : CREATED -> INITIALIZING -> READY -> RUNNING -> STOPPING ->
-                     STOPPED, with FAILED reachable on any error (see
-                     `runtime.state.WORKER_TRANSITIONS`).
-  emitted events   : lifecycle signals only (worker_created/…/stopped/failed) via
-                     the injected observer + structured logs. The full Event Bus
-                     is M4.
-  failure modes    : startup/init failure -> FAILED + WorkerStartupError;
-                     shutdown failure -> FAILED + WorkerShutdownError; illegal
-                     transition -> InvalidWorkerTransition. No silent failures.
+                     health/metadata exposure. It HOSTS one ConversationOrchestrator
+                     and DELEGATES all conversation control to it (M2B.2). It does
+                     NOT own conversation state, providers, turn logic, or AI.
+  inputs           : a RuntimeContext (injected session identity, capability
+                     providers, config) and an optional lifecycle observer.
+  outputs          : worker lifecycle signals; health status; a RuntimeMetadata
+                     snapshot; read-only conversation state (via the orchestrator).
+  dependencies     : core (errors); runtime contracts + state; the Conversation
+                     Orchestrator. Never imports `api`; never instantiates a
+                     provider (AR-20/21); never touches conversation state directly.
+  lifecycle        : CREATED → INITIALIZING → READY → RUNNING → STOPPING →
+                     STOPPED, with FAILED reachable on any error
+                     (`runtime.state.WORKER_TRANSITIONS`).
+  emitted events   : worker lifecycle signals via the injected observer + logs.
+                     Conversation-state notifications come from the orchestrator.
+  failure modes    : startup/init failure → FAILED + WorkerStartupError;
+                     shutdown failure → FAILED + WorkerShutdownError; illegal
+                     worker transition → InvalidWorkerTransition. No silent failures.
   recovery         : cleanup is guaranteed and idempotent on every stop/cancel/
-                     failure path; the owning host may discard a FAILED/STOPPED
-                     worker. (Snapshot-based session recovery is Constitution §A7,
-                     built with memory at M5.)
+                     failure path and terminalizes the conversation defensively.
 
-Scope note (DL-0006): the Constitution glossary defines a Session Worker as
-executing "one or more sessions". M2A implements the *one*-session case; a future
-host that multiplexes many workers/sessions is an additive change.
+Ownership (M2B.2): worker → worker lifecycle (WorkerState). Orchestrator →
+conversation lifecycle (SessionState, sole writer). Providers → capabilities.
+These boundaries are strict: the worker calls begin/run/end/cancel on the
+orchestrator but never transitions conversation state itself.
 
-Deterministic: given the same sequence of lifecycle calls, the same transitions
-occur. No runtime globals; all state is instance state; one session per worker.
+Deterministic: given the same sequence of lifecycle calls, the same worker
+transitions occur. No runtime globals; all state is instance state; one session
+per worker (DL-0006).
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ import asyncio
 import contextlib
 import logging
 import time
+
+from core.states import SessionState
 
 from .contracts import (
     LifecycleObserver,
@@ -51,14 +53,15 @@ from .contracts import (
     WorkerConfiguration,
 )
 from .errors import InvalidWorkerTransition, WorkerShutdownError, WorkerStartupError
+from .orchestrator import ConversationOrchestrator
 from .state import TERMINAL_WORKER_STATES, WORKER_TRANSITIONS, WorkerState
 
 log = logging.getLogger("voxvoice.runtime.worker")
 
 
 class SessionWorker:
-    """Owns the lifecycle of exactly one voice session. Business logic lives in
-    later runtime components, not here."""
+    """Owns the lifecycle of exactly one voice session and hosts one Conversation
+    Orchestrator. Conversation logic lives in the orchestrator, not here."""
 
     def __init__(
         self,
@@ -74,13 +77,13 @@ class SessionWorker:
         self._started_at: float | None = None
         self._stopped_at: float | None = None
 
-        self._stop_event = asyncio.Event()
+        self._orchestrator: ConversationOrchestrator | None = None
         self._run_task: asyncio.Task[None] | None = None
         self._cleaned_up = False
 
         self._emit("constructed")
 
-    # ── read-only exposure (health, metadata, DI points) ────────────────────
+    # ── read-only exposure (health, metadata, DI + conversation state) ──────
     @property
     def state(self) -> WorkerState:
         return self._state
@@ -100,6 +103,17 @@ class SessionWorker:
         return self._context.config
 
     @property
+    def orchestrator(self) -> ConversationOrchestrator | None:
+        """Read-only reference to the hosted orchestrator (created on start).
+        The worker never drives conversation state through it beyond the
+        begin/run/end/cancel coordination calls."""
+        return self._orchestrator
+
+    @property
+    def conversation_state(self) -> SessionState | None:
+        return self._orchestrator.state if self._orchestrator is not None else None
+
+    @property
     def health(self) -> dict[str, object]:
         return {
             "worker_id": self._context.config.worker_id,
@@ -107,6 +121,9 @@ class SessionWorker:
             "state": self._state.value,
             "healthy": self._state is not WorkerState.FAILED,
             "uptime_s": (time.time() - self._started_at) if self._started_at else 0.0,
+            "conversation_state": (
+                self._orchestrator.state.value if self._orchestrator is not None else None
+            ),
         }
 
     @property
@@ -122,8 +139,9 @@ class SessionWorker:
 
     # ── lifecycle ───────────────────────────────────────────────────────────
     async def start(self) -> None:
-        """CREATED -> INITIALIZING -> READY -> RUNNING. Spawns the (cancellable)
-        run task. On any failure: -> FAILED and raise WorkerStartupError."""
+        """CREATED → INITIALIZING → READY → RUNNING. Creates + begins the
+        conversation orchestrator during init, then spawns the run task. On any
+        failure: → FAILED and raise WorkerStartupError."""
         if self._state is not WorkerState.CREATED:
             raise InvalidWorkerTransition(
                 f"start() requires CREATED, worker is {self._state.value}"
@@ -143,14 +161,15 @@ class SessionWorker:
             raise WorkerStartupError(f"worker startup failed: {exc}") from exc
 
     async def stop(self) -> None:
-        """Graceful shutdown: signal the run task, drain it (bounded by
-        shutdown_timeout_s), then guarantee cleanup and reach STOPPED.
-        Idempotent once terminal."""
+        """Graceful shutdown: end the conversation, drain the run task (bounded by
+        shutdown_timeout_s), then guarantee cleanup and reach STOPPED. Idempotent
+        once terminal."""
         if self._state in TERMINAL_WORKER_STATES:
             return
         try:
             self._transition(WorkerState.STOPPING, "stopping")
-            self._stop_event.set()
+            if self._orchestrator is not None and not self._orchestrator.is_terminal:
+                await self._orchestrator.end(reason="stopped")
             await self._drain_run_task()
         except InvalidWorkerTransition:
             raise
@@ -163,14 +182,15 @@ class SessionWorker:
         self._transition(WorkerState.STOPPED, "stopped")
 
     async def cancel(self) -> None:
-        """Forceful shutdown: cancel the run task immediately, then guarantee
-        cleanup and reach STOPPED. Idempotent once terminal."""
+        """Forceful shutdown: cancel the conversation and the run task immediately,
+        then guarantee cleanup and reach STOPPED. Idempotent once terminal."""
         if self._state in TERMINAL_WORKER_STATES:
             return
         try:
             if WorkerState.STOPPING in WORKER_TRANSITIONS[self._state]:
                 self._transition(WorkerState.STOPPING, "cancelling")
-            self._stop_event.set()
+            if self._orchestrator is not None and not self._orchestrator.is_terminal:
+                await self._orchestrator.cancel(reason="cancelled")
             if self._run_task is not None:
                 self._run_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -182,18 +202,22 @@ class SessionWorker:
 
     # ── internals ─────────────────────────────────────────────────────────
     async def _initialize(self) -> None:
-        """Startup hook. At M2A this only validates the injected context; future
-        milestones open transports/providers here. No behaviour that could hang."""
+        """Startup hook: validate the context, then create and begin the
+        conversation orchestrator (CREATED → CONNECTED → IN_CONVERSATION). Provider
+        opening happens inside the orchestrator via interfaces (M2C+)."""
         if not self._context.config.worker_id:
             raise ValueError("worker_id is required")
         if not self._context.session.session_id:
             raise ValueError("session_id is required")
+        self._orchestrator = ConversationOrchestrator(self._context)
+        await self._orchestrator.begin()
 
     async def _run(self) -> None:
-        """The running loop. At M2A there is deliberately NO conversation logic —
-        the worker idles until asked to stop, and is fully cancellable. The
-        conversation loop is wired in from M2B."""
-        await self._stop_event.wait()
+        """The running loop — delegated entirely to the orchestrator. Returns when
+        the orchestrator signals the conversation has ended. Fully cancellable."""
+        if self._orchestrator is None:
+            return
+        await self._orchestrator.run()
 
     async def _drain_run_task(self) -> None:
         if self._run_task is None:
@@ -215,16 +239,19 @@ class SessionWorker:
             pass
 
     async def _cleanup(self) -> None:
-        """Idempotent resource release. Runs on every stop/cancel/failure path.
-        Nothing to release at M2A; future components register teardown here."""
+        """Idempotent resource release on every stop/cancel/failure path. Defensively
+        terminalizes the conversation if the orchestrator was left non-terminal
+        (routed through the approved state machine — no hidden transitions)."""
         if self._cleaned_up:
             return
         self._cleaned_up = True
+        if self._orchestrator is not None and not self._orchestrator.is_terminal:
+            self._orchestrator.fail(reason="worker_cleanup")
         log.debug("worker %s cleaned up", self._context.config.worker_id)
 
     def _fail(self, detail: str, cause: BaseException | None = None) -> None:
-        """Force FAILED (reachable from any non-terminal state) and record it.
-        No silent failures — always logged and signalled."""
+        """Force worker FAILED (reachable from any non-terminal state) and record
+        it. No silent failures — always logged and signalled."""
         if self._state not in TERMINAL_WORKER_STATES:
             self._state = WorkerState.FAILED
             self._emit(detail)
