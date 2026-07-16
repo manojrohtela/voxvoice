@@ -8,7 +8,8 @@ and no behaviour yet. Each component gets its full specification (Constitution
 
 | Module | Responsibility (single) | Built at |
 |---|---|---|
-| `worker.py` | Host session actors; admission, backpressure, reaping | M2 |
+| `worker.py` | **SessionWorker: owns one session's execution lifecycle** (start/stop/cancel/cleanup, health, DI) — **implemented M2A** (spec: [`docs/runtime/session-worker.md`](../../docs/runtime/session-worker.md)). Conversation execution wires in at M2B. | M2A ✅ |
+| `state.py` · `contracts.py` · `errors.py` | Worker state machine, runtime contracts (SessionContext/RuntimeContext/RuntimeDependencies/…), typed worker errors | M2A ✅ |
 | `orchestrator/` | Sole writer of conversation state; state machine; lifecycle policy; emits `session.*` | M2 |
 | `turn/` | Turn Intelligence: activity detection, endpoint scoring, interruption policy, timing | M3 |
 | `ai/` | Context assembly, prompt runtime, response validation/formatting, tool scheduling | M5 |

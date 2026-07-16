@@ -66,6 +66,12 @@ _Currently lives beside the code (to be migrated or cross-linked here):_
 | [../platform/ORACLE_DEPLOY.md](../platform/ORACLE_DEPLOY.md) | Step-by-step Oracle Cloud VM deploy (firewall, DNS, TLS, remote profile). |
 | [../platform/voicebot/README.md](../platform/voicebot/README.md) | Local Pipecat voice-agent MVP (Groq STT/LLM + Cartesia TTS). |
 
+## Runtime (component specs — Constitution §A11.3)
+
+| Document | Date | Status | Description |
+|---|---|---|---|
+| [runtime/session-worker.md](runtime/session-worker.md) | 2026-07-16 | Implemented (M2A) | `SessionWorker` — owns one session's execution lifecycle (start/stop/cancel/cleanup, deterministic FSM, DI seam, health). No conversation/provider/AI logic (later milestones). |
+
 ## Roadmap
 
 | Document | Date | Status | Description |
