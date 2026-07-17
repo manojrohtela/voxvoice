@@ -47,7 +47,6 @@ from .contracts import (
     LifecycleObserver,
     LifecycleSignal,
     RuntimeContext,
-    RuntimeDependencies,
     RuntimeMetadata,
     SessionContext,
     WorkerConfiguration,
@@ -91,12 +90,6 @@ class SessionWorker:
     @property
     def session(self) -> SessionContext:
         return self._context.session
-
-    @property
-    def dependencies(self) -> RuntimeDependencies:
-        """The injected providers/metrics. Exposed so future components read them
-        from here — never from a global (AR-4)."""
-        return self._context.dependencies
 
     @property
     def config(self) -> WorkerConfiguration:

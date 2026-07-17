@@ -13,7 +13,6 @@ import pytest
 
 from runtime.contracts import (
     RuntimeContext,
-    RuntimeDependencies,
     SessionContext,
     WorkerConfiguration,
 )
@@ -22,10 +21,9 @@ from runtime.state import WorkerState as S
 from runtime.worker import SessionWorker
 
 
-def _context(deps: RuntimeDependencies | None = None, worker_id: str = "wrk_1") -> RuntimeContext:
+def _context(worker_id: str = "wrk_1") -> RuntimeContext:
     return RuntimeContext(
         session=SessionContext(session_id="ses_1", org_id="org_1", agent_id="agt_1"),
-        dependencies=deps or RuntimeDependencies(),
         config=WorkerConfiguration(worker_id=worker_id, shutdown_timeout_s=2.0),
     )
 
@@ -107,21 +105,9 @@ async def test_stop_ends_run_task(workers):
     assert run_task is not None and run_task.done()
 
 
-async def test_dependency_injection_is_stored_not_instantiated(workers):
-    stt, tts, llm = object(), object(), object()
-    deps = RuntimeDependencies(stt=stt, tts=tts, llm=llm)
-    w = workers(_context(deps=deps))
-    # Exposed exactly as injected — the worker never constructs a provider.
-    assert w.dependencies.stt is stt
-    assert w.dependencies.tts is tts
-    assert w.dependencies.llm is llm
-    assert w.dependencies.transport is None
-    await w.start()
-    await w.stop()  # completes fine without any provider being used
-
-
-async def test_runs_with_all_dependencies_absent(workers):
-    w = workers(_context())  # all deps None
+async def test_runs_without_a_registry(workers):
+    # No registry/agent → the worker runs an idle conversation (lifecycle only).
+    w = workers(_context())
     await w.start()
     assert w.state is S.RUNNING
     await w.stop()

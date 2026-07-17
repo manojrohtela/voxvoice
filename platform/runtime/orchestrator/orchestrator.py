@@ -44,7 +44,7 @@ import logging
 
 from core.states import SessionState
 
-from ..contracts import RuntimeContext, RuntimeDependencies
+from ..contracts import RuntimeContext
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
 from ..errors import OrchestrationError, OrchestrationStartupError
 from ..pipeline.pipeline import RuntimePipeline
@@ -80,12 +80,6 @@ class ConversationOrchestrator:
     @property
     def history(self) -> tuple[TransitionRecord, ...]:
         return self._sm.history
-
-    @property
-    def dependencies(self) -> RuntimeDependencies:
-        """The injected provider interfaces (a DI seam; the pipeline resolves
-        providers from the registry instead — see DL-0009 debt note). Read-only."""
-        return self._context.dependencies
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:

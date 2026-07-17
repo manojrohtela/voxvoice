@@ -24,9 +24,15 @@ linear branch stack (`main` fast-forwardable to `feat/m2c2-runtime-pipeline`, 6
 commits, no merges/conflicts). Safe improvements applied: stale post-M2C.2
 docstrings refreshed, a duplicated webhook-target call removed, +2 tests
 (concurrent-session isolation, api runtime-failure → 502). 101 tests pass, ruff
-clean. Open items before Epic 3: rotate exposed keys (DL-0002), merge the stack,
-consolidate the dual provider-provision seams (RuntimeDependencies vs registry,
-DL-0009). Certified ready for a **v0.1 Runtime Foundation** tag on merge.
+clean. Certified ready for a **v0.1 Runtime Foundation** tag on merge. Open items
+before Epic 3: rotate exposed keys (DL-0002), merge the stack.
+
+**Epic 2.1 — Architecture Consolidation (2026-07-17):** removed `RuntimeDependencies`,
+the vestigial second provider-provision seam — the `ProviderRegistry` is now the
+single mechanism (DL-0011). Nothing read its values, so runtime behaviour is
+unchanged; 2 obsolete DI tests removed. 99 tests pass, ruff clean, no cycles,
+boundaries intact. No other true duplication found (worker vs conversation state
+machines are complementary, different domains).
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
 | **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |

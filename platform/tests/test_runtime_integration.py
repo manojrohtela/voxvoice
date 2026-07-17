@@ -19,7 +19,6 @@ from core.states import SessionState
 from runtime.contracts import (
     AgentSpec,
     RuntimeContext,
-    RuntimeDependencies,
     SessionContext,
     WorkerConfiguration,
 )
@@ -31,7 +30,6 @@ from runtime.worker import SessionWorker
 def _context(registry, transcripts, session_id="ses_int"):
     return RuntimeContext(
         session=SessionContext(session_id=session_id, org_id="org_1", agent_id="agt_1"),
-        dependencies=RuntimeDependencies(),
         config=WorkerConfiguration(worker_id="wrk_int", shutdown_timeout_s=2.0),
         registry=registry,
         agent=AgentSpec(system_prompt="be helpful"),

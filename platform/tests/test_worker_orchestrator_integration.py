@@ -14,7 +14,6 @@ import pytest
 from core.states import SessionState as C
 from runtime.contracts import (
     RuntimeContext,
-    RuntimeDependencies,
     SessionContext,
     WorkerConfiguration,
 )
@@ -27,7 +26,6 @@ from runtime.worker import SessionWorker
 def _ctx() -> RuntimeContext:
     return RuntimeContext(
         session=SessionContext(session_id="ses_1", org_id="org_1", agent_id="agt_1"),
-        dependencies=RuntimeDependencies(),
         config=WorkerConfiguration(worker_id="wrk_1", shutdown_timeout_s=2.0),
     )
 

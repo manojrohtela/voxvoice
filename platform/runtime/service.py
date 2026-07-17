@@ -26,7 +26,6 @@ from core.session_control import (
 from .contracts import (
     AgentSpec,
     RuntimeContext,
-    RuntimeDependencies,
     SessionContext,
     WorkerConfiguration,
 )
@@ -62,7 +61,6 @@ class RuntimeSessionService(SessionController):
                 channel=request.channel,
                 metadata=request.metadata,
             ),
-            dependencies=RuntimeDependencies(),
             config=WorkerConfiguration(worker_id=f"wrk_{request.session_id}"),
             registry=self._registry,
             agent=agent,

@@ -8,14 +8,12 @@ execution, lifecycle notifications, and history. No speech/AI/provider logic.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import Mock
 
 import pytest
 
 from core.states import SessionState as C
 from runtime.contracts import (
     RuntimeContext,
-    RuntimeDependencies,
     SessionContext,
     WorkerConfiguration,
 )
@@ -23,10 +21,9 @@ from runtime.errors import OrchestrationError, OrchestrationStartupError
 from runtime.orchestrator import ConversationOrchestrator
 
 
-def _ctx(deps: RuntimeDependencies | None = None) -> RuntimeContext:
+def _ctx() -> RuntimeContext:
     return RuntimeContext(
         session=SessionContext(session_id="ses_1", org_id="org_1", agent_id="agt_1"),
-        dependencies=deps or RuntimeDependencies(),
         config=WorkerConfiguration(worker_id="wrk_1"),
     )
 
@@ -109,18 +106,6 @@ async def test_sole_writer_state_is_read_only():
     with pytest.raises(AttributeError):
         orch.state = C.ENDED  # property has no setter
     assert not hasattr(orch, "sm")  # the state machine is private (no public writer)
-
-
-async def test_dependency_injection_without_provider_execution():
-    stt, tts, llm, transport = Mock(), Mock(), Mock(), Mock()
-    deps = RuntimeDependencies(stt=stt, tts=tts, llm=llm, transport=transport)
-    orch = ConversationOrchestrator(_ctx(deps))
-    await orch.begin()
-    await orch.end()
-    # No provider was executed at M2B.2 (interfaces held, never called).
-    for m in (stt, tts, llm, transport):
-        assert m.mock_calls == []
-    assert orch.dependencies.stt is stt
 
 
 async def test_history_records_provenance():

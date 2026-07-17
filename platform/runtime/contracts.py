@@ -1,10 +1,11 @@
-"""Runtime-Plane contracts and value types (M2A).
+"""Runtime-Plane contracts and value types (M2A; consolidated E2.1).
 
-Minimal, immutable-where-possible types the SessionWorker and future runtime
-components share. Deliberately small — no fields are added in anticipation of
-later milestones (KISS). Provider slots are typed with the `core.providers`
-*interfaces*; the worker receives them injected and never instantiates them
-(Constitution §A6, AR-20/21).
+Minimal, immutable-where-possible types the SessionWorker and runtime components
+share. Deliberately small (KISS). Provider provisioning is the sole
+responsibility of the `ProviderRegistry` — the runtime resolves capabilities from
+`RuntimeContext.registry` and never constructs a provider (Constitution §A6,
+AR-20/21). The former `RuntimeDependencies` direct-injection seam was removed at
+E2.1 as duplicated responsibility (DL-0011).
 """
 
 from __future__ import annotations
@@ -12,15 +13,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-
-from core.providers import (
-    AnalyticsProvider,
-    LLMProvider,
-    StorageProvider,
-    STTProvider,
-    TransportProvider,
-    TTSProvider,
-)
 
 from .state import WorkerState
 
@@ -52,22 +44,6 @@ class WorkerConfiguration:
     shutdown_timeout_s: float = 10.0
 
 
-@dataclass(slots=True)
-class RuntimeDependencies:
-    """An optional dependency-injection seam for capability providers + a metrics
-    sink. The pipeline resolves providers from the `RuntimeContext.registry`
-    instead (M2C.2), so these fields are currently a secondary seam kept for
-    direct injection in tests; consolidating the two mechanisms is a documented
-    debt (DL-0009). The worker never constructs a provider itself."""
-
-    stt: STTProvider | None = None
-    tts: TTSProvider | None = None
-    llm: LLMProvider | None = None
-    transport: TransportProvider | None = None
-    storage: StorageProvider | None = None
-    metrics: AnalyticsProvider | None = None
-
-
 @dataclass(frozen=True, slots=True)
 class AgentSpec:
     """The agent's runtime-relevant configuration, passed from the Control Plane
@@ -85,17 +61,17 @@ class AgentSpec:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
-    """The dependency-injection seam handed to a worker: what session it owns,
-    which providers it may use, and its configuration. Future runtime components
-    receive this rather than reaching for globals (AR-3/AR-4: no runtime globals).
+    """The dependency-injection seam handed to a worker: what session it owns, its
+    configuration, and how it resolves providers. Runtime components receive this
+    rather than reaching for globals (AR-3/AR-4: no runtime globals).
 
-    `registry` (M2C.2) is how the Runtime resolves provider capabilities
-    (Constitution §A4.1). `agent` carries the agent's runtime config. `on_transcript`
-    is the Control Plane's transcript sink. All optional: without them a worker
-    runs an idle conversation (no pipeline) — used by lifecycle-only tests."""
+    `registry` (Constitution §A4.1) is the single mechanism by which the Runtime
+    resolves provider capabilities. `agent` carries the agent's runtime config.
+    `on_transcript` is the Control Plane's transcript sink. `registry`/`agent` are
+    optional: without them a worker runs an idle conversation (no pipeline) — used
+    by lifecycle-only tests."""
 
     session: SessionContext
-    dependencies: RuntimeDependencies
     config: WorkerConfiguration
     registry: ProviderRegistry | None = None
     agent: AgentSpec | None = None

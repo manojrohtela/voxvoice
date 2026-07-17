@@ -48,8 +48,8 @@ stopped immediately after start is race-free.
 - **Inputs:** `RuntimeContext` (session, injected provider interfaces, config);
   optional transition observer. Methods: `begin()`, `run()`, `end(reason,source)`,
   `cancel(reason)`, `fail(reason)`.
-- **Outputs:** read-only `state`, `is_terminal`, `history`, `dependencies`;
-  transition notifications via the state-machine observer.
+- **Outputs:** read-only `state`, `is_terminal`, `history`; transition
+  notifications via the state-machine observer.
 
 ## Provider integration
 Dependency injection only. The orchestrator holds the provider **interfaces**

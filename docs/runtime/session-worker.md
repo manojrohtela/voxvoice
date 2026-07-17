@@ -15,9 +15,10 @@ milestones and must not leak into this class (business logic is prohibited here)
 
 ## Inputs
 - `RuntimeContext` — the dependency-injection seam: `SessionContext` (the one
-  session's identity + consumer metadata), `RuntimeDependencies` (capability
-  provider *interfaces* + metrics, all optional at M2A), and
-  `WorkerConfiguration` (worker id, startup/shutdown timeouts).
+  session's identity + consumer metadata), `WorkerConfiguration` (worker id,
+  startup/shutdown timeouts), and optionally the `ProviderRegistry` + `AgentSpec`
+  + transcript sink used to run a real conversation (E2.1: the registry is the
+  single provider-provision mechanism).
 - `on_lifecycle` (optional) — a synchronous `LifecycleObserver` notified on every
   state change.
 
@@ -27,10 +28,10 @@ milestones and must not leak into this class (business logic is prohibited here)
 - `metadata` — an immutable `RuntimeMetadata` snapshot.
 
 ## Dependencies
-`core.errors` (typed base), `runtime.contracts`, `runtime.state`. Standard
-library (`asyncio`) for concurrency. **Never** imports `api`; **never**
-instantiates a provider (AR-20/21) — providers are received via
-`RuntimeDependencies` and merely stored for future components.
+`core.errors` (typed base), `runtime.contracts`, `runtime.state`, the
+`ConversationOrchestrator`. Standard library (`asyncio`) for concurrency.
+**Never** imports `api`; **never** instantiates a provider (AR-20/21) — providers
+are resolved from the `ProviderRegistry` by the orchestrator.
 
 ## Lifecycle (state machine)
 ```
