@@ -57,6 +57,10 @@ class AgentSpec:
     tts_provider: str = "default"
     tts_voice: str | None = None
     llm_model: str | None = None
+    # Interrupt Intelligence (M3.4): opt-in barge-in. When True AND a Voice Activity
+    # provider is registered, the pipeline runs the interruptible playback path;
+    # otherwise assistant playback is uninterruptible (exact M3.3 behaviour).
+    allow_interrupt: bool = False
 
 
 @dataclass(frozen=True, slots=True)

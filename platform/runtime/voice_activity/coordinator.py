@@ -39,6 +39,7 @@ class VoiceActivityCoordinator:
         session_id: str,
         turns=None,
         endpoint=None,
+        interrupt=None,
     ) -> None:
         self._provider = provider
         self._engine = engine
@@ -50,6 +51,10 @@ class VoiceActivityCoordinator:
         # speech/silence observations to enrich endpoint decisions; it never decides
         # completion itself (the Turn Engine stays the sole owner of turn state).
         self._endpoint = endpoint
+        # The Interrupt Intelligence façade (optional, M3.4). The VAF supplies
+        # speech/silence during assistant playback so barge-in can be detected; it
+        # never decides interruption itself.
+        self._interrupt = interrupt
 
     @property
     def engine(self) -> VoiceActivityEngine:
@@ -86,10 +91,21 @@ class VoiceActivityCoordinator:
                 self._turns.on_user_speech()
             if self._endpoint is not None:
                 self._endpoint.on_user_speech()  # enrich the endpoint's speech run
-        elif changed is VoiceActivityState.SILENCE_CONFIRMED and self._endpoint is not None:
+        elif changed is VoiceActivityState.SILENCE_CONFIRMED:
             # Confirmed end-of-speech → let the endpoint framework count it toward a
             # pending endpoint's silence hold (never decides completion on its own).
-            self._endpoint.on_user_silence()
+            if self._endpoint is not None:
+                self._endpoint.on_user_silence()
+        # Interrupt Intelligence (M3.4) consumes the *per-frame* verdict, not the
+        # state transition: barge-in is sustained speech *during assistant playback*,
+        # which is not a VAF transition (the caller may already be in SPEAKING). The
+        # engine only acts on these while the assistant is speaking; otherwise it is
+        # a no-op. It never decides interruption here (the engine does, by policy).
+        if self._interrupt is not None:
+            if sample.speech:
+                self._interrupt.on_user_speech(sample.confidence)
+            else:
+                self._interrupt.on_user_silence(sample.confidence)
         return changed
 
     async def stop(self) -> None:

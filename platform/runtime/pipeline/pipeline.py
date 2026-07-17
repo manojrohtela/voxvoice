@@ -20,6 +20,7 @@ via an injected sink (the future Event Bus integration point, M4).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from core.providers.tts import TTSProvider
 
     from ..endpoint import EndpointCoordinator
+    from ..interrupt import InterruptCoordinator
     from ..turn import TurnCoordinator
     from ..voice_activity import VoiceActivityCoordinator
 
@@ -63,6 +65,7 @@ class RuntimePipeline:
         turns: TurnCoordinator | None = None,
         voice_activity: VoiceActivityCoordinator | None = None,
         endpoint: EndpointCoordinator | None = None,
+        interrupt: InterruptCoordinator | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -86,6 +89,13 @@ class RuntimePipeline:
         # only on a *final* endpoint decision. When absent (a lifecycle-only path)
         # the pipeline falls back to the legacy respond-on-Final behaviour.
         self._endpoint = endpoint
+        # Interrupt Intelligence Framework integration (M3.4): when present, assistant
+        # playback runs concurrently with inbound reading so caller barge-in can
+        # pre-empt it. When absent, the pipeline runs the M3.3 sequential path
+        # (assistant playback is uninterruptible) — graceful fallback, unchanged.
+        self._interrupt = interrupt
+        # The in-flight assistant response task (interruptible path only).
+        self._response_task: asyncio.Task[None] | None = None
         # The most recent Final transcript awaiting an endpoint decision (so the
         # stream-end flush can close out a turn without dropping the utterance).
         self._pending_text: str | None = None
@@ -113,6 +123,14 @@ class RuntimePipeline:
 
     async def stop(self) -> None:
         t0 = time.monotonic()
+        if self._response_task is not None and not self._response_task.done():
+            self._response_task.cancel()  # cancel in-flight assistant playback
+            try:
+                await self._response_task
+            except asyncio.CancelledError:
+                pass
+        if self._interrupt is not None:
+            self._interrupt.cancel()  # clear any in-flight interrupt state
         if self._endpoint is not None:
             self._endpoint.cancel()  # terminalize any pending endpoint on shutdown
         if self._turns is not None:
@@ -127,7 +145,14 @@ class RuntimePipeline:
     # ── the streaming turn loop ───────────────────────────────────────────────
     async def run(self) -> None:
         """Drive the conversation until the transport's inbound stream ends
-        (caller hangup) or the pipeline is stopped. Streams STT → LLM → TTS."""
+        (caller hangup) or the pipeline is stopped. Streams STT → LLM → TTS.
+
+        When Interrupt Intelligence is wired the interruptible path runs assistant
+        playback concurrently with inbound reading (barge-in). Otherwise the M3.3
+        sequential path runs unchanged (graceful fallback)."""
+        if self._interrupt is not None:
+            await self._run_interruptible()
+            return
         log.info("pipeline %s conversation started", self._session_id)
         inbound = self._transport.inbound(session_id=self._session_id)
         # Tap the inbound stream for voice activity only when a coordinator is
@@ -182,6 +207,93 @@ class RuntimePipeline:
         if self._endpoint is not None:
             self._endpoint.reset()  # back to CONTINUE_LISTENING for the next turn
 
+    # ── the interruptible turn loop (M3.4; barge-in enabled) ─────────────────
+    async def _run_interruptible(self) -> None:
+        """Like `run()`, but assistant playback runs as a concurrent task so caller
+        barge-in can pre-empt it. The inbound tap feeds the Voice Activity Framework
+        (which notifies the Interrupt coordinator); a confirmed interrupt sets the
+        coordinator's `stop_requested` signal, which this loop acts on."""
+        log.info("pipeline %s conversation started (interruptible)", self._session_id)
+        inbound = self._transport.inbound(session_id=self._session_id)
+        if self._voice_activity is not None:
+            inbound = self._tap_voice_activity(inbound)
+        async for result in self._stt.transcribe(
+            inbound, language=self._language, sample_rate=self._sample_rate
+        ):
+            # A barge-in confirmed while the assistant is speaking → pre-empt now.
+            if self._interrupt.stop_requested.is_set() and self._response_active():
+                await self._preempt_response()
+            if isinstance(result, Partial):
+                if self._turns is not None:
+                    self._turns.on_user_speech()
+                if self._endpoint is not None:
+                    self._endpoint.on_user_speech()
+                self._emit("user", result.text, is_final=False)
+            elif isinstance(result, Final):
+                self._emit("user", result.text, is_final=True)
+                # Guard: never overlap two responses. If one is still playing and no
+                # interrupt was confirmed, let it finish before starting the next.
+                if self._response_active():
+                    await self._await_response()
+                self._start_segment(result.text)
+        await self._await_response()  # drain a still-playing response before ending
+        if self._endpoint is not None and self._pending_text is not None:
+            decision = self._endpoint.flush()
+            if decision in FINAL_ENDPOINT_DECISIONS:
+                self._start_response()
+                await self._await_response()
+        log.info("pipeline %s conversation ended", self._session_id)
+
+    def _response_active(self) -> bool:
+        return self._response_task is not None and not self._response_task.done()
+
+    def _start_segment(self, user_text: str) -> None:
+        """Endpoint decides; on a final decision launch the response as a task."""
+        self._pending_text = user_text
+        decision = self._endpoint.on_segment() if self._endpoint is not None else None
+        if decision in FINAL_ENDPOINT_DECISIONS:
+            self._start_response()
+
+    def _start_response(self) -> None:
+        text = self._pending_text
+        self._pending_text = None
+        if text is None:
+            return
+        self._response_task = asyncio.create_task(self._respond_task(text))
+
+    async def _respond_task(self, user_text: str) -> None:
+        await self._respond(user_text)
+        if self._endpoint is not None:
+            self._endpoint.reset()  # ready for the next turn (mirrors _complete_turn)
+
+    async def _await_response(self) -> None:
+        task = self._response_task
+        self._response_task = None
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:  # pragma: no cover — defensive
+                pass
+
+    async def _preempt_response(self) -> None:
+        """Pre-empt assistant playback for a confirmed interrupt: stop the playback
+        task, cancel the interrupted turn, and hand off to a new user turn. The new
+        turn itself begins via the normal speech path (Turn Engine stays the owner)."""
+        self._interrupt.begin_stop()  # INTERRUPT_CONFIRMED → ASSISTANT_STOPPING
+        task = self._response_task
+        self._response_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._interrupt.start_user_turn()  # → USER_TURN_STARTING (cancels the turn)
+        self._interrupt.complete()  # → INTERRUPT_COMPLETED
+        if self._endpoint is not None:
+            self._endpoint.reset()  # drop any stale pending decision
+        self._pending_text = None
+
     async def _respond(self, user_text: str) -> None:
         if self._turns is not None:
             self._turns.on_assistant_thinking()
@@ -201,11 +313,19 @@ class RuntimePipeline:
             return
         if self._turns is not None:
             self._turns.on_assistant_speaking()
+        if self._interrupt is not None:
+            self._interrupt.on_assistant_started()  # begin barge-in monitoring
         self._emit("agent", agent_text, is_final=True)
         async for frame in self._tts.synthesize(
             agent_text, voice=self._tts_voice, language=self._language
         ):
+            if self._interrupt is not None and self._interrupt.stop_requested.is_set():
+                # A barge-in was confirmed → stop playback gracefully. The run loop
+                # drives the interrupt action phase + the new user turn.
+                return
             await self._transport.send(session_id=self._session_id, frame=frame)
+        if self._interrupt is not None:
+            self._interrupt.on_assistant_finished()  # playback completed on its own
         if self._turns is not None:
             self._turns.on_turn_completed()
 

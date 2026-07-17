@@ -88,9 +88,15 @@ via the Voice Activity Framework) · endpoint detection → decides `on_user_fin
 (**done M3.3**: the [Endpoint Intelligence Framework](endpoint-framework.md) now
 owns turn completion and calls `on_user_final` when a turn should finish — the Turn
 Engine remains the sole writer of turn state) · interrupt engine → cancels/pre-empts
-the active turn · metrics → consume `TurnEvent`s / `TurnTiming`. All plug in without
-changing this subsystem's shape.
+the active turn (**done M3.4**: the [Interrupt Intelligence Framework](interrupt-framework.md)
+cancels the interrupted assistant turn via `cancel()` on a confirmed barge-in; the
+new user turn begins via the normal `on_user_speech` path) · metrics → consume
+`TurnEvent`s / `TurnTiming`. All plug in without changing this subsystem's shape.
 
 > **M3.3 update:** the pipeline no longer calls `on_user_final` directly on an STT
 > Final. The Endpoint Intelligence Framework decides when the turn is complete and
 > issues that notification; the Turn Engine's contract is unchanged.
+>
+> **M3.4 update:** when barge-in is enabled the Interrupt Intelligence Framework
+> `cancel()`s the pre-empted assistant turn (→ `TURN_CANCELLED`); the Turn Engine
+> API is unchanged and remains the sole writer of turn state.

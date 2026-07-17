@@ -48,6 +48,7 @@ from ..contracts import RuntimeContext
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
 from ..endpoint import EndpointCoordinator, EndpointEngine
 from ..errors import OrchestrationError, OrchestrationStartupError
+from ..interrupt import InterruptCoordinator, InterruptEngine
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
 from ..turn import TurnCoordinator, TurnEngine
@@ -82,6 +83,11 @@ class ConversationOrchestrator:
         # ALWAYS created (it replaces the STT-final completion heuristic). Exposed
         # read-only; driven by the pipeline/VAF via the coordinator, never here.
         self._endpoint_engine: EndpointEngine | None = None
+        # Interrupt Intelligence Framework (M3.4): owns interrupt-decision state,
+        # created only when the agent opts in AND a VAD provider is registered
+        # (barge-in needs a speech signal). Exposed read-only; driven by the
+        # pipeline/VAF via the coordinator, never here.
+        self._interrupt_engine: InterruptEngine | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -117,6 +123,14 @@ class ConversationOrchestrator:
         wired when a pipeline is built). The orchestrator never manipulates
         endpoint state — the pipeline/VAF drive it via the coordinator."""
         return self._endpoint_engine
+
+    @property
+    def interrupt_engine(self) -> InterruptEngine | None:
+        """Read-only access to the interrupt subsystem (created on begin only when
+        the agent opts in and a VAD provider is registered; None under graceful
+        fallback). The orchestrator never manipulates interrupt state — the
+        pipeline/VAF drive it via the coordinator."""
+        return self._interrupt_engine
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:
@@ -243,11 +257,23 @@ class ConversationOrchestrator:
         endpoint = EndpointCoordinator(
             engine=self._endpoint_engine, session_id=session_id, turns=turns
         )
+        # Interrupt Intelligence Framework (M3.4): wired only when the agent opts in
+        # (`allow_interrupt`) AND a VAD provider is registered — barge-in needs a
+        # speech signal. Otherwise the pipeline runs the M3.3 sequential path
+        # (uninterruptible playback; graceful fallback). Shares the one Turn Engine;
+        # the VAF feeds it speech/silence during assistant playback.
+        interrupt = None
+        want_interrupt = bool(getattr(agent, "allow_interrupt", False))
+        if want_interrupt and registry.has(CapabilityKind.VOICE_ACTIVITY):
+            self._interrupt_engine = InterruptEngine(session_id)
+            interrupt = InterruptCoordinator(
+                engine=self._interrupt_engine, session_id=session_id, turns=turns
+            )
         # Voice Activity Framework (M3.2): wired only when the capability is
         # registered — otherwise the pipeline runs exactly as M3.1 (graceful
         # fallback). The VAF shares the one TurnCoordinator, feeding speech-onset
-        # signals to the same Turn Engine, and enriches endpoint decisions with
-        # speech/silence observations.
+        # signals to the same Turn Engine, and enriches endpoint + interrupt
+        # decisions with speech/silence observations.
         voice_activity = None
         if registry.has(CapabilityKind.VOICE_ACTIVITY):
             va_provider = registry.resolve(CapabilityKind.VOICE_ACTIVITY)
@@ -258,6 +284,7 @@ class ConversationOrchestrator:
                 session_id=session_id,
                 turns=turns,
                 endpoint=endpoint,
+                interrupt=interrupt,
             )
         self._pipeline = RuntimePipeline(
             transport=transport,
@@ -272,6 +299,7 @@ class ConversationOrchestrator:
             turns=turns,
             voice_activity=voice_activity,
             endpoint=endpoint,
+            interrupt=interrupt,
         )
         await self._pipeline.start()
 

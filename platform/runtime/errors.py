@@ -116,6 +116,28 @@ class DuplicateEndpointDecision(EndpointError):
     """Attempted to transition into the already-active decision (no self-loops)."""
 
 
+# ── Interrupt Intelligence Framework (M3.4) ──────────────────────────────────
+# State-machine violations root in core.errors.RuntimeConflict (like the turn,
+# endpoint, voice-activity, and conversation machines). The interrupt framework
+# has no provider — it is pure runtime logic driven by a configurable policy — so
+# there is no provider-error variant; `AssistantStopError` is a lifecycle conflict
+# (the pipeline failed to stop assistant playback during a confirmed interrupt).
+class InterruptError(RuntimeConflict):
+    """Base for interrupt-decision state-machine errors."""
+
+
+class InvalidInterruptTransition(InterruptError):
+    """Target is not a legal transition from the current interrupt decision."""
+
+
+class DuplicateInterruptDecision(InterruptError):
+    """Attempted to transition into the already-active decision (no self-loops)."""
+
+
+class AssistantStopError(InterruptError):
+    """Assistant playback could not be stopped during a confirmed interrupt."""
+
+
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────
 # Rooted directly in PlatformError — these are registration/resolution-time
 # errors, distinct from core.errors.ProviderError (execution-time vendor
