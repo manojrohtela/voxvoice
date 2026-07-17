@@ -7,7 +7,7 @@ SessionWorker transitions to FAILED and raises one of these.
 
 from __future__ import annotations
 
-from core.errors import PlatformError, RuntimeConflict
+from core.errors import PlatformError, ProviderError, RuntimeConflict
 
 
 class WorkerError(PlatformError):
@@ -79,6 +79,24 @@ class DuplicateTurnTransition(TurnError):
 
 class NoActiveTurnError(TurnError):
     """An operation requires an active turn but none exists."""
+
+
+# ── Voice Activity Framework (M3.2) ──────────────────────────────────────────
+# State-machine violations root in core.errors.RuntimeConflict (like the turn and
+# conversation machines). A provider *execution* failure is different — it roots
+# in core.errors.ProviderError (a capability failed), not a state conflict.
+class VoiceActivityError(RuntimeConflict):
+    """Base for voice-activity state-machine errors."""
+
+
+class InvalidVoiceActivityTransition(VoiceActivityError):
+    """Target is not a legal transition from the current voice-activity state."""
+
+
+class VoiceActivityProviderError(ProviderError):
+    """A voice-activity provider failed to start, stop, or detect. Auxiliary to
+    the conversation: the coordinator/pipeline degrade gracefully rather than
+    letting it break the call (DL-0013)."""
 
 
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────

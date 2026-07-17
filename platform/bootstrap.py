@@ -19,18 +19,26 @@ from providers.llm.echo import EchoLLM
 from providers.stt.local import LocalSTT
 from providers.transport.local import LocalTransport
 from providers.tts.local import LocalTTS
+from providers.voice_activity.local import LocalVoiceActivity
 from runtime.registry import CapabilityKind, ProviderRegistry
 from runtime.service import RuntimeSessionService
 
 
-def build_local_registry() -> ProviderRegistry:
+def build_local_registry(*, include_voice_activity: bool = False) -> ProviderRegistry:
     """A ProviderRegistry populated with the local-development provider profile.
-    Every provider is registered as the default for its capability."""
+    Every provider is registered as the default for its capability.
+
+    Voice activity (M3.2) is off by default so the shipped local profile exercises
+    the graceful-fallback path (no VAD → pipeline runs exactly as M3.1). Set
+    `include_voice_activity=True` to register the deterministic `LocalVoiceActivity`
+    detector and exercise the full Voice Activity Framework end-to-end."""
     registry = ProviderRegistry()
     registry.register(CapabilityKind.TRANSPORT, LocalTransport(), default=True)
     registry.register(CapabilityKind.STT, LocalSTT(), default=True)
     registry.register(CapabilityKind.LLM, EchoLLM(), default=True)
     registry.register(CapabilityKind.TTS, LocalTTS(), default=True)
+    if include_voice_activity:
+        registry.register(CapabilityKind.VOICE_ACTIVITY, LocalVoiceActivity(), default=True)
     return registry
 
 

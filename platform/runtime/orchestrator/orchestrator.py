@@ -50,6 +50,7 @@ from ..errors import OrchestrationError, OrchestrationStartupError
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
 from ..turn import TurnCoordinator, TurnEngine
+from ..voice_activity import VoiceActivityCoordinator, VoiceActivityEngine
 
 log = logging.getLogger("voxvoice.runtime.orchestrator")
 
@@ -72,6 +73,10 @@ class ConversationOrchestrator:
         # orchestrator creates it and exposes it read-only; it never manipulates
         # turn state (the pipeline drives it via the coordinator).
         self._turn_engine: TurnEngine | None = None
+        # Voice Activity Framework (M3.2): owns voice-activity state, created only
+        # when a VAD provider is registered (graceful fallback otherwise). Exposed
+        # read-only; driven by the pipeline via the coordinator, never here.
+        self._voice_activity_engine: VoiceActivityEngine | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -92,6 +97,14 @@ class ConversationOrchestrator:
         orchestrator never manipulates turn state — that is the engine's, driven
         by the pipeline via the coordinator."""
         return self._turn_engine
+
+    @property
+    def voice_activity_engine(self) -> VoiceActivityEngine | None:
+        """Read-only access to the voice-activity subsystem (created on begin only
+        when a VAD provider is registered; None under graceful fallback). The
+        orchestrator never manipulates activity state — the pipeline drives it via
+        the coordinator."""
+        return self._voice_activity_engine
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:
@@ -203,22 +216,39 @@ class ConversationOrchestrator:
         def _sel(name: str | None) -> str | None:
             return None if (not name or name == "default") else name
 
+        session_id = self._context.session.session_id
         transport = registry.resolve(CapabilityKind.TRANSPORT)
         stt = registry.resolve(CapabilityKind.STT, _sel(agent.stt_provider))
         llm = registry.resolve(CapabilityKind.LLM)
         tts = registry.resolve(CapabilityKind.TTS, _sel(agent.tts_provider))
-        self._turn_engine = TurnEngine(self._context.session.session_id)
+        self._turn_engine = TurnEngine(session_id)
+        turns = TurnCoordinator(self._turn_engine)
+        # Voice Activity Framework (M3.2): wired only when the capability is
+        # registered — otherwise the pipeline runs exactly as M3.1 (graceful
+        # fallback). The VAF shares the one TurnCoordinator, feeding speech-onset
+        # signals to the same Turn Engine.
+        voice_activity = None
+        if registry.has(CapabilityKind.VOICE_ACTIVITY):
+            va_provider = registry.resolve(CapabilityKind.VOICE_ACTIVITY)
+            self._voice_activity_engine = VoiceActivityEngine(session_id)
+            voice_activity = VoiceActivityCoordinator(
+                provider=va_provider,
+                engine=self._voice_activity_engine,
+                session_id=session_id,
+                turns=turns,
+            )
         self._pipeline = RuntimePipeline(
             transport=transport,
             stt=stt,
             llm=llm,
             tts=tts,
-            session_id=self._context.session.session_id,
+            session_id=session_id,
             system_prompt=agent.system_prompt,
             language=agent.language,
             tts_voice=agent.tts_voice,
             on_transcript=self._context.on_transcript,
-            turns=TurnCoordinator(self._turn_engine),
+            turns=turns,
+            voice_activity=voice_activity,
         )
         await self._pipeline.start()
 

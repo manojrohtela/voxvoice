@@ -15,6 +15,7 @@ from .storage import StorageProvider
 from .stt import STTProvider
 from .transport import TransportProvider
 from .tts import TTSProvider
+from .voice_activity import VoiceActivityProvider
 
 __all__ = [
     "STTProvider",
@@ -23,4 +24,5 @@ __all__ = [
     "TransportProvider",
     "StorageProvider",
     "AnalyticsProvider",
+    "VoiceActivityProvider",
 ]

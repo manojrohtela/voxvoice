@@ -63,6 +63,7 @@ from core.providers import (
     STTProvider,
     TransportProvider,
     TTSProvider,
+    VoiceActivityProvider,
 )
 
 from .errors import (
@@ -87,6 +88,7 @@ class CapabilityKind(StrEnum):
     TRANSPORT = "transport"
     STORAGE = "storage"
     ANALYTICS = "analytics"
+    VOICE_ACTIVITY = "voice_activity"
 
 
 # Maps a capability kind to the ABC every registered provider must satisfy.
@@ -97,6 +99,7 @@ _CAPABILITY_BASES: dict[str, type] = {
     CapabilityKind.TRANSPORT: TransportProvider,
     CapabilityKind.STORAGE: StorageProvider,
     CapabilityKind.ANALYTICS: AnalyticsProvider,
+    CapabilityKind.VOICE_ACTIVITY: VoiceActivityProvider,
 }
 
 # The union of provider ABCs the registry accepts (for type hints only; the
@@ -109,6 +112,7 @@ ProviderInstance = (
     | TransportProvider
     | StorageProvider
     | AnalyticsProvider
+    | VoiceActivityProvider
 )
 
 

@@ -27,12 +27,16 @@ from core.providers.stt import Final, Partial
 from ..contracts import TranscriptSink
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from core.audio import AudioFrame
     from core.providers.llm import LLMProvider
     from core.providers.stt import STTProvider
     from core.providers.transport import TransportProvider
     from core.providers.tts import TTSProvider
 
     from ..turn import TurnCoordinator
+    from ..voice_activity import VoiceActivityCoordinator
 
 log = logging.getLogger("voxvoice.runtime.pipeline")
 
@@ -52,6 +56,7 @@ class RuntimePipeline:
         tts_voice: str | None = None,
         on_transcript: TranscriptSink | None = None,
         turns: TurnCoordinator | None = None,
+        voice_activity: VoiceActivityCoordinator | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -66,11 +71,26 @@ class RuntimePipeline:
         # Turn Engine integration (M3.1): notify-only. When absent, the pipeline
         # behaves exactly as before — turn tracking never affects speech/audio.
         self._turns = turns
+        # Voice Activity Framework integration (M3.2): analyzes a copy of each
+        # inbound frame; notify-only. When absent, the inbound stream is handed to
+        # STT untapped — the pipeline behaves exactly as M3.1.
+        self._voice_activity = voice_activity
 
     # ── lifecycle (provider startup/shutdown; coordinated by the Orchestrator) ─
     async def start(self) -> None:
         t0 = time.monotonic()
         await self._transport.start(session_id=self._session_id)
+        # Voice activity is auxiliary (DL-0013): a startup failure degrades to the
+        # untapped pipeline (logged, never fatal) rather than breaking the call.
+        if self._voice_activity is not None:
+            try:
+                await self._voice_activity.start()
+            except Exception as exc:  # noqa: BLE001 — degrade gracefully
+                log.warning(
+                    "pipeline %s: voice-activity start failed; continuing without VAD: %s",
+                    self._session_id, exc,
+                )
+                self._voice_activity = None
         log.info(
             "pipeline %s started (transport=%s stt=%s llm=%s tts=%s) in %.1fms",
             self._session_id, self._transport.name, self._stt.name, self._llm.name,
@@ -81,6 +101,8 @@ class RuntimePipeline:
         t0 = time.monotonic()
         if self._turns is not None:
             self._turns.cancel()  # terminalize any active turn on shutdown
+        if self._voice_activity is not None:
+            await self._voice_activity.stop()  # best-effort provider teardown
         await self._transport.stop(session_id=self._session_id)
         log.info(
             "pipeline %s stopped in %.1fms", self._session_id, (time.monotonic() - t0) * 1000
@@ -91,8 +113,13 @@ class RuntimePipeline:
         """Drive the conversation until the transport's inbound stream ends
         (caller hangup) or the pipeline is stopped. Streams STT → LLM → TTS."""
         log.info("pipeline %s conversation started", self._session_id)
+        inbound = self._transport.inbound(session_id=self._session_id)
+        # Tap the inbound stream for voice activity only when a coordinator is
+        # present — STT receives byte-identical frames either way (M3.2).
+        if self._voice_activity is not None:
+            inbound = self._tap_voice_activity(inbound)
         async for result in self._stt.transcribe(
-            self._transport.inbound(session_id=self._session_id),
+            inbound,
             language=self._language,
             sample_rate=self._sample_rate,
         ):
@@ -133,6 +160,23 @@ class RuntimePipeline:
             await self._transport.send(session_id=self._session_id, frame=frame)
         if self._turns is not None:
             self._turns.on_turn_completed()
+
+    async def _tap_voice_activity(
+        self, frames: AsyncIterator[AudioFrame]
+    ) -> AsyncIterator[AudioFrame]:
+        """Pass frames through to STT unchanged while feeding a copy to the Voice
+        Activity Framework. VAD is auxiliary: an observe/provider failure is logged
+        and skipped so it can never break the conversation (DL-0013)."""
+        async for frame in frames:
+            if self._voice_activity is not None:
+                try:
+                    self._voice_activity.observe(frame)
+                except Exception as exc:  # noqa: BLE001 — VAD must not break the pipeline
+                    log.warning(
+                        "pipeline %s: voice-activity observe failed (ignored): %s",
+                        self._session_id, exc,
+                    )
+            yield frame
 
     def _emit(self, role: str, text: str, *, is_final: bool) -> None:
         if self._on_transcript is None:

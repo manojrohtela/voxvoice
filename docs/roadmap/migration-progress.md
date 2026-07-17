@@ -42,7 +42,8 @@ machines are complementary, different domains).
 | Milestone | Scope | Status |
 |---|---|---|
 | **M3.1 — Turn Engine foundation** | Per-turn lifecycle subsystem (TurnEngine/TurnCoordinator/TurnLifecycle/TurnContext/TurnPhase); deterministic phases + timing; notify-only pipeline integration (behaviour unchanged); no VAD/endpointing/interruptions | ✅ Done (branch `feat/m3.1-turn-engine`) |
-| **M3.2+ — VAD / endpoint detection / interrupt engine** | Plug real speech intelligence into the Turn Engine | ▫ Pending |
+| **M3.2 — Voice Activity Framework** | Provider-neutral VAD: `VoiceActivityDetection` capability (registry-resolved), `VoiceActivityEngine` deterministic activity model + hysteresis, `VoiceActivityCoordinator` taps inbound audio + notifies the Turn Engine; deterministic `LocalVoiceActivity` provider; graceful fallback when unconfigured (behaviour unchanged); no semantic/adaptive endpointing, interruptions, double-talk, noise suppression | ✅ Done (branch `feat/m3.2-voice-activity`) |
+| **M3.3+ — endpoint detection / interrupt engine** | Consume `SILENCE_CONFIRMED` for adaptive endpointing; interrupt engine; real streaming VAD provider plugins | ▫ Pending |
 
 ## M1 outcome (2026-07-16)
 
