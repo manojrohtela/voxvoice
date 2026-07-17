@@ -18,6 +18,7 @@ from .state import WorkerState
 
 if TYPE_CHECKING:
     from .registry import ProviderRegistry
+    from .smart_turn import SmartTurnPolicy
 
 # A transcript sink receives (session_id, role, text, is_final). The Control
 # Plane provides one; the future Event Bus (M4) subsumes it.
@@ -61,6 +62,13 @@ class AgentSpec:
     # provider is registered, the pipeline runs the interruptible playback path;
     # otherwise assistant playback is uninterruptible (exact M3.3 behaviour).
     allow_interrupt: bool = False
+    # Smart Turn Intelligence (M3.5): opt-in adaptive/semantic timing. When True the
+    # pipeline routes endpoint/interrupt decisions through the Smart Turn engine
+    # (arbitration + adaptive policy + optional registered semantic evaluator).
+    # Under the default identity policy behaviour is unchanged. `smart_turn_policy`
+    # supplies the adaptive knobs (None → the default identity policy).
+    smart_turn: bool = False
+    smart_turn_policy: SmartTurnPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,7 @@ Interfaces only — **no implementations** (those are `providers/*`, from M2+).
 
 from .analytics import AnalyticsProvider
 from .llm import LLMProvider
+from .semantic_turn import SemanticCapabilities, SemanticHint, SemanticTurnEvaluator
 from .storage import StorageProvider
 from .stt import STTProvider
 from .transport import TransportProvider
@@ -25,4 +26,7 @@ __all__ = [
     "StorageProvider",
     "AnalyticsProvider",
     "VoiceActivityProvider",
+    "SemanticTurnEvaluator",
+    "SemanticHint",
+    "SemanticCapabilities",
 ]

@@ -59,6 +59,7 @@ from typing import Any
 from core.providers import (
     AnalyticsProvider,
     LLMProvider,
+    SemanticTurnEvaluator,
     StorageProvider,
     STTProvider,
     TransportProvider,
@@ -89,6 +90,7 @@ class CapabilityKind(StrEnum):
     STORAGE = "storage"
     ANALYTICS = "analytics"
     VOICE_ACTIVITY = "voice_activity"
+    SEMANTIC_TURN = "semantic_turn"
 
 
 # Maps a capability kind to the ABC every registered provider must satisfy.
@@ -100,6 +102,7 @@ _CAPABILITY_BASES: dict[str, type] = {
     CapabilityKind.STORAGE: StorageProvider,
     CapabilityKind.ANALYTICS: AnalyticsProvider,
     CapabilityKind.VOICE_ACTIVITY: VoiceActivityProvider,
+    CapabilityKind.SEMANTIC_TURN: SemanticTurnEvaluator,
 }
 
 # The union of provider ABCs the registry accepts (for type hints only; the
@@ -113,6 +116,7 @@ ProviderInstance = (
     | StorageProvider
     | AnalyticsProvider
     | VoiceActivityProvider
+    | SemanticTurnEvaluator
 )
 
 

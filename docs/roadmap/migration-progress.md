@@ -45,7 +45,16 @@ machines are complementary, different domains).
 | **M3.2 — Voice Activity Framework** | Provider-neutral VAD: `VoiceActivityDetection` capability (registry-resolved), `VoiceActivityEngine` deterministic activity model + hysteresis, `VoiceActivityCoordinator` taps inbound audio + notifies the Turn Engine; deterministic `LocalVoiceActivity` provider; graceful fallback when unconfigured (behaviour unchanged); no semantic/adaptive endpointing, interruptions, double-talk, noise suppression | ✅ Done (branch `feat/m3.2-voice-activity`) |
 | **M3.3 — Endpoint Intelligence Framework** | Provider-neutral turn-completion decisions: `EndpointEngine` deterministic decision model + configurable `EndpointPolicy` (min speech, silence hold, min silence, confidence, timeout), `EndpointCoordinator` consumes neutral speech/segment/silence signals and notifies the Turn Engine (`on_user_final`); **replaces the pipeline's STT-final heuristic** (always wired); VAD signals enrich decisions but never trigger completion; default policy reproduces pre-M3.3 behaviour (no regression). Trigger-vs-decision rationale DL-0014 | ✅ Done (branch `feat/m3.3-endpoint-intelligence`) |
 | **M3.4 — Interrupt Intelligence Framework** | Provider-neutral barge-in: `InterruptEngine` deterministic decision model + configurable `InterruptPolicy` (min interrupt speech, confidence, hold, assistant grace, duplicate suppression), `InterruptCoordinator` (owns the `stop_requested` signal + cancels the interrupted turn); pipeline runs an **interruptible concurrent playback path** that safely pre-empts the assistant and starts a new user turn. Opt-in (`AgentSpec.allow_interrupt` + VAD); graceful fallback to the M3.3 sequential path. Opt-in/per-frame-verdict rationale DL-0015 | ✅ Done (branch `feat/m3.4-interrupt-intelligence`) |
-| **M3.5+ — smart-turn EOT / predictive interruption** | Semantic (LLM) endpointing + adaptive delay; predictive / speaker-aware interruption; independent acoustic-silence-triggered completion; real streaming VAD provider plugins + sub-150ms latency validation | ▫ Pending |
+| **M3.5 — Smart Turn Intelligence Engine** | Deterministic **arbiter** combining Turn/Voice-Activity/Endpoint/Interrupt outputs + adaptive `SmartTurnPolicy` (adaptive silence, adaptive grace, dynamic interruption threshold, confidence weighting, timing smoothing) + an optional **registry-resolved semantic evaluator** (`core.providers.semantic_turn`, `CapabilityKind.SEMANTIC_TURN`) into the final conversational-timing decision the pipeline consumes; sub-frameworks stay independent (no ownership overlap). Opt-in (`AgentSpec.smart_turn`); identity default → unchanged behaviour; runtime never calls an LLM. Arbiter/semantic-capability rationale DL-0016 | ✅ Done (branch `feat/m3.5-smart-turn`) |
+
+**Epic 3 — Voice Intelligence complete.** The five Turn Intelligence subsystems
+(Turn Engine → Voice Activity → Endpoint → Interrupt → Smart Turn) are implemented,
+deterministic, provider-neutral, and independently owned; Smart Turn arbitrates them
+into human-like conversational timing with a semantic extension point that future
+models plug into with no runtime change. Default profiles preserve behaviour
+end-to-end (223 tests). Next: Epic 4 (Event surface & SDK).
+
+| **beyond Epic 3 — real semantic models / streaming VAD** | Register real EOT/intent (or LLM-backed) `SEMANTIC_TURN` + streaming `VOICE_ACTIVITY` providers; prosody-scaled adaptive policies; wall-clock delay scheduling + sub-150ms latency validation | ▫ Pending |
 
 ## M1 outcome (2026-07-16)
 

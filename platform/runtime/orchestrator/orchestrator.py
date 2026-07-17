@@ -51,6 +51,7 @@ from ..errors import OrchestrationError, OrchestrationStartupError
 from ..interrupt import InterruptCoordinator, InterruptEngine
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
+from ..smart_turn import SmartTurnCoordinator, SmartTurnEngine
 from ..turn import TurnCoordinator, TurnEngine
 from ..voice_activity import VoiceActivityCoordinator, VoiceActivityEngine
 
@@ -88,6 +89,10 @@ class ConversationOrchestrator:
         # (barge-in needs a speech signal). Exposed read-only; driven by the
         # pipeline/VAF via the coordinator, never here.
         self._interrupt_engine: InterruptEngine | None = None
+        # Smart Turn Intelligence Engine (M3.5): owns final conversational-timing
+        # decisions, created only when the agent opts in. Blends an optional
+        # registered semantic evaluator. Exposed read-only; the pipeline drives it.
+        self._smart_turn_engine: SmartTurnEngine | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -131,6 +136,13 @@ class ConversationOrchestrator:
         fallback). The orchestrator never manipulates interrupt state — the
         pipeline/VAF drive it via the coordinator."""
         return self._interrupt_engine
+
+    @property
+    def smart_turn_engine(self) -> SmartTurnEngine | None:
+        """Read-only access to the Smart Turn subsystem (created on begin only when
+        the agent opts in; None under graceful fallback). The orchestrator never
+        manipulates Smart Turn state — the pipeline drives it via the coordinator."""
+        return self._smart_turn_engine
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:
@@ -286,6 +298,26 @@ class ConversationOrchestrator:
                 endpoint=endpoint,
                 interrupt=interrupt,
             )
+        # Smart Turn Intelligence (M3.5): wired only when the agent opts in
+        # (`smart_turn`). It arbitrates the endpoint/interrupt decisions via its
+        # adaptive policy; an optional registered `SEMANTIC_TURN` evaluator is
+        # resolved and blended (a future semantic model registers → no runtime
+        # change). Under the default identity policy behaviour is unchanged.
+        smart_turn = None
+        if bool(getattr(agent, "smart_turn", False)):
+            semantic = (
+                registry.resolve(CapabilityKind.SEMANTIC_TURN)
+                if registry.has(CapabilityKind.SEMANTIC_TURN)
+                else None
+            )
+            self._smart_turn_engine = SmartTurnEngine(
+                session_id,
+                policy=getattr(agent, "smart_turn_policy", None),
+                semantic=semantic,
+            )
+            smart_turn = SmartTurnCoordinator(
+                engine=self._smart_turn_engine, session_id=session_id
+            )
         self._pipeline = RuntimePipeline(
             transport=transport,
             stt=stt,
@@ -300,6 +332,7 @@ class ConversationOrchestrator:
             voice_activity=voice_activity,
             endpoint=endpoint,
             interrupt=interrupt,
+            smart_turn=smart_turn,
         )
         await self._pipeline.start()
 

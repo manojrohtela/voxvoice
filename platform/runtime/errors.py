@@ -138,6 +138,21 @@ class AssistantStopError(InterruptError):
     """Assistant playback could not be stopped during a confirmed interrupt."""
 
 
+# ── Smart Turn Intelligence Engine (M3.5) ────────────────────────────────────
+# The Smart Turn engine arbitrates the sub-frameworks' decisions; its own errors
+# are lifecycle/config conflicts rooted in core.errors.RuntimeConflict (like the
+# turn/endpoint/interrupt/voice-activity machines). Conflicting sub-decisions are
+# resolved by a fixed, documented precedence — not an error. The semantic evaluator
+# is a provider behind a neutral contract; a misbehaving one degrades to the
+# identity hint (logged), it does not raise into the deterministic core.
+class SmartTurnError(RuntimeConflict):
+    """Base for Smart Turn engine errors."""
+
+
+class InvalidSmartTurnPolicy(SmartTurnError):
+    """A SmartTurnPolicy has an invalid value/combination (rejected at construction)."""
+
+
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────
 # Rooted directly in PlatformError — these are registration/resolution-time
 # errors, distinct from core.errors.ProviderError (execution-time vendor

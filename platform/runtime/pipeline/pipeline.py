@@ -30,6 +30,8 @@ from core.providers.stt import Final, Partial
 
 from ..contracts import TranscriptSink
 from ..endpoint import FINAL_ENDPOINT_DECISIONS
+from ..interrupt import InterruptDecision
+from ..smart_turn import FINISH_DECISIONS, PREEMPT_DECISIONS
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -40,8 +42,9 @@ if TYPE_CHECKING:
     from core.providers.transport import TransportProvider
     from core.providers.tts import TTSProvider
 
-    from ..endpoint import EndpointCoordinator
+    from ..endpoint import EndpointCoordinator, EndpointDecision
     from ..interrupt import InterruptCoordinator
+    from ..smart_turn import SmartTurnCoordinator
     from ..turn import TurnCoordinator
     from ..voice_activity import VoiceActivityCoordinator
 
@@ -66,6 +69,7 @@ class RuntimePipeline:
         voice_activity: VoiceActivityCoordinator | None = None,
         endpoint: EndpointCoordinator | None = None,
         interrupt: InterruptCoordinator | None = None,
+        smart_turn: SmartTurnCoordinator | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -94,6 +98,11 @@ class RuntimePipeline:
         # pre-empt it. When absent, the pipeline runs the M3.3 sequential path
         # (assistant playback is uninterruptible) — graceful fallback, unchanged.
         self._interrupt = interrupt
+        # Smart Turn Intelligence Framework integration (M3.5): when present, the
+        # pipeline routes endpoint/interrupt decisions through the Smart Turn engine
+        # (arbitration + adaptive policy + optional semantic hint). When absent, the
+        # pipeline consumes the raw endpoint/interrupt decisions exactly as M3.4.
+        self._smart_turn = smart_turn
         # The in-flight assistant response task (interruptible path only).
         self._response_task: asyncio.Task[None] | None = None
         # The most recent Final transcript awaiting an endpoint decision (so the
@@ -129,6 +138,8 @@ class RuntimePipeline:
                 await self._response_task
             except asyncio.CancelledError:
                 pass
+        if self._smart_turn is not None:
+            self._smart_turn.cancel()  # clear adaptive/smoothing state
         if self._interrupt is not None:
             self._interrupt.cancel()  # clear any in-flight interrupt state
         if self._endpoint is not None:
@@ -177,7 +188,7 @@ class RuntimePipeline:
         # so the last utterance is never silently dropped.
         if self._endpoint is not None and self._pending_text is not None:
             decision = self._endpoint.flush()
-            if decision in FINAL_ENDPOINT_DECISIONS:
+            if self._endpoint_finishes(decision):
                 await self._complete_turn()
         log.info("pipeline %s conversation ended", self._session_id)
 
@@ -192,7 +203,7 @@ class RuntimePipeline:
             return
         self._pending_text = user_text
         decision = self._endpoint.on_segment()  # notifies the Turn Engine if final
-        if decision in FINAL_ENDPOINT_DECISIONS:
+        if self._endpoint_finishes(decision):
             await self._complete_turn()
 
     async def _complete_turn(self) -> None:
@@ -220,9 +231,13 @@ class RuntimePipeline:
         async for result in self._stt.transcribe(
             inbound, language=self._language, sample_rate=self._sample_rate
         ):
-            # A barge-in confirmed while the assistant is speaking → pre-empt now.
+            # A barge-in confirmed while the assistant is speaking → pre-empt now,
+            # unless Smart Turn arbitrates it away (IGNORE_INTERRUPT → keep speaking).
             if self._interrupt.stop_requested.is_set() and self._response_active():
-                await self._preempt_response()
+                if self._interrupt_preempts():
+                    await self._preempt_response()
+                else:
+                    self._ignore_interrupt()
             if isinstance(result, Partial):
                 if self._turns is not None:
                     self._turns.on_user_speech()
@@ -247,11 +262,46 @@ class RuntimePipeline:
     def _response_active(self) -> bool:
         return self._response_task is not None and not self._response_task.done()
 
+    # ── Smart Turn arbitration (M3.5; consumes the sub-frameworks' decisions) ─
+    def _endpoint_finishes(self, decision: EndpointDecision | None) -> bool:
+        """Whether an endpoint decision should finish the user turn (respond). Smart
+        Turn (when wired) arbitrates via its adaptive policy; otherwise the raw
+        endpoint FINAL decisions apply (exact M3.4 behaviour). The adaptive hold
+        attached to a DELAY_RESPONSE is exposed on the engine (`pending_delay_frames`)
+        for a real transport scheduler — the in-process profile records it, the
+        decision still resolves to respond."""
+        if decision is None:
+            return False
+        if self._smart_turn is None:
+            return decision in FINAL_ENDPOINT_DECISIONS
+        st = self._smart_turn.on_endpoint(
+            decision, assistant_speaking=self._response_active()
+        )
+        return st in FINISH_DECISIONS
+
+    def _interrupt_preempts(self) -> bool:
+        """Whether a confirmed interrupt should pre-empt playback. Smart Turn (when
+        wired) may IGNORE it per the dynamic threshold; otherwise a confirmed
+        interrupt always pre-empts (exact M3.4 behaviour)."""
+        if self._smart_turn is None:
+            return True
+        st = self._smart_turn.on_interrupt(
+            InterruptDecision.INTERRUPT_CONFIRMED, assistant_speaking=True
+        )
+        return st in PREEMPT_DECISIONS
+
+    def _ignore_interrupt(self) -> None:
+        """Smart Turn ignored a confirmed barge-in: clear the interrupt and re-arm
+        monitoring so the assistant keeps speaking (RESUME_ASSISTANT)."""
+        if self._interrupt is not None:
+            self._interrupt.reset()  # clear confirmed + stop_requested
+            self._interrupt.on_assistant_started()  # re-arm while still speaking
+
     def _start_segment(self, user_text: str) -> None:
         """Endpoint decides; on a final decision launch the response as a task."""
         self._pending_text = user_text
         decision = self._endpoint.on_segment() if self._endpoint is not None else None
-        if decision in FINAL_ENDPOINT_DECISIONS:
+        if self._endpoint_finishes(decision):
             self._start_response()
 
     def _start_response(self) -> None:

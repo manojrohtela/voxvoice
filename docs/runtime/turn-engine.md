@@ -100,3 +100,9 @@ new user turn begins via the normal `on_user_speech` path) · metrics → consum
 > **M3.4 update:** when barge-in is enabled the Interrupt Intelligence Framework
 > `cancel()`s the pre-empted assistant turn (→ `TURN_CANCELLED`); the Turn Engine
 > API is unchanged and remains the sole writer of turn state.
+>
+> **M3.5 update (Epic 3 complete):** the [Smart Turn Intelligence Engine](smart-turn-framework.md)
+> arbitrates the endpoint/interrupt decisions into the final conversational-timing
+> decision the pipeline consumes. It only *reads* the sub-frameworks' outputs (Turn
+> phase included) — it writes none of their state. The Turn Engine remains the sole
+> owner of turn lifecycle; its contract is unchanged.
