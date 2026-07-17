@@ -34,7 +34,7 @@ unchanged; 2 obsolete DI tests removed. 99 tests pass, ruff clean, no cycles,
 boundaries intact. No other true duplication found (worker vs conversation state
 machines are complementary, different domains).
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
-| **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
+| **M4 — Event surface & SDK** | Event Bus impl (**M4.1 ✅**) + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ◐ In progress |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |
 | **M6 — Moat & hardening** | Target-language provider plugins + evals; smart-turn EOT; state-machine timeouts; load test; tool runtime | ▫ Pending |
 
@@ -53,6 +53,12 @@ deterministic, provider-neutral, and independently owned; Smart Turn arbitrates 
 into human-like conversational timing with a semantic extension point that future
 models plug into with no runtime change. Default profiles preserve behaviour
 end-to-end (223 tests). Next: Epic 4 (Event surface & SDK).
+
+### Epic 4 — Event surface & SDK
+| Milestone | Scope | Status |
+|---|---|---|
+| **M4.1 — Internal Event Bus Foundation** | The single internal communication mechanism: `core.events` envelope (refined additively — source/correlation/conversation/metadata) + deterministic `EventBus` contract; `events.InProcessEventBus` (dispatcher/registry/publisher/subscriber) — ordered, exactly-once in-process, subscriber-isolated, reentrancy-safe, type-filtered; `runtime.event_bridge` publishes each engine's events with zero coupling (engines never know consumers); orchestrator publishes runtime/session/provider lifecycle. In-process only (no external transports/durability). Behaviour unchanged (239 tests). Refinement/sync-delivery rationale DL-0017 | ✅ Done (branch `feat/m4.1-event-bus`) |
+| **M4.2+ — outbox / gateway / SDK** | Durable outbox + retry/DLQ; WS/SSE event gateway; mid-call control API; client SDK; distributed broker (implements the same `EventBus` contract) | ▫ Pending |
 
 | **beyond Epic 3 — real semantic models / streaming VAD** | Register real EOT/intent (or LLM-backed) `SEMANTIC_TURN` + streaming `VOICE_ACTIVITY` providers; prosody-scaled adaptive policies; wall-clock delay scheduling + sub-150ms latency validation | ▫ Pending |
 

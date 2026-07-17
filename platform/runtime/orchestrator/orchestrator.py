@@ -43,11 +43,13 @@ import asyncio
 import logging
 
 from core.states import SessionState
+from events import InProcessEventBus
 
 from ..contracts import RuntimeContext
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
 from ..endpoint import EndpointCoordinator, EndpointEngine
 from ..errors import OrchestrationError, OrchestrationStartupError
+from ..event_bridge import RuntimeEventBridge
 from ..interrupt import InterruptCoordinator, InterruptEngine
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
@@ -72,6 +74,14 @@ class ConversationOrchestrator:
         self._sm = ConversationStateMachine(on_transition=on_transition)
         self._end_event = asyncio.Event()
         self._pipeline: RuntimePipeline | None = None
+        # Event Bus (M4.1): the single internal communication mechanism. Created on
+        # begin; runtime facts are published via the bridge (engines stay decoupled
+        # — they never know the bus exists). Exposed read-only. A guard so lifecycle
+        # events publish exactly once.
+        self._event_bus: InProcessEventBus | None = None
+        self._bridge: RuntimeEventBridge | None = None
+        self._session_started = False
+        self._lifecycle_closed = False
         # Turn Engine (M3.1): owns turn lifecycle for this conversation. The
         # orchestrator creates it and exposes it read-only; it never manipulates
         # turn state (the pipeline drives it via the coordinator).
@@ -106,6 +116,13 @@ class ConversationOrchestrator:
     @property
     def history(self) -> tuple[TransitionRecord, ...]:
         return self._sm.history
+
+    @property
+    def event_bus(self) -> InProcessEventBus | None:
+        """Read-only access to the session's Event Bus (created on begin). The
+        orchestrator publishes lifecycle events and wires engine observers to it via
+        the bridge; it owns no consumer logic."""
+        return self._event_bus
 
     @property
     def turn_engine(self) -> TurnEngine | None:
@@ -152,6 +169,17 @@ class ConversationOrchestrator:
             raise OrchestrationError(
                 f"begin() requires CREATED, conversation is {self._sm.state.value}"
             )
+        # The Event Bus is the single internal communication mechanism (M4.1). Create
+        # it first so startup facts (runtime started, providers connected) are events.
+        session = self._context.session
+        self._event_bus = InProcessEventBus()
+        self._bridge = RuntimeEventBridge(
+            self._event_bus,
+            session_id=session.session_id,
+            org_id=session.org_id,
+            conversation_id=session.session_id,
+        )
+        self._bridge.runtime_started()
         try:
             self._sm.transition(
                 SessionState.CONNECTED, reason="transport_ready", source="orchestrator"
@@ -162,12 +190,16 @@ class ConversationOrchestrator:
                 reason="conversation_started",
                 source="orchestrator",
             )
+            self._bridge.session_started()
+            self._session_started = True
         except Exception as exc:  # noqa: BLE001 — re-raised as a typed error
             # During startup we are in CREATED/CONNECTED, from which FAILED is legal.
             if self._sm.can_transition(SessionState.FAILED):
                 self._sm.transition(
                     SessionState.FAILED, reason="startup_failed", source="orchestrator"
                 )
+            self._bridge.runtime_error(f"startup_failed:{type(exc).__name__}")
+            self._close_lifecycle(reason="startup_failed")
             self._end_event.set()
             log.error("conversation startup failed: %s", exc)
             raise OrchestrationStartupError(f"conversation startup failed: {exc}") from exc
@@ -199,6 +231,7 @@ class ConversationOrchestrator:
     async def end(self, *, reason: str = "completed", source: str = "orchestrator") -> None:
         """Coordinate graceful shutdown: → ENDING → ENDED. Idempotent once terminal."""
         if self._sm.is_terminal:
+            self._close_lifecycle(reason=reason)
             self._end_event.set()
             return
         try:
@@ -216,6 +249,7 @@ class ConversationOrchestrator:
                     source=source,
                 )
         finally:
+            self._close_lifecycle(reason=reason)
             self._end_event.set()
 
     async def cancel(self, *, reason: str = "cancelled") -> None:
@@ -227,8 +261,11 @@ class ConversationOrchestrator:
         transitions). Pre-conversation → FAILED; mid-conversation → ENDING → ENDED
         (the machine forbids IN_CONVERSATION → FAILED)."""
         if self._sm.is_terminal:
+            self._close_lifecycle(reason=reason)
             self._end_event.set()
             return
+        if self._bridge is not None:
+            self._bridge.runtime_error(reason)
         if self._sm.can_transition(SessionState.FAILED):
             self._sm.transition(SessionState.FAILED, reason=reason, source="orchestrator")
         else:
@@ -236,6 +273,7 @@ class ConversationOrchestrator:
                 self._sm.transition(SessionState.ENDING, reason=reason, source="orchestrator")
             if self._sm.state is SessionState.ENDING:
                 self._sm.transition(SessionState.ENDED, reason=reason, source="orchestrator")
+        self._close_lifecycle(reason=reason)
         self._end_event.set()
         log.error("conversation failed: %s", reason)
 
@@ -255,17 +293,29 @@ class ConversationOrchestrator:
             return None if (not name or name == "default") else name
 
         session_id = self._context.session.session_id
+        # The bridge publishes each engine's events to the bus (engines stay
+        # decoupled — they only call their existing on_event observer).
+        bridge = self._bridge
         transport = registry.resolve(CapabilityKind.TRANSPORT)
         stt = registry.resolve(CapabilityKind.STT, _sel(agent.stt_provider))
         llm = registry.resolve(CapabilityKind.LLM)
         tts = registry.resolve(CapabilityKind.TTS, _sel(agent.tts_provider))
-        self._turn_engine = TurnEngine(session_id)
+        if bridge is not None:
+            for cap, prov in (
+                ("transport", transport), ("stt", stt), ("llm", llm), ("tts", tts),
+            ):
+                bridge.provider_connected(cap, getattr(prov, "name", "?"))
+        self._turn_engine = TurnEngine(
+            session_id, on_event=bridge.turn_observer if bridge else None
+        )
         turns = TurnCoordinator(self._turn_engine)
         # Endpoint Intelligence Framework (M3.3): ALWAYS wired — it owns turn
         # completion (replacing the STT-final heuristic). The default policy confirms
         # a completed segment immediately, so the conversation behaves as before. It
         # notifies the same Turn Engine (via `turns`) when a turn should finish.
-        self._endpoint_engine = EndpointEngine(session_id)
+        self._endpoint_engine = EndpointEngine(
+            session_id, on_event=bridge.endpoint_observer if bridge else None
+        )
         endpoint = EndpointCoordinator(
             engine=self._endpoint_engine, session_id=session_id, turns=turns
         )
@@ -277,7 +327,9 @@ class ConversationOrchestrator:
         interrupt = None
         want_interrupt = bool(getattr(agent, "allow_interrupt", False))
         if want_interrupt and registry.has(CapabilityKind.VOICE_ACTIVITY):
-            self._interrupt_engine = InterruptEngine(session_id)
+            self._interrupt_engine = InterruptEngine(
+                session_id, on_event=bridge.interrupt_observer if bridge else None
+            )
             interrupt = InterruptCoordinator(
                 engine=self._interrupt_engine, session_id=session_id, turns=turns
             )
@@ -289,7 +341,13 @@ class ConversationOrchestrator:
         voice_activity = None
         if registry.has(CapabilityKind.VOICE_ACTIVITY):
             va_provider = registry.resolve(CapabilityKind.VOICE_ACTIVITY)
-            self._voice_activity_engine = VoiceActivityEngine(session_id)
+            if bridge is not None:
+                bridge.provider_connected(
+                    "voice_activity", getattr(va_provider, "name", "?")
+                )
+            self._voice_activity_engine = VoiceActivityEngine(
+                session_id, on_event=bridge.voice_activity_observer if bridge else None
+            )
             voice_activity = VoiceActivityCoordinator(
                 provider=va_provider,
                 engine=self._voice_activity_engine,
@@ -314,6 +372,7 @@ class ConversationOrchestrator:
                 session_id,
                 policy=getattr(agent, "smart_turn_policy", None),
                 semantic=semantic,
+                on_event=bridge.smart_turn_observer if bridge else None,
             )
             smart_turn = SmartTurnCoordinator(
                 engine=self._smart_turn_engine, session_id=session_id
@@ -339,3 +398,21 @@ class ConversationOrchestrator:
     async def _close_providers(self) -> None:
         if self._pipeline is not None:
             await self._pipeline.stop()
+        registry = self._context.registry
+        agent = self._context.agent
+        if self._bridge is not None and registry is not None and agent is not None:
+            for cap in ("tts", "llm", "stt", "transport"):
+                self._bridge.provider_disconnected(cap, "?")
+
+    def _close_lifecycle(self, *, reason: str | None = None) -> None:
+        """Publish the terminal lifecycle events (once) and shut the bus down. Safe
+        to call from every terminal path — idempotent via `_lifecycle_closed`."""
+        if self._lifecycle_closed:
+            return
+        self._lifecycle_closed = True
+        if self._bridge is not None:
+            if self._session_started:
+                self._bridge.session_ended(reason)
+            self._bridge.runtime_stopped()
+        if self._event_bus is not None:
+            self._event_bus.shutdown()
