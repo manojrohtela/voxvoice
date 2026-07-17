@@ -97,3 +97,33 @@ async def test_cancel_ends_conversation_mid_flight(started):
     await worker.cancel()
     assert worker.state is WorkerState.STOPPED
     assert worker.conversation_state is SessionState.ENDED
+
+
+async def test_concurrent_sessions_are_isolated(started):
+    """Two conversations run concurrently through the shared (multi-session)
+    provider set with no cross-contamination."""
+    registry = build_local_registry()
+    transport = registry.resolve(CapabilityKind.TRANSPORT)
+    a_scripts: list[tuple[str, str, bool]] = []
+    b_scripts: list[tuple[str, str, bool]] = []
+    wa = SessionWorker(_context(registry, a_scripts, session_id="ses_A"))
+    wb = SessionWorker(_context(registry, b_scripts, session_id="ses_B"))
+    started.extend([wa, wb])
+
+    await asyncio.gather(wa.start(), wb.start())
+    await transport.feed("ses_A", AudioFrame(data=b"alpha"))
+    await transport.feed("ses_B", AudioFrame(data=b"beta"))
+    await transport.hangup("ses_A")
+    await transport.hangup("ses_B")
+    await asyncio.gather(wa.wait_closed(), wb.wait_closed())
+    await asyncio.gather(wa.stop(), wb.stop())
+
+    a_finals = [(r, t) for (r, t, f) in a_scripts if f]
+    b_finals = [(r, t) for (r, t, f) in b_scripts if f]
+    assert ("agent", "You said: alpha") in a_finals
+    assert ("agent", "You said: beta") in b_finals
+    # No cross-contamination between sessions.
+    assert all("beta" not in t for (_, t) in a_finals)
+    assert all("alpha" not in t for (_, t) in b_finals)
+    assert [f.data.decode() for f in transport.sent("ses_A")] == ["You said: alpha"]
+    assert [f.data.decode() for f in transport.sent("ses_B")] == ["You said: beta"]

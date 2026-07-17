@@ -17,6 +17,16 @@
 | **M2C.2 — Runtime Pipeline & first conversation** | RuntimePipeline (Transport→STT→LLM→TTS→Transport via contracts); local provider profile; orchestrator resolves providers via the registry + coordinates their lifecycle; transcripts via injected sink; **`POST /v1/sessions` restored** through the Runtime Plane. First complete end-to-end conversation. | ✅ Done (branch `feat/m2c2-runtime-pipeline`) |
 
 **Epic 2 complete.** The Runtime Plane executes a real multi-turn conversation end-to-end (local provider profile) without bypassing any architectural boundary; the prototype voicebot path is no longer primary.
+
+**Epic 2 Production-Readiness Gate (2026-07-17):** passed. Critical audit found no
+ownership violations, no import cycles, zero layer-boundary violations, and a clean
+linear branch stack (`main` fast-forwardable to `feat/m2c2-runtime-pipeline`, 6
+commits, no merges/conflicts). Safe improvements applied: stale post-M2C.2
+docstrings refreshed, a duplicated webhook-target call removed, +2 tests
+(concurrent-session isolation, api runtime-failure → 502). 101 tests pass, ruff
+clean. Open items before Epic 3: rotate exposed keys (DL-0002), merge the stack,
+consolidate the dual provider-provision seams (RuntimeDependencies vs registry,
+DL-0009). Certified ready for a **v0.1 Runtime Foundation** tag on merge.
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
 | **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |

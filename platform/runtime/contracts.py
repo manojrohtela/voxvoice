@@ -54,9 +54,11 @@ class WorkerConfiguration:
 
 @dataclass(slots=True)
 class RuntimeDependencies:
-    """Injected capability providers (interfaces only) + metrics sink. All
-    optional at M2A — no implementations exist yet. The worker stores these and
-    hands them to future components; it never constructs a provider itself."""
+    """An optional dependency-injection seam for capability providers + a metrics
+    sink. The pipeline resolves providers from the `RuntimeContext.registry`
+    instead (M2C.2), so these fields are currently a secondary seam kept for
+    direct injection in tests; consolidating the two mechanisms is a documented
+    debt (DL-0009). The worker never constructs a provider itself."""
 
     stt: STTProvider | None = None
     tts: TTSProvider | None = None

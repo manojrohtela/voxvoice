@@ -113,9 +113,10 @@ async def create_session(
     db.add(session)
     db.commit()
 
+    url, secret = _webhook_target(org)
     await emit_event(
-        url=_webhook_target(org)[0],
-        secret=_webhook_target(org)[1],
+        url=url,
+        secret=secret,
         org_id=org.id,
         event="session.started",
         data={"session_id": session.id, "channel": body.channel},

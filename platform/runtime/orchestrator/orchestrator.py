@@ -1,15 +1,16 @@
-"""ConversationOrchestrator — the sole coordinator of conversation execution (M2B.2).
+"""ConversationOrchestrator — the sole coordinator of conversation execution
+(M2B.2; pipeline wiring M2C.2).
 
 Component specification (Constitution §A11.3):
   responsibilities : own the ConversationStateMachine and be its SOLE writer;
                      coordinate the conversation lifecycle phases (begin → run →
-                     end) and failure routing; invoke provider capabilities ONLY
-                     through the injected `core.providers` interfaces; emit
-                     lifecycle notifications. It performs no speech processing, AI
-                     inference, provider implementation, turn logic, or business
-                     logic.
-  inputs           : a RuntimeContext (session, injected provider interfaces,
-                     config); an optional transition observer.
+                     end) and failure routing; resolve provider capabilities from
+                     the Provider Registry and coordinate their lifecycle (open on
+                     begin, close on end); drive the RuntimePipeline. It performs
+                     no speech processing, AI inference, provider implementation,
+                     turn logic, or business logic.
+  inputs           : a RuntimeContext (session, provider registry, agent spec,
+                     transcript sink, config); an optional transition observer.
   outputs          : conversation state + immutable history (read-only);
                      transition notifications (via the state machine observer).
   dependencies     : core.states, runtime.conversation (the state machine),
@@ -29,9 +30,11 @@ Ownership boundary: the SessionWorker owns the worker; this Orchestrator owns th
 conversation. The worker delegates conversation control here and never touches
 conversation state. Providers own capabilities. Turn execution (M3) is separate.
 
-Scope: the actual conversation loop (turns: STT → LLM → TTS) is M2C+. Here the
-"running" phase is coordinated by awaiting an end signal; provider startup/teardown
-are placeholders that take no action (no implementations exist yet).
+Scope (M2C.2): the running phase drives the RuntimePipeline (Transport → STT →
+LLM → TTS → Transport) whose providers are resolved from the registry. When there
+is no registry/agent (lifecycle-only paths) the conversation runs idle, awaiting
+an end signal. Turn Intelligence (M3), the Event Bus (M4), and Memory (M5) remain
+out of scope.
 """
 
 from __future__ import annotations
@@ -80,8 +83,8 @@ class ConversationOrchestrator:
 
     @property
     def dependencies(self) -> RuntimeDependencies:
-        """The injected provider interfaces. Read-only; the orchestrator invokes
-        them only through their contracts (M2C+), never a concrete implementation."""
+        """The injected provider interfaces (a DI seam; the pipeline resolves
+        providers from the registry instead — see DL-0009 debt note). Read-only."""
         return self._context.dependencies
 
     # ── coordination phases ─────────────────────────────────────────────────
@@ -113,11 +116,11 @@ class ConversationOrchestrator:
             raise OrchestrationStartupError(f"conversation startup failed: {exc}") from exc
 
     async def run(self) -> None:
-        """Coordinate the running phase. The conversation loop (turns) is M2C+;
-        here we await the end signal. Tolerates the conversation having already
-        ended/ending (e.g. the session was stopped before this task started) —
-        the end signal is already set, so this returns promptly. Only raises if
-        run() is called before begin() (a genuine misuse)."""
+        """Coordinate the running phase. Drives the RuntimePipeline when one was
+        built (a registry+agent were provided); otherwise awaits the end signal
+        (idle conversation). Tolerates the conversation having already ended/ending
+        (e.g. the session was stopped before this task started) — it returns
+        promptly. Only raises if run() is called before begin() (a genuine misuse)."""
         if self._sm.is_terminal or self._sm.state is SessionState.ENDING:
             return
         if self._sm.state is not SessionState.IN_CONVERSATION:

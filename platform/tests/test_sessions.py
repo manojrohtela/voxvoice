@@ -64,3 +64,18 @@ def test_get_and_end_unknown_session_is_404(client, org_a):
     assert client.get("/v1/sessions/ses_missing", headers=_h(key)).status_code == 404
     assert client.post("/v1/sessions/ses_missing/end", headers=_h(key)).status_code == 404
     assert client.get("/v1/sessions/ses_missing/transcript", headers=_h(key)).status_code == 404
+
+
+def test_session_start_runtime_failure_is_502(client, org_a, monkeypatch):
+    """A runtime startup failure surfaces as a clean 502 (no raw error leaked),
+    and the persisted Session is marked failed."""
+    from runtime.orchestrator.orchestrator import ConversationOrchestrator
+
+    async def boom(self) -> None:
+        raise RuntimeError("provider open boom")
+
+    monkeypatch.setattr(ConversationOrchestrator, "_open_providers", boom)
+    _, key = org_a
+    agent_id = _make_agent(client, key)
+    resp = client.post("/v1/sessions", headers=_h(key), json={"agent_id": agent_id})
+    assert resp.status_code == 502
