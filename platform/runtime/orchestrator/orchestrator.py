@@ -49,6 +49,7 @@ from ..conversation import ConversationStateMachine, TransitionObserver, Transit
 from ..errors import OrchestrationError, OrchestrationStartupError
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
+from ..turn import TurnCoordinator, TurnEngine
 
 log = logging.getLogger("voxvoice.runtime.orchestrator")
 
@@ -67,6 +68,10 @@ class ConversationOrchestrator:
         self._sm = ConversationStateMachine(on_transition=on_transition)
         self._end_event = asyncio.Event()
         self._pipeline: RuntimePipeline | None = None
+        # Turn Engine (M3.1): owns turn lifecycle for this conversation. The
+        # orchestrator creates it and exposes it read-only; it never manipulates
+        # turn state (the pipeline drives it via the coordinator).
+        self._turn_engine: TurnEngine | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -80,6 +85,13 @@ class ConversationOrchestrator:
     @property
     def history(self) -> tuple[TransitionRecord, ...]:
         return self._sm.history
+
+    @property
+    def turn_engine(self) -> TurnEngine | None:
+        """Read-only access to the turn subsystem (created on begin). The
+        orchestrator never manipulates turn state — that is the engine's, driven
+        by the pipeline via the coordinator."""
+        return self._turn_engine
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:
@@ -195,6 +207,7 @@ class ConversationOrchestrator:
         stt = registry.resolve(CapabilityKind.STT, _sel(agent.stt_provider))
         llm = registry.resolve(CapabilityKind.LLM)
         tts = registry.resolve(CapabilityKind.TTS, _sel(agent.tts_provider))
+        self._turn_engine = TurnEngine(self._context.session.session_id)
         self._pipeline = RuntimePipeline(
             transport=transport,
             stt=stt,
@@ -205,6 +218,7 @@ class ConversationOrchestrator:
             language=agent.language,
             tts_voice=agent.tts_voice,
             on_transcript=self._context.on_transcript,
+            turns=TurnCoordinator(self._turn_engine),
         )
         await self._pipeline.start()
 

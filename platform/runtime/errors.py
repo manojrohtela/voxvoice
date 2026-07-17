@@ -58,6 +58,29 @@ class PipelineError(OrchestrationError):
     """A runtime pipeline stage (transport/STT/LLM/TTS) failed during execution."""
 
 
+# ── Turn Engine (M3.1) ───────────────────────────────────────────────────────
+# Rooted in core.errors.RuntimeConflict (illegal state-machine transition), like
+# the conversation transition errors — reused, not duplicated.
+class TurnError(RuntimeConflict):
+    """Base for turn-lifecycle errors."""
+
+
+class InvalidTurnTransition(TurnError):
+    """Target is not a legal transition from the current turn phase."""
+
+
+class TerminalTurnError(TurnError):
+    """Attempted to transition out of a terminal turn phase (completed/cancelled)."""
+
+
+class DuplicateTurnTransition(TurnError):
+    """Attempted to transition into the already-active turn phase (no self-loops)."""
+
+
+class NoActiveTurnError(TurnError):
+    """An operation requires an active turn but none exists."""
+
+
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────
 # Rooted directly in PlatformError — these are registration/resolution-time
 # errors, distinct from core.errors.ProviderError (execution-time vendor

@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from core.providers.transport import TransportProvider
     from core.providers.tts import TTSProvider
 
+    from ..turn import TurnCoordinator
+
 log = logging.getLogger("voxvoice.runtime.pipeline")
 
 
@@ -49,6 +51,7 @@ class RuntimePipeline:
         sample_rate: int = 16000,
         tts_voice: str | None = None,
         on_transcript: TranscriptSink | None = None,
+        turns: TurnCoordinator | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -60,6 +63,9 @@ class RuntimePipeline:
         self._sample_rate = sample_rate
         self._tts_voice = tts_voice
         self._on_transcript = on_transcript
+        # Turn Engine integration (M3.1): notify-only. When absent, the pipeline
+        # behaves exactly as before — turn tracking never affects speech/audio.
+        self._turns = turns
 
     # ── lifecycle (provider startup/shutdown; coordinated by the Orchestrator) ─
     async def start(self) -> None:
@@ -73,6 +79,8 @@ class RuntimePipeline:
 
     async def stop(self) -> None:
         t0 = time.monotonic()
+        if self._turns is not None:
+            self._turns.cancel()  # terminalize any active turn on shutdown
         await self._transport.stop(session_id=self._session_id)
         log.info(
             "pipeline %s stopped in %.1fms", self._session_id, (time.monotonic() - t0) * 1000
@@ -89,13 +97,19 @@ class RuntimePipeline:
             sample_rate=self._sample_rate,
         ):
             if isinstance(result, Partial):
+                if self._turns is not None:
+                    self._turns.on_user_speech()
                 self._emit("user", result.text, is_final=False)
             elif isinstance(result, Final):
+                if self._turns is not None:
+                    self._turns.on_user_final()
                 self._emit("user", result.text, is_final=True)
                 await self._respond(result.text)
         log.info("pipeline %s conversation ended", self._session_id)
 
     async def _respond(self, user_text: str) -> None:
+        if self._turns is not None:
+            self._turns.on_assistant_thinking()
         # Minimal context assembly (Memory/Prompt Runtime are M5).
         context = [
             {"role": "system", "content": self._system_prompt},
@@ -107,12 +121,18 @@ class RuntimePipeline:
                 parts.append(delta.text)
         agent_text = "".join(parts).strip()
         if not agent_text:
+            if self._turns is not None:
+                self._turns.on_turn_completed()  # empty response still completes the turn
             return
+        if self._turns is not None:
+            self._turns.on_assistant_speaking()
         self._emit("agent", agent_text, is_final=True)
         async for frame in self._tts.synthesize(
             agent_text, voice=self._tts_voice, language=self._language
         ):
             await self._transport.send(session_id=self._session_id, frame=frame)
+        if self._turns is not None:
+            self._turns.on_turn_completed()
 
     def _emit(self, role: str, text: str, *, is_final: bool) -> None:
         if self._on_transcript is None:

@@ -38,6 +38,12 @@ machines are complementary, different domains).
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |
 | **M6 — Moat & hardening** | Target-language provider plugins + evals; smart-turn EOT; state-machine timeouts; load test; tool runtime | ▫ Pending |
 
+### Epic 3 — Voice Intelligence
+| Milestone | Scope | Status |
+|---|---|---|
+| **M3.1 — Turn Engine foundation** | Per-turn lifecycle subsystem (TurnEngine/TurnCoordinator/TurnLifecycle/TurnContext/TurnPhase); deterministic phases + timing; notify-only pipeline integration (behaviour unchanged); no VAD/endpointing/interruptions | ✅ Done (branch `feat/m3.1-turn-engine`) |
+| **M3.2+ — VAD / endpoint detection / interrupt engine** | Plug real speech intelligence into the Turn Engine | ▫ Pending |
+
 ## M1 outcome (2026-07-16)
 
 **Structure now matches Constitution §A14.** New packages: `core/` (contracts,

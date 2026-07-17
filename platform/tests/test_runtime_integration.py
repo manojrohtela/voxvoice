@@ -97,6 +97,49 @@ async def test_cancel_ends_conversation_mid_flight(started):
     assert worker.conversation_state is SessionState.ENDED
 
 
+async def test_turn_engine_tracks_conversation_turns(started):
+    """The Turn Engine records one completed turn per utterance, with timing —
+    and the conversation's transcripts/audio are unchanged (M3.1 requirement)."""
+    from runtime.turn import TurnPhase
+
+    registry = build_local_registry()
+    transport = registry.resolve(CapabilityKind.TRANSPORT)
+    transcripts: list[tuple[str, str, bool]] = []
+    worker = SessionWorker(_context(registry, transcripts, session_id="ses_turns"))
+    started.append(worker)
+
+    await worker.start()
+    engine = worker.orchestrator.turn_engine
+    assert engine is not None
+
+    await transport.feed("ses_turns", AudioFrame(data=b"first"))
+    await transport.feed("ses_turns", AudioFrame(data=b"second"))
+    await transport.hangup("ses_turns")
+    await worker.wait_closed()
+    await worker.stop()
+
+    # Two completed turns, in order, each with recorded timing.
+    assert engine.turn_count == 2
+    assert [c.phase for c in engine.history] == [
+        TurnPhase.TURN_COMPLETED,
+        TurnPhase.TURN_COMPLETED,
+    ]
+    first = engine.history[0]
+    assert first.timing.first_audio_at is not None
+    assert first.timing.user_finished_at is not None
+    assert first.timing.assistant_started_at is not None
+    assert first.timing.completed_at is not None
+
+    # Behaviour unchanged: the same transcripts and played-back audio as before.
+    finals = [(r, t) for (r, t, f) in transcripts if f]
+    assert ("agent", "You said: first") in finals
+    assert ("agent", "You said: second") in finals
+    assert [f.data.decode() for f in transport.sent("ses_turns")] == [
+        "You said: first",
+        "You said: second",
+    ]
+
+
 async def test_concurrent_sessions_are_isolated(started):
     """Two conversations run concurrently through the shared (multi-session)
     provider set with no cross-contamination."""
