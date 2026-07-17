@@ -237,6 +237,43 @@ async def test_no_vad_provider_falls_back_gracefully(started):
     assert [f.data.decode() for f in transport.sent("ses_novad")] == ["You said: plain"]
 
 
+async def test_endpoint_framework_drives_completion(started):
+    """The Endpoint Intelligence Framework is always wired and owns turn
+    completion. With the default policy it confirms each utterance, so the
+    conversation (transcripts + audio) is unchanged from M3.1 (no regression)."""
+    from runtime.endpoint import EndpointDecision
+
+    registry = build_local_registry()
+    transport = registry.resolve(CapabilityKind.TRANSPORT)
+    transcripts: list[tuple[str, str, bool]] = []
+    worker = SessionWorker(_context(registry, transcripts, session_id="ses_ep"))
+    started.append(worker)
+
+    await worker.start()
+    endpoint = worker.orchestrator.endpoint_engine
+    turns = worker.orchestrator.turn_engine
+    assert endpoint is not None  # always wired (replaces the STT-final heuristic)
+
+    await transport.feed("ses_ep", AudioFrame(data=b"one"))
+    await transport.feed("ses_ep", AudioFrame(data=b"two"))
+    await transport.hangup("ses_ep")
+    await worker.wait_closed()
+    await worker.stop()
+
+    # Two turns completed via endpoint decisions; the engine rests between turns.
+    assert turns is not None and turns.turn_count == 2
+    assert endpoint.decision is EndpointDecision.CONTINUE_LISTENING
+    assert endpoint.context.turn_index == 2
+    # Behaviour unchanged: same transcripts + played-back audio as before M3.3.
+    finals = [(r, t) for (r, t, f) in transcripts if f]
+    assert ("agent", "You said: one") in finals
+    assert ("agent", "You said: two") in finals
+    assert [f.data.decode() for f in transport.sent("ses_ep")] == [
+        "You said: one",
+        "You said: two",
+    ]
+
+
 async def test_concurrent_sessions_are_isolated(started):
     """Two conversations run concurrently through the shared (multi-session)
     provider set with no cross-contamination."""

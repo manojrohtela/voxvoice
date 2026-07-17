@@ -46,6 +46,7 @@ from core.states import SessionState
 
 from ..contracts import RuntimeContext
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
+from ..endpoint import EndpointCoordinator, EndpointEngine
 from ..errors import OrchestrationError, OrchestrationStartupError
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
@@ -77,6 +78,10 @@ class ConversationOrchestrator:
         # when a VAD provider is registered (graceful fallback otherwise). Exposed
         # read-only; driven by the pipeline via the coordinator, never here.
         self._voice_activity_engine: VoiceActivityEngine | None = None
+        # Endpoint Intelligence Framework (M3.3): owns endpoint-decision state,
+        # ALWAYS created (it replaces the STT-final completion heuristic). Exposed
+        # read-only; driven by the pipeline/VAF via the coordinator, never here.
+        self._endpoint_engine: EndpointEngine | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -105,6 +110,13 @@ class ConversationOrchestrator:
         orchestrator never manipulates activity state — the pipeline drives it via
         the coordinator."""
         return self._voice_activity_engine
+
+    @property
+    def endpoint_engine(self) -> EndpointEngine | None:
+        """Read-only access to the endpoint subsystem (created on begin, always
+        wired when a pipeline is built). The orchestrator never manipulates
+        endpoint state — the pipeline/VAF drive it via the coordinator."""
+        return self._endpoint_engine
 
     # ── coordination phases ─────────────────────────────────────────────────
     async def begin(self) -> None:
@@ -223,10 +235,19 @@ class ConversationOrchestrator:
         tts = registry.resolve(CapabilityKind.TTS, _sel(agent.tts_provider))
         self._turn_engine = TurnEngine(session_id)
         turns = TurnCoordinator(self._turn_engine)
+        # Endpoint Intelligence Framework (M3.3): ALWAYS wired — it owns turn
+        # completion (replacing the STT-final heuristic). The default policy confirms
+        # a completed segment immediately, so the conversation behaves as before. It
+        # notifies the same Turn Engine (via `turns`) when a turn should finish.
+        self._endpoint_engine = EndpointEngine(session_id)
+        endpoint = EndpointCoordinator(
+            engine=self._endpoint_engine, session_id=session_id, turns=turns
+        )
         # Voice Activity Framework (M3.2): wired only when the capability is
         # registered — otherwise the pipeline runs exactly as M3.1 (graceful
         # fallback). The VAF shares the one TurnCoordinator, feeding speech-onset
-        # signals to the same Turn Engine.
+        # signals to the same Turn Engine, and enriches endpoint decisions with
+        # speech/silence observations.
         voice_activity = None
         if registry.has(CapabilityKind.VOICE_ACTIVITY):
             va_provider = registry.resolve(CapabilityKind.VOICE_ACTIVITY)
@@ -236,6 +257,7 @@ class ConversationOrchestrator:
                 engine=self._voice_activity_engine,
                 session_id=session_id,
                 turns=turns,
+                endpoint=endpoint,
             )
         self._pipeline = RuntimePipeline(
             transport=transport,
@@ -249,6 +271,7 @@ class ConversationOrchestrator:
             on_transcript=self._context.on_transcript,
             turns=turns,
             voice_activity=voice_activity,
+            endpoint=endpoint,
         )
         await self._pipeline.start()
 

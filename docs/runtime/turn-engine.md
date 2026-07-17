@@ -83,7 +83,14 @@ provider implementation. Consumed by the pipeline (via the coordinator) and the
 orchestrator (creates + exposes the engine).
 
 ## Extension points for M3.2+
-VAD → drives `on_user_speech`/turn-start with real speech detection · endpoint
-detection → decides `on_user_final` (adaptive delay) · interrupt engine →
-cancels/pre-empts the active turn · metrics → consume `TurnEvent`s / `TurnTiming`.
-All plug in without changing this subsystem's shape.
+VAD → drives `on_user_speech`/turn-start with real speech detection (**done M3.2**,
+via the Voice Activity Framework) · endpoint detection → decides `on_user_final`
+(**done M3.3**: the [Endpoint Intelligence Framework](endpoint-framework.md) now
+owns turn completion and calls `on_user_final` when a turn should finish — the Turn
+Engine remains the sole writer of turn state) · interrupt engine → cancels/pre-empts
+the active turn · metrics → consume `TurnEvent`s / `TurnTiming`. All plug in without
+changing this subsystem's shape.
+
+> **M3.3 update:** the pipeline no longer calls `on_user_final` directly on an STT
+> Final. The Endpoint Intelligence Framework decides when the turn is complete and
+> issues that notification; the Turn Engine's contract is unchanged.

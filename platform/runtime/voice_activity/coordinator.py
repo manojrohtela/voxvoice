@@ -38,6 +38,7 @@ class VoiceActivityCoordinator:
         engine: VoiceActivityEngine,
         session_id: str,
         turns=None,
+        endpoint=None,
     ) -> None:
         self._provider = provider
         self._engine = engine
@@ -45,6 +46,10 @@ class VoiceActivityCoordinator:
         # The Turn Engine façade (optional). The VAF notifies it of speech onset;
         # it never manipulates turn state directly.
         self._turns = turns
+        # The Endpoint Intelligence façade (optional, M3.3). The VAF supplies
+        # speech/silence observations to enrich endpoint decisions; it never decides
+        # completion itself (the Turn Engine stays the sole owner of turn state).
+        self._endpoint = endpoint
 
     @property
     def engine(self) -> VoiceActivityEngine:
@@ -74,10 +79,17 @@ class VoiceActivityCoordinator:
                 f"detect failed: {exc}"
             ) from exc
         changed = self._engine.observe(sample)
-        if changed is VoiceActivityState.SPEAKING and self._turns is not None:
+        if changed is VoiceActivityState.SPEAKING:
             # Speech confirmed → the caller's turn has begun. `on_user_speech` is
             # idempotent, so this composes safely with STT-driven turn onset.
-            self._turns.on_user_speech()
+            if self._turns is not None:
+                self._turns.on_user_speech()
+            if self._endpoint is not None:
+                self._endpoint.on_user_speech()  # enrich the endpoint's speech run
+        elif changed is VoiceActivityState.SILENCE_CONFIRMED and self._endpoint is not None:
+            # Confirmed end-of-speech → let the endpoint framework count it toward a
+            # pending endpoint's silence hold (never decides completion on its own).
+            self._endpoint.on_user_silence()
         return changed
 
     async def stop(self) -> None:

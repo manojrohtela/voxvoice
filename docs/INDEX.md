@@ -4,7 +4,7 @@
 > review, design decision (ADR), and recommendation lives in this tree — never
 > only in chat. See [README.md](README.md) for the documentation conventions.
 
-_Last updated: 2026-07-16_
+_Last updated: 2026-07-17_
 
 ## Specification
 
@@ -76,6 +76,7 @@ _Currently lives beside the code (to be migrated or cross-linked here):_
 | [runtime/provider-registry.md](runtime/provider-registry.md) | 2026-07-16 | Implemented (M2C.1) | `ProviderRegistry` — capability-based provider reference management (register/unregister/resolve/list, validation, hot-swap, thread-safe, deterministic). Manages references only; never constructs/executes a provider. Placement rationale (runtime, not core/providers) in DL-0008. |
 | [runtime/turn-engine.md](runtime/turn-engine.md) | 2026-07-17 | Implemented (M3.1) | Turn Engine (`TurnEngine`/`TurnCoordinator`/`TurnLifecycle`/`TurnContext`/`TurnPhase`) — the per-turn lifecycle foundation: deterministic phases + timing, notify-only pipeline integration (conversation behaviour unchanged). No VAD/endpointing/interruptions (M3.2+). `TurnPhase`-vs-`TurnState` reconciliation in DL-0012. |
 | [runtime/voice-activity-framework.md](runtime/voice-activity-framework.md) | 2026-07-17 | Implemented (M3.2) | Voice Activity Framework (`VoiceActivityEngine`/`VoiceActivityCoordinator`/`VoiceActivityState` + the `VoiceActivityProvider` capability) — provider-neutral speech detection: a deterministic activity state model with hysteresis, resolved via the registry (`CapabilityKind.VOICE_ACTIVITY`), tapping inbound audio to feed the Turn Engine. Behaviour unchanged; graceful fallback when no VAD provider is configured. Auxiliary-failure policy in DL-0013. |
+| [runtime/endpoint-framework.md](runtime/endpoint-framework.md) | 2026-07-17 | Implemented (M3.3) | Endpoint Intelligence Framework (`EndpointEngine`/`EndpointCoordinator`/`EndpointDecision`/`EndpointPolicy`) — deterministic, provider-neutral turn-completion decisions from neutral speech/segment/silence signals, governed by a configurable policy. **Replaces the pipeline's STT-final heuristic** (always wired); notifies the Turn Engine when a turn should finish (never owns turn state). Default policy reproduces pre-M3.3 behaviour (no regression). Trigger-vs-decision rationale in DL-0014. |
 | [runtime/runtime-pipeline.md](runtime/runtime-pipeline.md) | 2026-07-17 | Implemented (M2C.2) | `RuntimePipeline` + `RuntimeSessionService` — the streaming turn loop (Transport→STT→LLM→TTS→Transport via contracts) and the api↔runtime seam. First complete end-to-end conversation; `POST /v1/sessions` restored. Includes the runtime sequence diagram. |
 | [providers/local-profile.md](providers/local-profile.md) | 2026-07-17 | Implemented (M2C.2) | The local development provider profile (LocalTransport/LocalSTT/EchoLLM/LocalTTS) + the M2C.2 contract refinement. First-class, in-process, deterministic; real vendors are drop-in replacements. |
 

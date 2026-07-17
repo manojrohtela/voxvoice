@@ -4,7 +4,7 @@
 |---|---|
 | **Document** | `docs/roadmap/migration-progress.md` · **Status:** Living · **Owner:** Technical Owner |
 | **Tracks** | Execution of the Constitution migration roadmap (Part B) from prototype → first-party runtime. |
-| **Updated** | 2026-07-16 |
+| **Updated** | 2026-07-17 |
 
 | Milestone | Scope | Status |
 |---|---|---|
@@ -43,7 +43,8 @@ machines are complementary, different domains).
 |---|---|---|
 | **M3.1 — Turn Engine foundation** | Per-turn lifecycle subsystem (TurnEngine/TurnCoordinator/TurnLifecycle/TurnContext/TurnPhase); deterministic phases + timing; notify-only pipeline integration (behaviour unchanged); no VAD/endpointing/interruptions | ✅ Done (branch `feat/m3.1-turn-engine`) |
 | **M3.2 — Voice Activity Framework** | Provider-neutral VAD: `VoiceActivityDetection` capability (registry-resolved), `VoiceActivityEngine` deterministic activity model + hysteresis, `VoiceActivityCoordinator` taps inbound audio + notifies the Turn Engine; deterministic `LocalVoiceActivity` provider; graceful fallback when unconfigured (behaviour unchanged); no semantic/adaptive endpointing, interruptions, double-talk, noise suppression | ✅ Done (branch `feat/m3.2-voice-activity`) |
-| **M3.3+ — endpoint detection / interrupt engine** | Consume `SILENCE_CONFIRMED` for adaptive endpointing; interrupt engine; real streaming VAD provider plugins | ▫ Pending |
+| **M3.3 — Endpoint Intelligence Framework** | Provider-neutral turn-completion decisions: `EndpointEngine` deterministic decision model + configurable `EndpointPolicy` (min speech, silence hold, min silence, confidence, timeout), `EndpointCoordinator` consumes neutral speech/segment/silence signals and notifies the Turn Engine (`on_user_final`); **replaces the pipeline's STT-final heuristic** (always wired); VAD signals enrich decisions but never trigger completion; default policy reproduces pre-M3.3 behaviour (no regression). Trigger-vs-decision rationale DL-0014 | ✅ Done (branch `feat/m3.3-endpoint-intelligence`) |
+| **M3.4+ — interrupt engine / smart-turn EOT** | Interruptions / barge-in; semantic (LLM) endpointing + adaptive delay; independent acoustic-silence-triggered completion; real streaming VAD provider plugins | ▫ Pending |
 
 ## M1 outcome (2026-07-16)
 

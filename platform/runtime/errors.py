@@ -99,6 +99,23 @@ class VoiceActivityProviderError(ProviderError):
     letting it break the call (DL-0013)."""
 
 
+# ── Endpoint Intelligence Framework (M3.3) ───────────────────────────────────
+# State-machine violations root in core.errors.RuntimeConflict (like the turn,
+# conversation, and voice-activity machines). The endpoint framework has no
+# provider — it is pure runtime logic driven by a configurable policy — so there
+# is no provider-error variant here.
+class EndpointError(RuntimeConflict):
+    """Base for endpoint-decision state-machine errors."""
+
+
+class InvalidEndpointTransition(EndpointError):
+    """Target is not a legal transition from the current endpoint decision."""
+
+
+class DuplicateEndpointDecision(EndpointError):
+    """Attempted to transition into the already-active decision (no self-loops)."""
+
+
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────
 # Rooted directly in PlatformError — these are registration/resolution-time
 # errors, distinct from core.errors.ProviderError (execution-time vendor

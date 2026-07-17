@@ -8,11 +8,14 @@ through its `core.providers` contract — no vendor names, no provider-specific
 branching (Constitution §A6, AR-21). Providers are injected (resolved from the
 Provider Registry by the Orchestrator); the pipeline never constructs one.
 
-Scope (M2C.2): minimum streaming flow for a real multi-turn conversation. NO Turn
-Intelligence / adaptive endpointing (a Final from the STT marks a completed user
-utterance — M3 owns real turn detection). NO Memory / Prompt Runtime (context is
-the system prompt + the current utterance — M5 owns memory). Transcripts are
-delivered via an injected sink (the future Event Bus integration point, M4).
+Scope (M2C.2 + M3.3): minimum streaming flow for a real multi-turn conversation.
+Turn *completion* is decided by the Endpoint Intelligence Framework (M3.3): the
+pipeline no longer responds on every STT Final — it feeds transcript segments to
+the `EndpointCoordinator` and responds only when an endpoint decision is *final*.
+With the default policy a completed segment confirms immediately, so the local
+profile behaves exactly as before. NO Memory / Prompt Runtime (context is the
+system prompt + the current utterance — M5 owns memory). Transcripts are delivered
+via an injected sink (the future Event Bus integration point, M4).
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from core.providers.llm import TokenDelta
 from core.providers.stt import Final, Partial
 
 from ..contracts import TranscriptSink
+from ..endpoint import FINAL_ENDPOINT_DECISIONS
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -35,6 +39,7 @@ if TYPE_CHECKING:
     from core.providers.transport import TransportProvider
     from core.providers.tts import TTSProvider
 
+    from ..endpoint import EndpointCoordinator
     from ..turn import TurnCoordinator
     from ..voice_activity import VoiceActivityCoordinator
 
@@ -57,6 +62,7 @@ class RuntimePipeline:
         on_transcript: TranscriptSink | None = None,
         turns: TurnCoordinator | None = None,
         voice_activity: VoiceActivityCoordinator | None = None,
+        endpoint: EndpointCoordinator | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -75,6 +81,14 @@ class RuntimePipeline:
         # inbound frame; notify-only. When absent, the inbound stream is handed to
         # STT untapped — the pipeline behaves exactly as M3.1.
         self._voice_activity = voice_activity
+        # Endpoint Intelligence Framework integration (M3.3): decides when a caller's
+        # turn is complete. The pipeline feeds it transcript segments and responds
+        # only on a *final* endpoint decision. When absent (a lifecycle-only path)
+        # the pipeline falls back to the legacy respond-on-Final behaviour.
+        self._endpoint = endpoint
+        # The most recent Final transcript awaiting an endpoint decision (so the
+        # stream-end flush can close out a turn without dropping the utterance).
+        self._pending_text: str | None = None
 
     # ── lifecycle (provider startup/shutdown; coordinated by the Orchestrator) ─
     async def start(self) -> None:
@@ -99,6 +113,8 @@ class RuntimePipeline:
 
     async def stop(self) -> None:
         t0 = time.monotonic()
+        if self._endpoint is not None:
+            self._endpoint.cancel()  # terminalize any pending endpoint on shutdown
         if self._turns is not None:
             self._turns.cancel()  # terminalize any active turn on shutdown
         if self._voice_activity is not None:
@@ -126,13 +142,45 @@ class RuntimePipeline:
             if isinstance(result, Partial):
                 if self._turns is not None:
                     self._turns.on_user_speech()
+                if self._endpoint is not None:
+                    self._endpoint.on_user_speech()  # speech in progress; keeps turn open
                 self._emit("user", result.text, is_final=False)
             elif isinstance(result, Final):
-                if self._turns is not None:
-                    self._turns.on_user_final()
                 self._emit("user", result.text, is_final=True)
-                await self._respond(result.text)
+                await self._on_segment(result.text)
+        # Stream ended (caller hangup): close out a turn still awaiting confirmation
+        # so the last utterance is never silently dropped.
+        if self._endpoint is not None and self._pending_text is not None:
+            decision = self._endpoint.flush()
+            if decision in FINAL_ENDPOINT_DECISIONS:
+                await self._complete_turn()
         log.info("pipeline %s conversation ended", self._session_id)
+
+    async def _on_segment(self, user_text: str) -> None:
+        """A completed transcript segment. The Endpoint Intelligence Framework
+        decides whether it finishes the turn (M3.3). Without a coordinator the
+        pipeline falls back to the legacy respond-on-Final behaviour."""
+        if self._endpoint is None:
+            if self._turns is not None:
+                self._turns.on_user_final()
+            await self._respond(user_text)
+            return
+        self._pending_text = user_text
+        decision = self._endpoint.on_segment()  # notifies the Turn Engine if final
+        if decision in FINAL_ENDPOINT_DECISIONS:
+            await self._complete_turn()
+
+    async def _complete_turn(self) -> None:
+        """Respond to the caller's now-complete turn and ready the endpoint engine
+        for the next one. The Turn Engine was already told the user finished by the
+        EndpointCoordinator on the final decision."""
+        text = self._pending_text
+        self._pending_text = None
+        if text is None:
+            return
+        await self._respond(text)
+        if self._endpoint is not None:
+            self._endpoint.reset()  # back to CONTINUE_LISTENING for the next turn
 
     async def _respond(self, user_text: str) -> None:
         if self._turns is not None:
