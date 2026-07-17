@@ -2,7 +2,12 @@
 
 First-class STT MUST stream partial hypotheses. Batch-only providers are allowed
 only in *declared* degraded mode (`streaming=False`) — the runtime adapts and
-records the degradation (AR-24). Interface only; no implementation.
+records the degradation (AR-24).
+
+M2C.2: refined to an execution-ready shape — `transcribe` consumes a stream of
+audio frames and yields Partials during speech + a Final at end-of-utterance.
+Turn/endpoint detection is a provider/Turn-Intelligence concern (M3): a Final
+marks a completed user utterance.
 """
 
 from __future__ import annotations
@@ -10,6 +15,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+
+from core.audio import AudioFrame
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +44,8 @@ class STTProvider(ABC):
     capabilities: STTCapabilities
 
     @abstractmethod
-    async def open_stream(
-        self, *, language: str, sample_rate: int
+    def transcribe(
+        self, frames: AsyncIterator[AudioFrame], *, language: str, sample_rate: int
     ) -> AsyncIterator[Partial | Final]:
-        """Yield Partials during speech and a Final at end-of-utterance."""
+        """Consume caller audio frames; yield Partials during speech and a Final
+        at each end-of-utterance."""

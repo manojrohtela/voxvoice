@@ -200,6 +200,14 @@ class SessionWorker:
         self._stopped_at = time.time()
         self._transition(WorkerState.STOPPED, "cancelled")
 
+    async def wait_closed(self) -> None:
+        """Await the conversation running to completion (e.g. the caller hangs up
+        and the transport's inbound stream ends). Does not change worker state;
+        call `stop()` afterwards to finalize the worker to STOPPED."""
+        if self._run_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._run_task
+
     # ── internals ─────────────────────────────────────────────────────────
     async def _initialize(self) -> None:
         """Startup hook: validate the context, then create and begin the

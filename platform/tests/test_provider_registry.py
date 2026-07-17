@@ -26,13 +26,14 @@ from runtime.registry import CapabilityKind, ProviderRegistry
 
 
 class DummySTT(STTProvider):
-    """A minimal, real STTProvider — never actually called in these tests."""
+    """A minimal, real STTProvider — a watchdog that raises if ever executed
+    (the registry manages references only, never runs a provider)."""
 
     def __init__(self, name: str = "dummy-stt") -> None:
         self.name = name
         self.capabilities = STTCapabilities(streaming=True, partials=True)
 
-    async def open_stream(self, *, language: str, sample_rate: int):
+    def transcribe(self, frames, *, language: str, sample_rate: int):
         raise AssertionError("the registry must never execute a provider")
 
 
@@ -41,10 +42,7 @@ class DummyTTS(TTSProvider):
         self.name = name
         self.capabilities = TTSCapabilities(streaming=True)
 
-    async def open_stream(self, *, voice: str, language: str) -> None:
-        raise AssertionError("the registry must never execute a provider")
-
-    async def say(self, text_chunk: str):
+    def synthesize(self, text: str, *, voice: str | None = None, language: str = "en"):
         raise AssertionError("the registry must never execute a provider")
 
 

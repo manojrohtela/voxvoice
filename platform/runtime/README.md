@@ -17,7 +17,9 @@ and no behaviour yet. Each component gets its full specification (Constitution
 | `ai/` | Context assembly, prompt runtime, response validation/formatting, tool scheduling | M5 |
 | `memory/` | Layered token-budgeted context; snapshots; recovery | M5 |
 | `speech/` | Sentence chunking, playback scheduling, filler/ack policy, interruption flush | M3 |
-| `pipeline/` | **The only package that imports the pipeline substrate** (ADR-0002, AR-13); transports + service glue | M2 |
+| `pipeline/` | **RuntimePipeline: the streaming turn loop** (Transport→STT→LLM→TTS→Transport via contracts) — **implemented M2C.2** (spec: [`docs/runtime/runtime-pipeline.md`](../../docs/runtime/runtime-pipeline.md)). Also the only package permitted to import the pipeline substrate (AR-13) when real vendor plugins arrive. | M2C.2 ✅ |
+| `service.py` | **RuntimeSessionService: the api↔runtime seam** (implements `core.session_control.SessionController`); owns live sessions, creates one SessionWorker each | M2C.2 ✅ |
+| `registry.py` (see above) | provider resolution consumed by the orchestrator | M2C.1 ✅ |
 
 Layer rules (CI-checked): `runtime` imports `core` and provider interfaces; it
 does **not** import `api`. Only `runtime/pipeline` imports the substrate.

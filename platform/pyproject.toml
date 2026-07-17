@@ -26,6 +26,9 @@ dev = [
 # Package set follows the Constitution §A14 layer map (M1 reshape):
 #   core · api · runtime · providers · events · observability
 # (`tests` and the `voicebot` prototype are not installed packages.)
+[tool.setuptools]
+py-modules = ["bootstrap"]  # composition root (wires runtime into the Control Plane)
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "api*", "runtime*", "providers*", "events*", "observability*"]

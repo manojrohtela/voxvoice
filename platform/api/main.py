@@ -3,11 +3,12 @@
 Consumers talk to this API: auth, configuration (agents), session admission,
 control commands, and event delivery. It never touches audio or providers, and
 it does not import the Runtime Plane internals — it reaches the runtime only via
-a session-control interface and the Event Bus (AR-14).
+the `core.session_control.SessionController` interface (AR-14), a concrete
+instance of which is assembled by the top-level composition root (`bootstrap`)
+and injected here at startup.
 
-At M1 the engine-adapter axis, its transcript-ingest/poller, and the Dograh
-webclient harness were removed (ADR-0001/0007). Session *start* returns 503 until
-the Runtime Plane lands at M2 (Constitution migration M1 — honest gap).
+M2C.2: `POST /v1/sessions` is operational again — it provisions a real Runtime
+session through the Runtime Pipeline.
 """
 
 from __future__ import annotations
@@ -16,16 +17,37 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from sqlalchemy import text
+from sqlmodel import Session as DBSession
 
 from .config import get_settings
 from .db import engine as db_engine
 from .db import init_db
+from .models import Transcript
 from .routers import agents, sessions
+
+
+def _persist_transcript(session_id: str, role: str, text_value: str, is_final: bool) -> None:
+    """Control-Plane transcript sink handed to the Runtime. Persists FINAL items
+    (partials are for live/SDK use, not storage). This is the integration point
+    the Event Bus (M4) will subsume."""
+    if not is_final:
+        return
+    with DBSession(db_engine) as db:
+        db.add(Transcript(session_id=session_id, role=role, text=text_value, ts=0.0))
+        db.commit()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Composition root: assemble the runtime session controller (local provider
+    # profile) and inject it. Deferred import so `api` never statically depends
+    # on `runtime` (AR-14); `bootstrap` is the one sanctioned wiring point.
+    from bootstrap import build_session_controller
+
+    app.state.session_controller = build_session_controller(
+        transcript_sink=_persist_transcript
+    )
     yield
 
 

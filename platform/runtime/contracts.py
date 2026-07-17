@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from core.providers import (
     AnalyticsProvider,
@@ -22,6 +23,13 @@ from core.providers import (
 )
 
 from .state import WorkerState
+
+if TYPE_CHECKING:
+    from .registry import ProviderRegistry
+
+# A transcript sink receives (session_id, role, text, is_final). The Control
+# Plane provides one; the future Event Bus (M4) subsumes it.
+TranscriptSink = Callable[[str, str, str, bool], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,14 +67,37 @@ class RuntimeDependencies:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """The agent's runtime-relevant configuration, passed from the Control Plane
+    into the Runtime (built from the persisted Agent). Provider *names* are opaque
+    capability selectors resolved via the registry — never vendor branches."""
+
+    system_prompt: str
+    first_message: str | None = None
+    language: str = "en-IN"
+    stt_provider: str = "default"
+    tts_provider: str = "default"
+    tts_voice: str | None = None
+    llm_model: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeContext:
     """The dependency-injection seam handed to a worker: what session it owns,
     which providers it may use, and its configuration. Future runtime components
-    receive this rather than reaching for globals (AR-3/AR-4: no runtime globals)."""
+    receive this rather than reaching for globals (AR-3/AR-4: no runtime globals).
+
+    `registry` (M2C.2) is how the Runtime resolves provider capabilities
+    (Constitution §A4.1). `agent` carries the agent's runtime config. `on_transcript`
+    is the Control Plane's transcript sink. All optional: without them a worker
+    runs an idle conversation (no pipeline) — used by lifecycle-only tests."""
 
     session: SessionContext
     dependencies: RuntimeDependencies
     config: WorkerConfiguration
+    registry: ProviderRegistry | None = None
+    agent: AgentSpec | None = None
+    on_transcript: TranscriptSink | None = None
 
 
 @dataclass(frozen=True, slots=True)

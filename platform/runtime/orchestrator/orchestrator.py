@@ -44,6 +44,8 @@ from core.states import SessionState
 from ..contracts import RuntimeContext, RuntimeDependencies
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
 from ..errors import OrchestrationError, OrchestrationStartupError
+from ..pipeline.pipeline import RuntimePipeline
+from ..registry import CapabilityKind
 
 log = logging.getLogger("voxvoice.runtime.orchestrator")
 
@@ -61,6 +63,7 @@ class ConversationOrchestrator:
         # The state machine is PRIVATE — the orchestrator is its only writer.
         self._sm = ConversationStateMachine(on_transition=on_transition)
         self._end_event = asyncio.Event()
+        self._pipeline: RuntimePipeline | None = None
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -121,7 +124,17 @@ class ConversationOrchestrator:
             raise OrchestrationError(
                 f"run() requires IN_CONVERSATION, conversation is {self._sm.state.value}"
             )
-        await self._end_event.wait()
+        if self._pipeline is None:
+            await self._end_event.wait()  # no pipeline configured — idle conversation
+            return
+        try:
+            await self._pipeline.run()
+        except Exception as exc:  # noqa: BLE001 — routed through the state machine
+            self.fail(reason=f"pipeline_error:{type(exc).__name__}")
+            return
+        # The transport's inbound stream ended (caller hangup) — end the conversation.
+        if not self._sm.is_terminal:
+            await self.end(reason="completed", source="transport")
 
     async def end(self, *, reason: str = "completed", source: str = "orchestrator") -> None:
         """Coordinate graceful shutdown: → ENDING → ENDED. Idempotent once terminal."""
@@ -166,12 +179,38 @@ class ConversationOrchestrator:
         self._end_event.set()
         log.error("conversation failed: %s", reason)
 
-    # ── provider coordination (interfaces only; placeholders until M2C) ──────
+    # ── provider coordination (resolved via the registry; M2C.2) ────────────
     async def _open_providers(self) -> None:
-        """M2C: open transport + STT/TTS/LLM streams via `self.dependencies`
-        (interfaces). No provider execution at M2B.2 — no implementations exist."""
-        return
+        """Resolve the capability providers for this agent from the Provider
+        Registry, build the RuntimePipeline, and start the transport. Providers
+        are requested by *capability* (optionally by opaque name) — never by
+        vendor identity. Without a registry/agent (lifecycle-only paths) this is
+        a no-op and the conversation runs idle."""
+        registry = self._context.registry
+        agent = self._context.agent
+        if registry is None or agent is None:
+            return
+
+        def _sel(name: str | None) -> str | None:
+            return None if (not name or name == "default") else name
+
+        transport = registry.resolve(CapabilityKind.TRANSPORT)
+        stt = registry.resolve(CapabilityKind.STT, _sel(agent.stt_provider))
+        llm = registry.resolve(CapabilityKind.LLM)
+        tts = registry.resolve(CapabilityKind.TTS, _sel(agent.tts_provider))
+        self._pipeline = RuntimePipeline(
+            transport=transport,
+            stt=stt,
+            llm=llm,
+            tts=tts,
+            session_id=self._context.session.session_id,
+            system_prompt=agent.system_prompt,
+            language=agent.language,
+            tts_voice=agent.tts_voice,
+            on_transcript=self._context.on_transcript,
+        )
+        await self._pipeline.start()
 
     async def _close_providers(self) -> None:
-        """M2C: close provider streams. No-op at M2B.2."""
-        return
+        if self._pipeline is not None:
+            await self._pipeline.stop()

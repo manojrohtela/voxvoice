@@ -54,6 +54,10 @@ class OrchestrationStartupError(OrchestrationError):
     """Conversation startup (begin) failed; the conversation is left FAILED."""
 
 
+class PipelineError(OrchestrationError):
+    """A runtime pipeline stage (transport/STT/LLM/TTS) failed during execution."""
+
+
 # ── Provider Registry (M2C.1) ────────────────────────────────────────────────
 # Rooted directly in PlatformError — these are registration/resolution-time
 # errors, distinct from core.errors.ProviderError (execution-time vendor

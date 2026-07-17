@@ -14,7 +14,9 @@
 | **M2B.1 — Conversation State Machine** | Deterministic conversation-lifecycle FSM over `core.states.SessionState` (validation, guards, immutable history, typed errors, notifications) — no orchestration | ✅ Done (branch `feat/m2b1-conversation-state-machine`) |
 | **M2B.2 — Conversation Orchestrator** | Sole-writer orchestrator drives the state machine (begin/run/end/cancel + failure routing); hosted by SessionWorker; providers via interfaces only — no provider execution/turn/AI | ✅ Done (branch `feat/m2b2-conversation-orchestrator`) |
 | **M2C.1 — Provider Registry** | Capability-based provider reference management (register/unregister/resolve/list, validation, hot-swap, thread-safe) — manages references only, no execution | ✅ Done (branch `feat/m2c1-provider-registry`) |
-| **M2C.2 — Provider wiring + turn loop** | Implement first STT/TTS/LLM/transport plugins; wire the orchestrator's `_open_providers`/`_close_providers` to resolve them via the registry; port the voicebot turn loop; transcripts live via events; restore session start | ⏳ Next (awaiting approval) |
+| **M2C.2 — Runtime Pipeline & first conversation** | RuntimePipeline (Transport→STT→LLM→TTS→Transport via contracts); local provider profile; orchestrator resolves providers via the registry + coordinates their lifecycle; transcripts via injected sink; **`POST /v1/sessions` restored** through the Runtime Plane. First complete end-to-end conversation. | ✅ Done (branch `feat/m2c2-runtime-pipeline`) |
+
+**Epic 2 complete.** The Runtime Plane executes a real multi-turn conversation end-to-end (local provider profile) without bypassing any architectural boundary; the prototype voicebot path is no longer primary.
 | **M3 — Streaming & Turn Intelligence** | Streaming STT plugin; endpoint scorer + interrupt engine; latency taps + `metric.turn` (exit: measured p50 ≤ 1.2 s) | ▫ Pending |
 | **M4 — Event surface & SDK** | Event Bus impl + outbox + retry/DLQ; WS event gateway; mid-call control API; client SDK | ▫ Pending |
 | **M5 — Memory & prompt runtime** | Context builder, rolling summary, entity memory, metadata templating, snapshot/reconnect | ▫ Pending |

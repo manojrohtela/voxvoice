@@ -1,10 +1,16 @@
-"""Streaming Text-to-Speech capability contract (Constitution §A6). Interface only."""
+"""Streaming Text-to-Speech capability contract (Constitution §A6).
+
+M2C.2: refined to an execution-ready shape — `synthesize` turns one utterance of
+text into a stream of audio frames.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+
+from core.audio import AudioFrame
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +26,7 @@ class TTSProvider(ABC):
     capabilities: TTSCapabilities
 
     @abstractmethod
-    async def open_stream(self, *, voice: str, language: str) -> None:
-        """Open a synthesis stream for a session."""
-
-    @abstractmethod
-    async def say(self, text_chunk: str) -> AsyncIterator[bytes]:
-        """Accept a text chunk; yield audio frames as they synthesize."""
+    def synthesize(
+        self, text: str, *, voice: str | None = None, language: str = "en"
+    ) -> AsyncIterator[AudioFrame]:
+        """Synthesize one utterance; yield audio frames as they are produced."""
