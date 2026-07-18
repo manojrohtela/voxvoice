@@ -57,6 +57,52 @@ class EventType(StrEnum):
     PROVIDER_CONNECTED = "provider.connected"
     PROVIDER_DISCONNECTED = "provider.disconnected"
 
+    # ── AI Runtime content vocabulary (M5.0) — DEFINED here, EMITTED by the
+    #    Epic-5 modules as they land. Additive (AR-32); provider-neutral. No
+    #    producer emits these yet (M5.0 is infrastructure only).
+    # content ingress / transcript (producer: Interaction Runtime)
+    INPUT_RECEIVED = "input.received"
+    INPUT_PROCESSED = "input.processed"
+    TRANSCRIPT_STARTED = "transcript.started"
+    TRANSCRIPT_UPDATED = "transcript.updated"
+    TRANSCRIPT_COMPLETED = "transcript.completed"
+    # memory (producer: Memory Runtime)
+    MEMORY_STORED = "memory.stored"
+    MEMORY_RETRIEVED = "memory.retrieved"
+    MEMORY_UPDATED = "memory.updated"
+    MEMORY_EXPIRED = "memory.expired"
+    MEMORY_EVICTED = "memory.evicted"
+    MEMORY_CLEARED = "memory.cleared"
+    MEMORY_SUMMARIZED = "memory.summarized"
+    # prompt (producer: Prompt Runtime)
+    PROMPT_RENDERED = "prompt.rendered"
+    PROMPT_TEMPLATE_UPDATED = "prompt.template.updated"
+    # knowledge (producer: Knowledge Runtime)
+    KNOWLEDGE_INDEXED = "knowledge.indexed"
+    KNOWLEDGE_RETRIEVED = "knowledge.retrieved"
+    KNOWLEDGE_SOURCE_UPDATED = "knowledge.source.updated"
+    # context (producer: Context Runtime)
+    CONTEXT_ASSEMBLED = "context.assembled"
+    CONTEXT_TRUNCATED = "context.truncated"
+    # reasoning + model (producer: Reasoning Runtime)
+    REASONING_STARTED = "reasoning.started"
+    REASONING_COMPLETED = "reasoning.completed"
+    REASONING_FAILED = "reasoning.failed"
+    MODEL_TOKEN = "model.token"
+    MODEL_USAGE = "model.usage"
+    # tools (producer: Tool Runtime / MCP Runtime)
+    TOOL_REQUESTED = "tool.requested"
+    TOOL_COMPLETED = "tool.completed"
+    TOOL_FAILED = "tool.failed"
+    # workflow / agent (producers: Workflow Runtime / Agent Runtime)
+    WORKFLOW_STARTED = "workflow.started"
+    WORKFLOW_STEP = "workflow.step"
+    WORKFLOW_COMPLETED = "workflow.completed"
+    AGENT_ACTIVATED = "agent.activated"
+    AGENT_HANDOFF = "agent.handoff"
+    # cost / metering (producer: Metering)
+    COST_UPDATED = "cost.updated"
+
 
 class EventSource(StrEnum):
     """The source-subsystem vocabulary — every event names the component that
@@ -72,6 +118,19 @@ class EventSource(StrEnum):
     SMART_TURN = "smart_turn"
     PIPELINE = "pipeline"
     PROVIDER_REGISTRY = "provider_registry"
+    # AI Runtime module sources (M5.0 — additive; producers land in Epic 5)
+    INTERACTION = "interaction"
+    MEMORY = "memory"
+    PROMPT = "prompt"
+    KNOWLEDGE = "knowledge"
+    CONTEXT = "context"
+    REASONING = "reasoning"
+    TOOL = "tool"
+    MCP = "mcp"
+    WORKFLOW = "workflow"
+    AGENT = "agent"
+    MODEL = "model"
+    METERING = "metering"
 
 
 @dataclass(frozen=True, slots=True)

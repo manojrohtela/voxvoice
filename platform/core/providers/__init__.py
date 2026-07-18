@@ -13,6 +13,15 @@ from .analytics import AnalyticsProvider
 from .llm import LLMProvider
 from .semantic_turn import SemanticCapabilities, SemanticHint, SemanticTurnEvaluator
 from .storage import StorageProvider
+from .stores import (
+    DocumentStore,
+    Embedder,
+    MetadataStore,
+    ObjectStore,
+    StoreCapabilities,
+    VectorMatch,
+    VectorStore,
+)
 from .stt import STTProvider
 from .transport import TransportProvider
 from .tts import TTSProvider
@@ -29,4 +38,11 @@ __all__ = [
     "SemanticTurnEvaluator",
     "SemanticHint",
     "SemanticCapabilities",
+    "ObjectStore",
+    "DocumentStore",
+    "MetadataStore",
+    "VectorStore",
+    "VectorMatch",
+    "Embedder",
+    "StoreCapabilities",
 ]
