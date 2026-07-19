@@ -12,6 +12,7 @@ publishing. Retrieval intelligence, ranking, policies, expiration, cache, and
 content-event ingestion are explicit non-goals (later milestones).
 """
 
+from .cache import CacheStats, LRUCacheBackend, MemoryCache
 from .config import (
     CacheConfig,
     EmbedderConfig,
@@ -33,11 +34,28 @@ from .domain import (
     MemoryTier,
     MemoryType,
 )
+from .extensions import Compressor, Redactor, Reranker, Summarizer
 from .factory import MemoryFactory
+from .ingestion import AccessIntent, IngestionResult, MemoryIngestor, StoreIntent
 from .lifecycle import LIFECYCLE, MemoryTrigger, advance, machine_for
+from .observability import MemoryStatistics, Metric
+from .planner import MemoryQueryPlanner, RetrievalPlan, RetrievalStrategy
+from .policies import (
+    ConflictPolicy,
+    ConflictStrategy,
+    ExpirationPolicy,
+    MemoryPolicies,
+    MergePolicy,
+    PolicyEngine,
+    PrivacyPolicy,
+    RetentionPolicy,
+)
+from .ranking import RankingEngine, ScoredRecord
 from .repositories import MemoryRepository, MetadataRepository, VectorRepository
+from .retrieval import RetrievalEngine
 from .runtime import MemoryRuntime
 from .serializer import MemorySerializer
+from .tenancy import MemoryAccessDenied, MemoryTenancy, ResolvedScope
 
 __all__ = [
     # runtime + composition
@@ -65,6 +83,38 @@ __all__ = [
     "MemoryRepository",
     "VectorRepository",
     "MetadataRepository",
+    # intelligence (M5.1B-2)
+    "MemoryQueryPlanner",
+    "RetrievalPlan",
+    "RetrievalStrategy",
+    "RetrievalEngine",
+    "RankingEngine",
+    "ScoredRecord",
+    "PolicyEngine",
+    "MemoryPolicies",
+    "ExpirationPolicy",
+    "RetentionPolicy",
+    "MergePolicy",
+    "ConflictPolicy",
+    "ConflictStrategy",
+    "PrivacyPolicy",
+    "MemoryCache",
+    "LRUCacheBackend",
+    "CacheStats",
+    "MemoryTenancy",
+    "ResolvedScope",
+    "MemoryAccessDenied",
+    "MemoryIngestor",
+    "IngestionResult",
+    "StoreIntent",
+    "AccessIntent",
+    "MemoryStatistics",
+    "Metric",
+    # extension points
+    "Reranker",
+    "Summarizer",
+    "Compressor",
+    "Redactor",
     # config
     "MemoryConfiguration",
     "RepositoryConfig",

@@ -214,19 +214,25 @@ def test_runtime_store_retrieve_forget():
     rt = _runtime()
     mid = rt.store("cover drive", tier=MemoryTier.SEMANTIC, scope=_scope(), importance=0.9)
     hits = rt.retrieve(MemoryQuery(tier=MemoryTier.SEMANTIC, scope=_scope()))
-    assert [(h.id, h.content, h.score) for h in hits] == [(mid, "cover drive", 0.9)]
+    # score is now a ranked blend (M5.1B-2), not raw importance
+    assert [(h.id, h.content) for h in hits] == [(mid, "cover drive")]
+    assert hits[0].score > 0
     rt.forget(mid)
     assert list(rt.retrieve(MemoryQuery(tier=MemoryTier.SEMANTIC, scope=_scope()))) == []
     rt.forget(mid)  # idempotent: no raise
 
 
-def test_runtime_retrieve_respects_min_score_and_scope():
+def test_runtime_retrieve_respects_ranking_min_score_and_scope():
     rt = _runtime()
     rt.store("low", tier=MemoryTier.SESSION, scope=_scope(), importance=0.2)
     rt.store("high", tier=MemoryTier.SESSION, scope=_scope(), importance=0.8)
-    hits = rt.retrieve(MemoryQuery(tier=MemoryTier.SESSION, scope=_scope(), min_score=0.5))
-    assert [h.content for h in hits] == ["high"]
-    # other user sees nothing
+    # ranked by importance-weighted score → high before low
+    hits = rt.retrieve(MemoryQuery(tier=MemoryTier.SESSION, scope=_scope()))
+    assert [h.content for h in hits] == ["high", "low"]
+    # min_score thresholds the ranked score; an unreachable threshold drops all
+    dropped = rt.retrieve(MemoryQuery(tier=MemoryTier.SESSION, scope=_scope(), min_score=1e9))
+    assert list(dropped) == []
+    # other user sees nothing (scope isolation)
     other = rt.retrieve(MemoryQuery(tier=MemoryTier.SESSION, scope=MemoryScope(user_id="ux")))
     assert list(other) == []
 
@@ -268,13 +274,15 @@ def test_runtime_retrieve_event_carries_scope_ids():
     assert seen[-1].conversation_id == "c1"
 
 
-def test_runtime_does_not_ingest_content_events():
+def test_runtime_ingests_content_events():
+    # M5.1B-2: the runtime now forms memory from content events (was deferred in -1)
     bus = InProcessEventBus()
     rt = _runtime()
     rt.attach(bus)
     bus.publish(Event(id="x", type=EventType.TRANSCRIPT_COMPLETED, ts=1.0, seq=0,
-                      session_id="s1", source=EventSource.INTERACTION, data={"text": "hi"}))
-    assert rt.metrics.handled == 0  # ingestion is deferred to a later milestone
+                      session_id="s1", source=EventSource.INTERACTION, data={"text": "hi there"}))
+    assert rt.metrics.handled == 1
+    assert rt.metrics.extra.get("ingested") == 1
 
 
 # ── runtime: module lifecycle ────────────────────────────────────────────────

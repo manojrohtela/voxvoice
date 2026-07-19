@@ -17,6 +17,7 @@ from typing import Any
 from core.errors import ConfigError
 from core.providers.stores import DocumentStore, Embedder, MetadataStore, VectorStore
 
+from .cache import MemoryCache
 from .config import EmbedderConfig, MemoryConfiguration, StoreConfig
 from .repositories import MemoryRepository, MetadataRepository, VectorRepository
 from .runtime import MemoryRuntime
@@ -44,11 +45,14 @@ class MemoryFactory:
         vec_store = _build_vector_store(config.repository.vector)
         meta_store = _build_metadata_store(config.repository.metadata)
         embedder = _build_embedder(config.repository.embedder)
+        cache = (
+            MemoryCache(maxsize=config.cache.max_items) if config.cache.enabled else None
+        )
 
         return MemoryRuntime(
             config=config,
             memory_repo=MemoryRepository(
-                doc_store, serializer, collection=config.repository.document.collection
+                doc_store, serializer, collection=config.repository.document.collection, cache=cache
             ),
             vector_repo=VectorRepository(vec_store, embedder),
             metadata_repo=MetadataRepository(meta_store),

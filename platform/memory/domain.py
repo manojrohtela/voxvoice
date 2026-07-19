@@ -77,13 +77,19 @@ class MemoryState(StrEnum):
 @dataclass(frozen=True, slots=True)
 class MemoryMetadata:
     """Descriptive envelope carried with a record. Timestamps are injected-clock
-    values (seconds). `access_count`/`last_access_at`/`expires_at` are recorded for
-    future ranking/expiration — **no logic reads them yet** (non-goals)."""
+    values (seconds). Ranking/expiration signals (`importance`, `confidence`,
+    `access_count`, `last_access_at`, `expires_at`) are read by the M5.1B-2 ranking +
+    policy engines. All fields are additive with defaults — old documents deserialize
+    unchanged (backward compatible)."""
 
     type: MemoryType = MemoryType.NOTE
     importance: float = 0.5
+    confidence: float = 1.0  # how trustworthy the memory is (0..1)
     tags: tuple[str, ...] = ()
-    source: str | None = None  # originating event id / producer, when known
+    source: str | None = None  # originating event id, when known
+    origin: str | None = None  # producing subsystem (e.g. "transcript", "tool")
+    created_by: str | None = None  # user/agent that caused the write
+    agent_id: str | None = None  # owning agent (agent-scope isolation)
     correlation_id: str | None = None
     created_at: float = 0.0
     updated_at: float = 0.0
@@ -117,6 +123,21 @@ class MemoryRecord:
     def with_metadata(self, metadata: MemoryMetadata) -> MemoryRecord:
         return replace(self, metadata=metadata)
 
+    def accessed(self, now: float) -> MemoryRecord:
+        """Record one access (for frequency/recency ranking). Returns a new record."""
+        return replace(
+            self,
+            metadata=replace(
+                self.metadata,
+                access_count=self.metadata.access_count + 1,
+                last_access_at=now,
+            ),
+        )
+
+    def touched(self, now: float) -> MemoryRecord:
+        """Bump `updated_at` (a content/importance change). Returns a new record."""
+        return replace(self, metadata=replace(self.metadata, updated_at=now))
+
 
 @dataclass(frozen=True, slots=True)
 class MemoryFilter:
@@ -130,6 +151,7 @@ class MemoryFilter:
     tier: MemoryTier | None = None
     type: MemoryType | None = None
     tags: tuple[str, ...] = ()
+    agent_id: str | None = None  # agent-scope isolation (matched on metadata)
     states: tuple[MemoryState, ...] = ()
     limit: int | None = None
 

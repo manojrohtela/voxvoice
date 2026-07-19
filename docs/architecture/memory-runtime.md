@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The provider-neutral, deterministic, event-driven runtime that **only manages memory** · **Status:** Core implemented (M5.1B-1) |
-| **Milestone** | M5.1A — Design (approved) · M5.1B-1 — Core (2026-07-18, additive) |
+| **Scope** | The provider-neutral, deterministic, event-driven runtime that **only manages memory** · **Status:** Complete (M5.1B-2) |
+| **Milestone** | M5.1A — Design (approved) · M5.1B-1 — Core (2026-07-18) · M5.1B-2 — Intelligence (2026-07-19, additive) |
 | **Basis** | The approved M5.1A Memory Runtime Design; the M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) |
 | **Governs** | `platform/memory/` |
 
@@ -92,9 +92,71 @@ implementation (`events/`), `api/`, `gateway/`, or `replay/`. A test enforces th
 (relative imports are excluded so `memory/runtime.py` doesn't shadow the top-level
 `runtime` package).
 
-## Non-goals (later milestones)
-Retrieval Engine · ranking · policies (capacity / expiration / retention / merge /
-conflict / privacy) · expiration / eviction · semantic / keyword / hybrid search ·
-Memory Cache · content-event ingestion (the runtime attaches to publish only) ·
-Context / Knowledge / Reasoning / Workflow / Agent runtimes. All additive behind the
-same contracts.
+## M5.1B-2 — Intelligence layer (additive; completes the runtime)
+Everything the M5.1B-1 non-goals list deferred now lands, on the same abstractions.
+Only `memory/` + its tests changed; core/runtime/events/gateway/replay untouched.
+
+### Retrieval flow: tenancy → planner → repositories → ranking → selection
+- **`MemoryQueryPlanner`** (`planner.py`) — pure decision layer. Turns a `MemoryQuery`
+  into a `RetrievalPlan` (strategy = keyword / semantic / hybrid + the scoped
+  `MemoryFilter` + tokenized terms). It *never* executes retrieval; it is the extension
+  seam for new strategies (`choose_strategy`).
+- **`RetrievalEngine`** (`retrieval.py`) — orchestrates the flow, **repositories only**
+  (never a provider). Isolation is enforced *first*. Candidate generation: keyword
+  (lexical term-overlap), semantic (`VectorRepository.search`, intersected with the
+  scoped ids so **the vector store can't leak across scopes**), hybrid (both, fused by
+  ranking). Scopes: conversation / session / user / organization / agent.
+- **`RankingEngine`** (`ranking.py`) — deterministic weighted blend via
+  `core.policies.RankingPolicy` over neutral signals: recency (half-life decay, injected
+  clock), frequency (saturating), importance, similarity, conversation affinity, keyword.
+  Optional injected `Reranker` runs last. No system randomness.
+
+### `PolicyEngine` (`policies.py`) — deterministic, AI-free
+Memory-specific policy value objects (built on `core.policies` where one fits) →
+verdicts the runtime executes: **Validation** (drop empty/oversize), **Privacy**
+(redact via an injected `Redactor`), **Merge** (dedupe identical content in a
+scope+tier), **Conflict** (keep-highest-importance / keep-latest), **Expiration** (per-
+tier TTL; swept by `MemoryRuntime.expire`), **Retention** (pinned tags + min-age floor
+protect from eviction/expiry), **Capacity** (per-tier `BudgetPolicy` → evict lowest-
+value). Compression + Summarization are `core.policies` switches + injected ports only.
+
+### Memory Cache (`cache.py`) — behind the repository
+A deterministic LRU (`LRUCacheBackend`) fronting the document store for hot records.
+It lives **inside `MemoryRepository`** (read-through/write-through/invalidate) — the
+runtime never sees it. Values are cached as storage documents, so a Redis
+`CacheBackend` swaps in unchanged. Hit/miss/eviction/invalidation stats feed
+observability.
+
+### Event ingestion (`ingestion.py` + `MemoryRuntime.handle_event`)
+The runtime now subscribes to the content vocabulary and forms memory from the bus:
+`INPUT_PROCESSED`/`TRANSCRIPT_COMPLETED` → **Conversation**, `REASONING_COMPLETED` →
+**Semantic**, `TOOL_COMPLETED` → **Episodic**, `CONTEXT_ASSEMBLED` → **access** feedback
+(bump `access_count`/`last_access_at`, emit `MEMORY_UPDATED`). It ignores its own
+`memory.*` events (no loop). Emits `MEMORY_STORED/UPDATED/RETRIEVED/EXPIRED/EVICTED/
+CLEARED` — all standard envelopes, so Replay/Gateway observe them for free.
+
+### Tenancy (`tenancy.py`) — isolation before retrieval
+`MemoryTenancy.guard` runs *first* on every store/retrieve: deterministic isolation (a
+query may never widen past its `TenantContext`'s org/user) plus the M5.0 `Authorizer`/
+`QuotaEnforcer`/`AuditSink` **hooks** (permissive no-op defaults ship; real RBAC/quota/
+audit are non-goals). Agent scope is carried on metadata + the tenant's `agent_id`.
+
+### Metadata evolution (`domain.py`) — backward compatible
+`MemoryMetadata` gains `confidence`, `origin`, `created_by`, `agent_id` (all additive
+with defaults; old documents deserialize unchanged — a test asserts it). New helpers
+`accessed()` / `touched()` feed frequency/recency ranking.
+
+### Observability (`observability.py`)
+Canonical `Metric` name constants + a `MemoryStatistics` snapshot (`runtime.statistics()`:
+state, health, counters, cache stats). Retrieval latency timer, rank-candidate
+histogram, cache hit/miss on the injected `Meter`; tracing/health via the M5.0 module.
+
+### Extension points (`extensions.py`) — interfaces only
+`Reranker`, `Summarizer`, `Compressor`, `Redactor` ABCs. The runtime calls them only if
+injected; none is implemented (no AI, no LLM — the runtime never authors intelligence).
+
+## Non-goals (still deferred)
+Prompt / Knowledge / Context / Reasoning / Workflow / Agent runtimes · MCP ·
+database-specific store adapters · REST APIs · frontend · real RBAC/quota/audit
+implementations · reranker/summarizer/compressor/redactor implementations. All additive
+behind the contracts already in place.

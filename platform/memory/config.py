@@ -39,10 +39,10 @@ class EmbedderConfig:
 
 @dataclass(frozen=True, slots=True)
 class CacheConfig:
-    """Declared but inert in M5.1B-1 (the Memory Cache is a later milestone)."""
+    """Hot-object cache settings (the Memory Cache lives behind the repository)."""
 
     enabled: bool = False
-    max_items: int = 0
+    max_items: int = 256
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,5 +92,6 @@ class MemoryConfiguration:
         return cls(
             tiers=(
                 TierConfig(tier=MemoryTier.SEMANTIC, vectorize=True),
-            )
+            ),
+            cache=CacheConfig(enabled=True, max_items=512),
         )

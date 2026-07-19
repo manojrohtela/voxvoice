@@ -12,6 +12,7 @@ from collections.abc import Sequence
 
 from core.providers.stores import DocumentStore
 
+from ..cache import MemoryCache
 from ..domain import MemoryFilter, MemoryId, MemoryRecord, MemoryScope
 from ..serializer import MemorySerializer
 
@@ -23,27 +24,41 @@ class MemoryRepository:
         serializer: MemorySerializer,
         *,
         collection: str = "memories",
+        cache: MemoryCache | None = None,
     ) -> None:
         self._store = store
         self._serializer = serializer
         self._collection = collection
+        self._cache = cache  # optional hot-object cache (behind this layer)
 
     async def add(self, record: MemoryRecord) -> None:
-        await self._store.upsert(
-            self._collection, record.id.value, self._serializer.to_document(record)
-        )
+        doc = self._serializer.to_document(record)
+        await self._store.upsert(self._collection, record.id.value, doc)
+        if self._cache is not None:
+            self._cache.put(record.id.value, doc)  # write-through
 
     async def get(self, memory_id: MemoryId) -> MemoryRecord | None:
+        if self._cache is not None:
+            cached = self._cache.get(memory_id.value)  # read-through
+            if cached is not None:
+                return self._serializer.from_document(cached)
         doc = await self._store.get(self._collection, memory_id.value)
-        return self._serializer.from_document(doc) if doc is not None else None
+        if doc is None:
+            return None
+        if self._cache is not None:
+            self._cache.put(memory_id.value, doc)
+        return self._serializer.from_document(doc)
 
     async def update(self, record: MemoryRecord) -> None:
-        await self._store.upsert(
-            self._collection, record.id.value, self._serializer.to_document(record)
-        )
+        doc = self._serializer.to_document(record)
+        await self._store.upsert(self._collection, record.id.value, doc)
+        if self._cache is not None:
+            self._cache.put(record.id.value, doc)  # write-through
 
     async def remove(self, memory_id: MemoryId) -> None:
         await self._store.delete(self._collection, memory_id.value)
+        if self._cache is not None:
+            self._cache.invalidate(memory_id.value)
 
     async def query(self, filter: MemoryFilter) -> Sequence[MemoryRecord]:
         """Fetch records matching `filter`. Store-level equality does the coarse cut
@@ -72,6 +87,8 @@ class MemoryRepository:
         if filter.states and record.state not in filter.states:
             return False
         if filter.type is not None and record.metadata.type is not filter.type:
+            return False
+        if filter.agent_id is not None and record.metadata.agent_id != filter.agent_id:
             return False
         if filter.scope is not None and not _scope_matches(record.scope, filter.scope):
             return False
