@@ -338,9 +338,11 @@ def _imports(pkg: str) -> set[str]:
 
 
 def test_reasoning_dependency_rules():
-    # reasoning depends only on core (+ its own package); never a sibling runtime, the bus
-    # impl, the prompt/context/memory/knowledge packages, api, gateway, or replay. (Tenancy —
-    # and thus the `tenant` dep — is M5.5B-2.)
+    # reasoning depends only on the foundation (core + tenant, the same isolation seam
+    # Memory/Knowledge/Context/Prompt use) plus its own package; never a sibling runtime, the
+    # bus impl, the prompt/context/memory/knowledge packages, api, gateway, or replay. (M5.5B-2
+    # tenancy added the `tenant` foundation dep — a leaf package, not a runtime, so no cycle;
+    # DL-0036.)
     forbidden = {"runtime", "api", "gateway", "replay", "events", "memory", "knowledge",
-                 "context", "prompt", "voicebot", "observability", "tenant"}
+                 "context", "prompt", "voicebot", "observability"}
     assert not (_imports("reasoning") & forbidden), _imports("reasoning")

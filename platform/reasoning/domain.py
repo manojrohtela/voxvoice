@@ -154,6 +154,45 @@ class CancellationRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolRecord:
+    """One tool decision in the tool loop (coordination only — Reasoning never executes the
+    tool; the injected `ToolPort` does). M5.5B-2."""
+
+    call_id: str
+    name: str
+    decision: str  # requested | approved | rejected | invoked | completed | failed | timed_out
+    ok: bool = True
+    detail: str = ""
+    at: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class TraceEvent:
+    """One ordered orchestration event in the reasoning execution trace (metadata only — never
+    changes runtime behaviour)."""
+
+    # stage: provider_selection | streaming | chunk | tool_decision | retry | cancellation | ...
+    stage: str
+    detail: str = ""
+    seq: int = 0
+    at: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningExecutionTrace:
+    """The ordered orchestration trace preserved on the lineage (provider selection → streaming
+    → chunk flow → tool decisions → retries → cancellation → completion). Metadata only."""
+
+    events: tuple[TraceEvent, ...] = ()
+
+    def with_event(
+        self, stage: str, *, detail: str = "", at: float = 0.0
+    ) -> ReasoningExecutionTrace:
+        ev = TraceEvent(stage=stage, detail=detail, seq=len(self.events), at=at)
+        return replace(self, events=(*self.events, ev))
+
+
+@dataclass(frozen=True, slots=True)
 class ResponseMetadata:
     """Provider/model/completion detail containers (opaque, provider-supplied later)."""
 
@@ -165,7 +204,8 @@ class ResponseMetadata:
 @dataclass(frozen=True, slots=True)
 class ReasoningLineage:
     """The reasoning history preserved on every response — so no downstream runtime loses it.
-    Retry/tool histories are populated by the M5.5B-2 engines; empty in the core."""
+    Retry/tool/cancellation histories + the execution trace are populated by the M5.5B-2
+    engines; empty in the core (all additive, default-empty)."""
 
     prompt_hash: str = ""
     prompt_fingerprint: str = ""
@@ -177,6 +217,10 @@ class ReasoningLineage:
     streaming: StreamingMetadata = field(default_factory=StreamingMetadata)
     transformation: str = "inference"
     response_hash: str = ""
+    # ── M5.5B-2 additive completions ──────────────────────────────────────────
+    cancellation_history: tuple[CancellationRecord, ...] = ()
+    execution_trace: ReasoningExecutionTrace = field(default_factory=ReasoningExecutionTrace)
+    response_version: str = "1"
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,12 +30,14 @@ from core.module import BusConsumer
 from core.ports.reasoning import Decision, DecisionKind, ReasoningPort, ReasoningRequest
 
 from ._run import run_coro_sync
+from .cancellation import CancellationManager, CancelReason
 from .config import ReasoningConfiguration
 from .domain import (
     ChunkKind,
     InferenceRequest,
     InferenceResponse,
     InferenceState,
+    ReasoningExecutionTrace,
     ReasoningScope,
     ReasoningStatistics,
     ResponsePackage,
@@ -44,10 +46,19 @@ from .engine import InferenceEngine
 from .events import ReasoningPhase
 from .ids import request_hash_for
 from .lifecycle import InferenceTrigger, advance
-from .observability import Metric
+from .observability import Metric, PipelineStatistics
 from .repositories import ReasoningRepository
+from .retry import RetryController
 from .serializer import ReasoningSerializer
 from .session import ReasoningSessionManager
+from .streaming import StreamingController
+from .tenancy import ReasoningTenancy
+from .tools import ToolDecisionCoordinator
+
+try:  # tenant is a foundation package (added at M5.5B-2 for tenancy); optional at import
+    from tenant import TenantContext
+except Exception:  # pragma: no cover
+    TenantContext = Any  # type: ignore[assignment,misc]
 
 
 class ReasoningRuntime(BusConsumer, ReasoningPort):
@@ -59,6 +70,11 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
         engine: InferenceEngine,
         sessions: ReasoningSessionManager,
         serializer: ReasoningSerializer | None = None,
+        streaming: StreamingController | None = None,
+        retry: RetryController | None = None,
+        cancellation: CancellationManager | None = None,
+        tools: ToolDecisionCoordinator | None = None,
+        tenancy: ReasoningTenancy | None = None,
         id_factory: Callable[[], str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -75,6 +91,12 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
         self._engine = engine
         self._sessions = sessions
         self._serializer = serializer or ReasoningSerializer()
+        # ── M5.5B-2 intelligence (opt-in; None → the core path is unchanged) ────
+        self._streaming = streaming
+        self._retry = retry
+        self._cancellation = cancellation
+        self._tools = tools
+        self._tenancy = tenancy
 
     # ── ReasoningPort (frozen) — stream decisions for a minimal request ───────
     def run(self, request: ReasoningRequest) -> Iterator[Decision]:
@@ -99,6 +121,12 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
     def infer(self, request: InferenceRequest) -> ResponsePackage:
         return run_coro_sync(self.ainfer(request)).package
 
+    def infer_scoped(
+        self, request: InferenceRequest, tenant: TenantContext | None
+    ) -> InferenceResponse:
+        """Tenant-aware infer (isolation enforced before provider selection)."""
+        return run_coro_sync(self.ainfer(request, tenant=tenant))
+
     def get(self, response_id: str) -> ResponsePackage | None:
         return run_coro_sync(self._repo.get_response(response_id))
 
@@ -109,17 +137,35 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
         return run_coro_sync(self._repo.responses_for_session(session_id))
 
     # ── async core: infer ─────────────────────────────────────────────────────
-    async def ainfer(self, request: InferenceRequest) -> InferenceResponse:
+    async def ainfer(
+        self, request: InferenceRequest, *, tenant: TenantContext | None = None
+    ) -> InferenceResponse:
         now = self._clock()
         request = self._resolve(request)
         scope = request.scope
+
+        # 0. isolation FIRST — before provider selection (M5.5B-2; guarded)
+        if self._tenancy is not None:
+            scope = self._tenancy.guard(scope, tenant, provider=request.provider).scope
+            request = replace(request, scope=scope)
+
         seq = len(await self._repo.responses_for_session(request.session_id))
         expires_at = (now + self._config.package_ttl_s) if self._config.package_ttl_s else None
 
+        # 0b. cancellation short-circuit — never even select a provider (M5.5B-2)
+        if self._cancellation is not None and self._cancellation.is_cancelled(
+            request.cancellation_token, session_id=request.session_id
+        ):
+            return await self._cancel_before_start(request, scope, now)
+
+        trace = ReasoningExecutionTrace() if self._is_intelligent else None
         with self.meter.timer(Metric.INFER_LATENCY):
             self._emit_lite(ReasoningPhase.REQUESTED, request)
             try:
-                package = await self._engine.infer(
+                if trace is not None:
+                    trace = trace.with_event("provider_selection", detail=request.provider, at=now)
+                    self.meter.incr(Metric.PROVIDER_SELECTED, 1)
+                package = await self._run_engine(
                     request, session_id=request.session_id, scope=scope, now=now,
                     seq=seq, expires_at=expires_at,
                 )
@@ -143,8 +189,21 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
                 package = advance(package, InferenceTrigger.STREAM, clock=self._clock)
                 self.meter.incr(Metric.STREAMING, 1)
                 self._emit(package, ReasoningPhase.STREAMING)
+                # backpressure orchestration (M5.5B-2; guarded, deterministic)
+                if self._streaming is not None:
+                    session = self._streaming.run(package.chunks)
+                    if session.backpressure_events:
+                        self.meter.incr(Metric.BACKPRESSURE, session.backpressure_events)
+                    if session.timed_out:
+                        self.meter.incr(Metric.STREAM_TIMEOUT, 1)
+                    if trace is not None:
+                        trace = trace.with_event("streaming",
+                                                 detail=f"chunks={session.metadata.chunk_count}",
+                                                 at=now)
                 for chunk in package.chunks:
                     self.meter.incr(Metric.CHUNKS, 1)
+                    if trace is not None:
+                        trace = trace.with_event("chunk", detail=str(chunk.index), at=now)
                     self._publish(
                         EventType.MODEL_TOKEN,
                         {"phase": ReasoningPhase.CHUNK.value, "id": package.id,
@@ -155,6 +214,22 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
             else:
                 # single-shot: STARTED → COMPLETED
                 package = advance(package, InferenceTrigger.COMPLETE, clock=self._clock)
+
+            # tool coordination (M5.5B-2; only if a coordinator + tool-call chunks present)
+            if self._tools is not None:
+                calls = self._tools.parse_calls(package.chunks)
+                if calls:
+                    coordination = await self._tools.coordinate(calls, now=now)
+                    self.meter.incr(Metric.TOOL_CALLS, len(calls))
+                    self.meter.incr(Metric.TOOL_REJECTED, coordination.rejected)
+                    package = self._record_tools(package, coordination)
+                    if trace is not None:
+                        trace = trace.with_event("tool_decision",
+                                                 detail=f"calls={len(calls)}", at=now)
+
+            if trace is not None:
+                trace = trace.with_event("completion", detail=package.response_hash, at=now)
+                package = self._attach_trace(package, trace)
 
         await self._repo.add_response(package)
         await self._sessions.record_response(request.session_id, package.id, scope=scope)
@@ -183,6 +258,29 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
                 count += 1
         return count
 
+    # ── cancellation (M5.5B-2; public signalling) ────────────────────────────
+    def cancel(self, token: str, *, reason: str = "manual", now: float | None = None) -> None:
+        """Signal cancellation for an in-flight inference token (always terminal for that
+        token). No-op if no cancellation manager is wired."""
+        if self._cancellation is None:
+            return
+        self._cancellation.cancel(token, CancelReason(reason), now=now or self._clock())
+
+    def cancel_session(self, session_id: str, *, now: float | None = None) -> None:
+        if self._cancellation is None:
+            return
+        self._cancellation.cancel_session(session_id, now=now or self._clock())
+
+    def pipeline_statistics(self, package: ResponsePackage) -> PipelineStatistics:
+        """A per-inference intelligence snapshot (tracing/replay) for a finished package."""
+        ln = package.lineage
+        return PipelineStatistics(
+            provider=package.provider, model=package.model, chunks=len(package.chunks),
+            used_tokens=package.usage.total_tokens, retries=len(ln.retry_history),
+            tool_calls=len(ln.tool_history), cancelled=package.cancellation is not None,
+            backpressure_events=0, trace_events=len(ln.execution_trace.events),
+        )
+
     # ── observability ────────────────────────────────────────────────────────
     def statistics(self) -> ReasoningStatistics:
         return ReasoningStatistics(
@@ -201,6 +299,59 @@ class ReasoningRuntime(BusConsumer, ReasoningPort):
         return False
 
     # ── internals ──────────────────────────────────────────────────────────────
+    @property
+    def _is_intelligent(self) -> bool:
+        return any((self._streaming, self._retry, self._cancellation,
+                    self._tools, self._tenancy))
+
+    async def _run_engine(self, request: InferenceRequest, **kw: Any) -> ResponsePackage:
+        """Run the engine, wrapped in the retry controller when one is injected (deterministic
+        backoff; the controller never networks). Core path (no retry) calls the engine once."""
+        if self._retry is None:
+            return await self._engine.infer(request, **kw)
+
+        async def _attempt(attempt: int) -> ResponsePackage:
+            return await self._engine.infer(request, **kw)
+
+        package, outcome = await self._retry.run(_attempt, kind="provider", now=kw.get("now", 0.0))
+        if outcome.history:
+            self.meter.incr(Metric.RETRIES, len(outcome.history))
+            package = replace(package,
+                              lineage=replace(package.lineage, retry_history=outcome.history))
+        return package
+
+    async def _cancel_before_start(
+        self, request: InferenceRequest, scope: ReasoningScope, now: float
+    ) -> InferenceResponse:
+        """A token already cancelled before the loop started → build a terminal CANCELLED
+        package deterministically (provider never selected)."""
+        seq = len(await self._repo.responses_for_session(request.session_id))
+        package = await self._engine.empty(request, session_id=request.session_id,
+                                           scope=scope, now=now, seq=seq)
+        signal = self._cancellation.signal_for(request.cancellation_token) or \
+            self._cancellation.cancel(request.cancellation_token or f"session:{request.session_id}",
+                                      CancelReason.SESSION, now=now)
+        package = self._cancellation.apply(package, signal, clock=self._clock)
+        await self._repo.add_response(package)
+        self.metrics.incr("cancelled")
+        self.meter.incr(Metric.CANCELLED, 1)
+        self.meter.incr(Metric.CANCELLATIONS, 1)
+        self._emit(package, ReasoningPhase.CANCELLED)
+        return InferenceResponse(package=package, delivered=False, reason=signal.reason.value)
+
+    def _record_tools(self, package: ResponsePackage, coordination: Any) -> ResponsePackage:
+        history = tuple({"call_id": r.call_id, "name": r.name, "decision": r.decision,
+                         "ok": str(r.ok), "detail": r.detail} for r in coordination.history)
+        decisions = tuple({"call_id": r.call_id, "name": r.name, "decision": r.decision}
+                          for r in coordination.history)
+        return replace(package, tool_decisions=decisions,
+                       lineage=replace(package.lineage, tool_history=history))
+
+    def _attach_trace(
+        self, package: ResponsePackage, trace: ReasoningExecutionTrace
+    ) -> ResponsePackage:
+        return replace(package, lineage=replace(package.lineage, execution_trace=trace))
+
     def _resolve(self, request: InferenceRequest) -> InferenceRequest:
         """Fill the request hash (deterministic) if the caller did not supply one."""
         if request.request_hash:

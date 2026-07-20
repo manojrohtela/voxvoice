@@ -16,17 +16,24 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from core.errors import ConfigError
+from core.ports.tool import ToolPort
 from core.providers.stores import DocumentStore, MetadataStore
 
 from .assembler import ResponseAssembler
+from .cancellation import CancellationManager
 from .config import ReasoningConfiguration, StoreConfig
 from .engine import InferenceEngine, ProviderRegistry
+from .policies import ReasoningPolicyEngine
 from .ports import ModelProvider
 from .repositories import ReasoningRepository
+from .retry import RetryController
 from .runtime import ReasoningRuntime
 from .serializer import ReasoningSerializer
 from .session import ReasoningSessionManager
 from .stores import EchoProvider, InMemoryDocumentStore, InMemoryMetadataStore, ReasoningStore
+from .streaming import StreamingController
+from .tenancy import ReasoningTenancy
+from .tools import ToolDecisionCoordinator
 
 _LOCAL = frozenset({"in_memory", "local"})
 
@@ -37,6 +44,8 @@ class ReasoningFactory:
         config: ReasoningConfiguration,
         *,
         providers: Sequence[ModelProvider] = (),
+        tool_port: ToolPort | None = None,
+        intelligence: bool = False,
         id_factory: Callable[[], str] | None = None,
         clock: Callable[[], float] | None = None,
         **kwargs: Any,
@@ -58,9 +67,27 @@ class ReasoningFactory:
             registry.register(p)
 
         engine = InferenceEngine(registry=registry, assembler=ResponseAssembler())
+
+        # ── intelligence engines (wired only when enabled) ────────────────────
+        streaming = retry = cancellation = tenancy = tools = None
+        if intelligence:
+            policy_engine = ReasoningPolicyEngine(config.policies)
+            streaming = StreamingController(policy_engine)
+            retry = RetryController(policy_engine)
+            cancellation = CancellationManager()
+            tenancy = ReasoningTenancy(
+                allowed_providers=config.policies.provider.allowed_providers, clock=the_clock
+            )
+            if tool_port is not None:
+                tools = ToolDecisionCoordinator(tool_port, policy_engine=policy_engine)
+        elif tool_port is not None:
+            tools = ToolDecisionCoordinator(tool_port)
+
         return ReasoningRuntime(
             config=config, repository=repository, engine=engine, sessions=sessions,
-            serializer=serializer, id_factory=id_factory, clock=the_clock, **kwargs,
+            serializer=serializer, streaming=streaming, retry=retry,
+            cancellation=cancellation, tools=tools, tenancy=tenancy,
+            id_factory=id_factory, clock=the_clock, **kwargs,
         )
 
     @staticmethod

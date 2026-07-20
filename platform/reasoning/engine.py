@@ -56,6 +56,22 @@ class InferenceEngine:
     def providers(self) -> tuple[str, ...]:
         return self._registry.names()
 
+    async def empty(
+        self,
+        request: InferenceRequest,
+        *,
+        session_id: str,
+        scope: ReasoningScope,
+        now: float,
+        seq: int,
+    ) -> ResponsePackage:
+        """Assemble an empty package **without selecting a provider** — used by the
+        CancellationManager for a token cancelled before the loop started (M5.5B-2)."""
+        return self._assembler.assemble(
+            request, [], session_id=session_id, scope=scope, now=now, seq=seq,
+            streamed=False, expires_at=None, finish_reason=FinishReason.CANCELLED,
+        )
+
     async def infer(
         self,
         request: InferenceRequest,

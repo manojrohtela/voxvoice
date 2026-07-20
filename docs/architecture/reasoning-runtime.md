@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns inference orchestration only** · **Status:** 🟢 Core implemented (M5.5B-1); intelligence M5.5B-2 |
-| **Milestone** | M5.5A — Design (approved) · M5.5B-1 — Core (2026-07-20, additive) · M5.5B-2 — Intelligence (planned) |
+| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns inference orchestration only** · **Status:** 🔒 Closed (additive extensions + bug fixes only) — core M5.5B-1 + intelligence M5.5B-2 |
+| **Milestone** | M5.5A — Design (approved) · M5.5B-1 — Core (2026-07-20, additive) · M5.5B-2 — Intelligence + Closure (2026-07-20, additive) |
 | **Basis** | The frozen M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) (`core.ports.ReasoningPort`, `core.ports.ToolPort`); the closed [Memory](memory-runtime.md)/[Knowledge](knowledge-runtime.md)/[Context](context-runtime.md)/[Prompt](prompt-runtime.md) Runtime patterns |
 | **Governs** | `platform/reasoning/` |
 
@@ -400,3 +400,64 @@ change (Memory/Knowledge/Context/Prompt precedent).
 real `ModelProvider` adapters (Anthropic/OpenAI/Gemini/local) · extension interfaces
 (`ResponseConsumer`/`CircuitBreaker`/`ResponseOptimizer`/`ReasoningOptimizer`/
 `MultiModalResponse`) · observability intelligence.
+
+---
+
+## What landed in M5.5B-2 (Intelligence & Closure — 2026-07-20, additive)
+
+The intelligence layer that completes the runtime. **Fully additive**: eight new modules +
+guarded hooks in `runtime`/`factory`; the core path is byte-for-byte unchanged when
+intelligence is off (asserted by `test_core_path_unchanged_when_intelligence_off`). The only
+non-`reasoning/` change is dropping `tenant` from the core dependency-rules forbidden set
+(now a leaf foundation dep — DL-0036). New external deps: **`core` + `tenant` only** (acyclic;
+AST-verified).
+
+### Components
+1. **`StreamingController` (`streaming.py`).** Deterministic chunk-lifecycle orchestration:
+   streaming session, partial→final responses, backpressure (a buffered-chunk cap → verdict,
+   never a blocking sleep), deterministic clock-based timeout hooks, `StreamingMetadata`.
+   **Orchestration only — never networking** (chunks arrive from the injected `ModelProvider`).
+2. **`ToolDecisionCoordinator` (`tools.py`).** Coordinates the tool loop over the **injected
+   `core.ports.ToolPort`** — parses `TOOL_CALL` chunks, runs the approval workflow (policy
+   verdict), invokes via the port, collects `ToolResult`, records tool history + lineage.
+   **Reasoning never executes a tool.** Retry/timeout are hooks.
+3. **`RetryController` (`retry.py`).** Deterministic retry: bounded budget, deterministic
+   exponential backoff (shared `core.policies.RetryPolicy` — no jitter, **no sleeping, no
+   networking**), recorded `RetryRecord` history, circuit-breaker hook, statistics.
+4. **`CancellationManager` (`cancellation.py`).** Manual / timeout / provider / tool /
+   streaming / session cancel → **always terminal** (`CANCELLED` via the shared FSM), with a
+   `CancellationRecord` + cancellation lineage + statistics. Signals; never networks.
+5. **`ReasoningScheduler` (`scheduler.py`).** Deterministic priority queue (descending
+   priority, ascending arrival — stable ties) with concurrency + deferred-execution hooks.
+   **Ordering only — no threading, no event loop, no timer.**
+6. **`ReasoningPolicyEngine` (`policies.py`).** Seven policies (Reasoning/Retry/Streaming/
+   Tool/Provider/Cancellation/Safety) → **verdicts only** (no I/O, no side effects).
+7. **`ReasoningTenancy` (`tenancy.py`).** Org/session isolation + provider allow-list +
+   quota/audit hooks (permissive defaults), enforced **before provider selection**. Wires the
+   M5.0 `tenant` seams — the same isolation seam Memory/Knowledge/Context/Prompt use.
+8. **Extension interfaces (`extensions.py`).** Interfaces only: `AsyncModelProvider` (future
+   network adapters), `ReasoningConsumer`/`AgentBridge`/`WorkflowBridge` (downstream delivery),
+   `ToolProvider` (MCP/A2A), `ResponseOptimizer`/`ReasoningOptimizer`, `MultiModalResponder`.
+   No implementations, no runtime dependency.
+
+### Reasoning lineage (complete) + execution trace
+`ReasoningLineage` now carries every required element: prompt hash + fingerprint, inference
+request hash, provider, model, retry history, tool history, **streaming history**,
+**cancellation history**, **`ReasoningExecutionTrace`** (ordered provider-selection → streaming
+→ chunk-flow → tool-decision → retry → cancellation → completion events, metadata only —
+never changes behaviour), transformation, response hash, **response version**. The serializer
+round-trips all of it (replay/gateway safe).
+
+### Observability
+`PipelineStatistics` per-inference snapshot + new meters: streaming backpressure/timeout,
+retry attempts/exhausted/circuit-trips, tool calls/rejected, cancellations, scheduled,
+provider-selected.
+
+### Closure
+The Reasoning Runtime is **architecturally closed** except for additive extensions and bug
+fixes. It owns **only** inference orchestration, streaming orchestration, retry orchestration,
+tool coordination, cancellation orchestration, response assembly, and temporary storage.
+Memory, Knowledge, Context, Prompt, Providers, Networking, Transport, tool **execution**,
+Workflow, Agents, and durable persistence remain outside its ownership. No identified future
+runtime requires a Reasoning redesign — Agent/Workflow/MCP/A2A/provider-adapters all land as
+`extensions.py` implementations behind the existing engine/controllers/ports.

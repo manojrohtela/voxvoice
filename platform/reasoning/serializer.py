@@ -18,6 +18,7 @@ from .domain import (
     InferenceMessage,
     InferenceRequest,
     InferenceState,
+    ReasoningExecutionTrace,
     ReasoningLineage,
     ReasoningMetadata,
     ReasoningScope,
@@ -28,7 +29,21 @@ from .domain import (
     RetryRecord,
     StreamingMetadata,
     TokenUsage,
+    TraceEvent,
 )
+
+
+def _trace_to_dict(t: ReasoningExecutionTrace) -> list[dict[str, Any]]:
+    return [{"stage": e.stage, "detail": e.detail, "seq": e.seq, "at": e.at} for e in t.events]
+
+
+def _trace_from_dict(items: Any) -> ReasoningExecutionTrace:
+    events = tuple(
+        TraceEvent(stage=e["stage"], detail=e.get("detail", ""),
+                   seq=e.get("seq", 0), at=e.get("at", 0.0))
+        for e in (items or ())
+    )
+    return ReasoningExecutionTrace(events=events)
 
 
 def _scope_to_dict(s: ReasoningScope) -> dict[str, Any]:
@@ -145,6 +160,10 @@ class ReasoningSerializer:
                 "tool_history": [dict(x) for x in ln.tool_history],
                 "streaming": _stream_to_dict(ln.streaming),
                 "transformation": ln.transformation, "response_hash": ln.response_hash,
+                "cancellation_history": [{"reason": r.reason, "at": r.at}
+                                         for r in ln.cancellation_history],
+                "execution_trace": _trace_to_dict(ln.execution_trace),
+                "response_version": ln.response_version,
             },
             "quality": dict(pkg.quality),
             "provider": pkg.provider, "model": pkg.model,
@@ -191,7 +210,12 @@ class ReasoningSerializer:
                 tool_history=tuple(dict(x) for x in ln.get("tool_history", ())),
                 streaming=_stream_from_dict(ln.get("streaming", {})),
                 transformation=ln.get("transformation", "inference"),
-                response_hash=ln.get("response_hash", "")),
+                response_hash=ln.get("response_hash", ""),
+                cancellation_history=tuple(
+                    CancellationRecord(reason=r["reason"], at=r.get("at", 0.0))
+                    for r in ln.get("cancellation_history", ())),
+                execution_trace=_trace_from_dict(ln.get("execution_trace")),
+                response_version=ln.get("response_version", "1")),
             quality=dict(d.get("quality", {})),
             provider=d.get("provider", "echo"), model=d.get("model", "default"),
             request_hash=d.get("request_hash", ""), response_hash=d.get("response_hash", ""),
