@@ -17,6 +17,7 @@ a TTL sweep. Budget/validation/policy/tenancy intelligence + provider adapters a
 non-goals (M5.4B-2).
 """
 
+from .budget import BudgetResult, BudgetStats, PromptBudgetManager
 from .builder import PromptBuilder
 from .config import (
     CollectionsConfig,
@@ -39,11 +40,34 @@ from .domain import (
     SectionKind,
 )
 from .events import PromptPhase
+from .extensions import (
+    MultiModalRenderer,
+    PromptAnalyzer,
+    PromptCompressor,
+    PromptConsumer,
+    PromptEnhancer,
+    PromptOptimizer,
+    PromptRewriter,
+)
 from .factory import PromptFactory
 from .formatter import PromptFormatter
 from .ids import content_hash, package_id_for, prompt_hash_for, section_id_for, template_version_for
 from .lifecycle import PACKAGE_LIFECYCLE, PackageTrigger, advance_package
-from .observability import Metric
+from .observability import Metric, PipelineStatistics
+from .policies import (
+    CITED_KINDS,
+    OverflowStrategy,
+    PromptBudgetPolicy,
+    PromptCitationPolicy,
+    PromptPolicies,
+    PromptPolicyEngine,
+    PromptProviderPolicy,
+    PromptRenderingPolicy,
+    PromptSafetyPolicy,
+    PromptTemplatePolicy,
+    PromptValidationPolicy,
+    Verdict,
+)
 from .ports import ModelProfile, ProviderProfile, Tokenizer
 from .renderer import PromptRenderer
 from .repositories import PromptRepository
@@ -52,14 +76,24 @@ from .runtime import PromptRuntime
 from .sections import SectionGenerator, section_order
 from .serializer import PromptSerializer
 from .stores import (
+    PROVIDER_PROFILES,
+    AnthropicProviderProfile,
     DefaultModelProfile,
+    EstimatedTokenizer,
+    GeminiProviderProfile,
+    GenericProviderProfile,
     InMemoryDocumentStore,
     InMemoryMetadataStore,
+    LocalModelProviderProfile,
     NeutralProviderProfile,
+    OpenAIProviderProfile,
     PromptStore,
     WordTokenizer,
+    model_profiles,
 )
 from .templates import Template, TemplateLevel, TemplateRegistry, TemplateResolver
+from .tenancy import PromptAccessDenied, PromptTenancy, ResolvedScope
+from .validation import PromptValidationEngine, ValidationReport
 
 __all__ = [
     # runtime + composition
@@ -115,7 +149,47 @@ __all__ = [
     "ModelProfile",
     # observability + events
     "Metric",
+    "PipelineStatistics",
     "PromptPhase",
+    # ── intelligence (M5.4B-2) ────────────────────────────────────────────────
+    "PromptBudgetManager",
+    "BudgetResult",
+    "BudgetStats",
+    "PromptValidationEngine",
+    "ValidationReport",
+    "PromptTenancy",
+    "PromptAccessDenied",
+    "ResolvedScope",
+    # policies
+    "PromptPolicyEngine",
+    "PromptPolicies",
+    "PromptBudgetPolicy",
+    "PromptRenderingPolicy",
+    "PromptProviderPolicy",
+    "PromptValidationPolicy",
+    "PromptCitationPolicy",
+    "PromptSafetyPolicy",
+    "PromptTemplatePolicy",
+    "OverflowStrategy",
+    "Verdict",
+    "CITED_KINDS",
+    # provider + model profiles + tokenizers
+    "PROVIDER_PROFILES",
+    "GenericProviderProfile",
+    "AnthropicProviderProfile",
+    "OpenAIProviderProfile",
+    "GeminiProviderProfile",
+    "LocalModelProviderProfile",
+    "EstimatedTokenizer",
+    "model_profiles",
+    # extension interfaces
+    "PromptOptimizer",
+    "PromptRewriter",
+    "PromptCompressor",
+    "PromptEnhancer",
+    "PromptAnalyzer",
+    "MultiModalRenderer",
+    "PromptConsumer",
     # config
     "PromptConfiguration",
     "StoreConfig",

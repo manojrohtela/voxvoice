@@ -38,3 +38,11 @@ def prompt_hash_for(sections: object) -> str:
 def package_id_for(session_id: str, prompt_hash: str, seq: int) -> str:
     """A package id stable for a (session, prompt content, assembly ordinal)."""
     return "pp_" + content_hash(session_id, prompt_hash, seq)
+
+
+def prompt_fingerprint_for(triples: object) -> str:
+    """The **provider-independent** semantic identity of a prompt — a hash over each
+    section's (kind, role, content). Two providers rendering the same sections into
+    different message shapes share this fingerprint though their `prompt_hash` differs.
+    Metadata only; no semantic AI. `triples` is an iterable of (kind, role, content)."""
+    return "pf_" + content_hash(*[f"{k}|{r}|{c}" for (k, r, c) in triples])

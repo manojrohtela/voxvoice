@@ -389,9 +389,10 @@ def _imports(pkg: str) -> set[str]:
 
 
 def test_prompt_dependency_rules():
-    # prompt depends only on core (+ its own package); never a sibling runtime, the bus
-    # impl, the context/memory/knowledge packages, api, gateway, or replay. (Tenancy — and
-    # thus the `tenant` dep — is M5.4B-2.)
+    # prompt depends only on the foundation (core + tenant, the same isolation seam
+    # Memory/Knowledge/Context use) plus its own package; never a sibling runtime, the bus
+    # impl, the context/memory/knowledge packages, api, gateway, or replay. (M5.4B-2 tenancy
+    # added the `tenant` foundation dep — a leaf package, not a runtime, so no cycle; DL-0032.)
     forbidden = {"runtime", "api", "gateway", "replay", "events", "memory", "knowledge",
-                 "context", "voicebot", "observability", "tenant"}
+                 "context", "voicebot", "observability"}
     assert not (_imports("prompt") & forbidden), _imports("prompt")

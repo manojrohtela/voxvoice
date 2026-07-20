@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns prompt construction only** · **Status:** 🟢 Core implemented (M5.4B-1); intelligence M5.4B-2 |
-| **Milestone** | M5.4A — Design (approved) · M5.4B-1 — Core (2026-07-20, additive) · M5.4B-2 — Intelligence (planned) |
+| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns prompt construction only** · **Status:** ✅ Complete — **architecturally closed** (M5.4B-2), additive extensions + bug fixes only |
+| **Milestone** | M5.4A — Design (approved) · M5.4B-1 — Core (2026-07-20) · M5.4B-2 — Intelligence (2026-07-20, additive) |
 | **Basis** | The frozen M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) (`core.ports.PromptPort`); the closed [Memory](memory-runtime.md) / [Knowledge](knowledge-runtime.md) / [Context](context-runtime.md) Runtime patterns |
 | **Governs** | `platform/prompt/` |
 
@@ -385,3 +385,83 @@ registry changes ride `PROMPT_TEMPLATE_UPDATED` — no new `EventType`, no bus c
 `ModelProfile` adapters (Anthropic/OpenAI/Gemini/local) + tokenizers · `TemplateStore`/
 `TemplateProvider`/`PromptOptimizer`/`MultiModalRenderer`/`PromptConsumer` extension
 interfaces · observability intelligence · streaming.
+
+---
+
+## What landed in M5.4B-2 (intelligence — all additive)
+The intelligence layer **completes and closes** the Prompt Runtime. Nothing outside
+`platform/prompt/` (+ one new test file) changed; `core`, `runtime`, `events`, `gateway`,
+`replay`, `memory`, `knowledge`, and `context` are untouched. `prompt/` now depends on
+`core` **and `tenant`** (the same leaf-foundation isolation seam Memory/Knowledge/Context
+use — see [DL-0032]; AST-verified). 484 → **508 tests** (24 new); ruff-clean. Intelligence
+is wired by `PromptFactory.create(..., intelligence=True)`; the naive M5.4B-1 core path is
+unchanged (`intelligence=False`, the default).
+
+1. **`PromptBudgetManager`** — deterministic allocation only: global/prompt budget capped at
+   the model window − completion reserve, **reserved** instructions (system/developer/user)
+   always kept, optional **per-section** fraction caps (enforced only when `adaptive` is off;
+   **adaptive** lets unused capacity flow), **overflow** strategy (`drop_lowest`/
+   `truncate_lowest`/`reject`), and deterministic **truncation** of the lowest-priority
+   context section. Model-aware budgeting is the injected `ModelProfile`; the logic is
+   unchanged. **Never owns inference.**
+2. **Provider profiles** (`stores/provider_profiles.py`) — Anthropic / OpenAI / Gemini /
+   Local / Generic `ProviderProfile` implementations defining **only** role mapping +
+   formatting + a `capabilities` descriptor. **No HTTP, no SDK, no provider client, no LLM.**
+   A `PROVIDER_PROFILES` registry names them; the runtime selects per `request.provider`.
+3. **Model profiles** — `DefaultModelProfile` gains `capabilities` + `metadata` descriptors
+   (additive, not on the frozen ABC); a `model_profiles()` registry (default/small/large)
+   with window/completion-reserve/tokenizer.
+4. **Tokenizer abstraction** — `WordTokenizer` (word-dominant) + `EstimatedTokenizer`
+   (char-ratio); vendor-neutral. Exact tokenizers are future additive adapters.
+5. **`PromptValidationEngine`** — **verdicts only** (template / placeholder / prompt / budget
+   / citation / provider / safety / role); the runtime performs the side effect (reject).
+6. **`PromptPolicyEngine` + `PromptPolicies`** — the seven policy value objects (Budget,
+   Rendering, Provider, Validation, Citation, Safety, Template) in one validated bundle;
+   the engine produces verdicts and does no I/O.
+7. **Prompt lineage** — every `PromptSection` now records the `provider`/`model` it was built
+   for (added to `PromptLineage`) alongside template + context sources + rendering/section
+   version + transformation + hash. The package carries `prompt_hash` + `prompt_fingerprint`
+   + `prompt_version` + provider/model. No downstream runtime loses prompt history.
+8. **Prompt fingerprint** — `prompt_fingerprint_for` is a **provider-independent** semantic
+   hash over each section's (kind, role, content). Different providers render the same
+   sections into different message shapes → **different `prompt_hash`** but **identical
+   `prompt_fingerprint`** (asserted). Metadata only; no semantic AI.
+9. **`PromptTenancy`** — org/private/shared template isolation **before template resolution**
+   (isolation-first — asserted), a **provider allow-list**, and the `tenant` hooks
+   (permissive defaults). Exposed via `PromptRuntime.build_scoped(request, context, tenant)`.
+10. **Observability** — per-build `PipelineStatistics` + budget metrics; standard `prompt.*`
+    envelopes unchanged (Replay/Gateway free).
+11. **Extension interfaces (`extensions.py`) — interfaces only.** `PromptOptimizer` ·
+    `PromptRewriter` · `PromptCompressor` · `PromptEnhancer` · `PromptAnalyzer` ·
+    `MultiModalRenderer` · `PromptConsumer` (+ re-exported Tokenizer/ProviderProfile/
+    ModelProfile). No implementations, no LLM. **Reasoning / Agent / Tool / Workflow / MCP /
+    A2A / Optimizer / Multi-modal** land as `PromptConsumer`/`PromptOptimizer`/
+    `MultiModalRenderer` implementations with no builder/renderer/budget/template change.
+
+### Pipeline wiring (design §5 realized)
+The runtime resolves the `ProviderProfile`/`ModelProfile` per `request.provider`/`model`,
+runs **tenancy (before template resolution)** + the builder (section-gen → format → stamp
+provider/model lineage → **budget via the manager** → render) + the **validation gate
+(before delivery)**, driving the FSM REQUESTED→BUILT→VALIDATED→RENDERED→DELIVERED or
+→REJECTED. With no engines injected the builder falls back to the naive M5.4B-1 path — core
+behaviour is byte-for-byte preserved.
+
+## Closure (M5.4B-2)
+The Prompt Runtime is **architecturally closed** except for additive extensions and bug
+fixes. Ownership (prompt construction only), dependency direction (`prompt → core, tenant`
+only — acyclic; the section generator consumes the frozen `AssembledContext`, never the
+`context` package), the repository boundary (temporary-only, sole store-toucher), provider
+neutrality (rendering/tokenizing/model-window are ports; no SDK/HTTP/LLM), determinism, and
+replay/gateway compatibility are all verified by test. **Prompt Runtime never owns Memory,
+Knowledge, Context Assembly, Reasoning, Inference, LLMs, Tools, Workflow, or Agents** — it
+constructs the prompt and hands it off. No future runtime requires a redesign of Prompt —
+they consume the `PromptPackage` via `PromptConsumer` and observe `prompt.*` events.
+
+## Deferred (all additive — no runtime shape change)
+Real provider network clients (Anthropic/OpenAI/Gemini SDKs) + model-exact tokenizers
+(tiktoken/HF) behind the `ProviderProfile`/`ModelProfile`/`Tokenizer` ports · prompt
+optimizer/rewriter/compressor/enhancer/analyzer implementations · multi-modal rendering ·
+durable `TemplateStore`/dynamic `TemplateProvider` · streaming · the downstream Reasoning/
+Agent/Tool/Workflow/MCP/A2A runtimes.
+
+[DL-0032]: ../../.voxvoice/DECISION_LOG.md

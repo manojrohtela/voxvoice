@@ -63,7 +63,8 @@ class PromptScope:
 class PromptLineage:
     """Where a rendered section came from — preserved so no downstream runtime loses prompt
     history. `context_sources` are the `AssembledContext` item ids the section was built
-    from (with their provenance carried in `context_provenance`)."""
+    from (with their provenance carried in `context_provenance`). `provider`/`model` record
+    the profiles the section was constructed for (M5.4B-2)."""
 
     template_id: str | None = None
     template_version: str | None = None
@@ -73,6 +74,11 @@ class PromptLineage:
     section_version: str = "1"
     transformation: str = "render"  # what formatting/rendering was applied
     hash: str = ""
+    provider: str | None = None
+    model: str | None = None
+
+    def with_provider_model(self, provider: str, model: str) -> PromptLineage:
+        return replace(self, provider=provider, model=model)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +152,7 @@ class PromptPackage:
     budget: BudgetUsage = field(default_factory=BudgetUsage)
     metadata: PromptMetadata = field(default_factory=PromptMetadata)
     prompt_hash: str = ""
+    prompt_fingerprint: str = ""  # provider-independent semantic identity (M5.4B-2)
     prompt_version: str = "1"
     truncated: bool = False
     created_at: float = 0.0

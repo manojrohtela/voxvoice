@@ -32,16 +32,25 @@ from core.ports.context import AssembledContext
 from core.ports.prompt import PromptFragment, PromptPort
 
 from ._run import run_coro_sync
+from .budget import PromptBudgetManager
 from .builder import PromptBuilder
 from .config import PromptConfiguration
 from .domain import PackageState, PromptPackage, PromptResponse, PromptScope, PromptStatistics
 from .events import PromptPhase
 from .lifecycle import PackageTrigger, advance_package
 from .observability import Metric
+from .ports import ModelProfile, ProviderProfile
 from .repositories import PromptRepository
 from .request import PromptRequest
 from .serializer import PromptSerializer
 from .templates import TemplateLevel, TemplateRegistry, TemplateResolver
+from .tenancy import PromptTenancy
+from .validation import PromptValidationEngine
+
+try:  # tenant is a foundation package (added at M5.4B-2 for tenancy); optional at import
+    from tenant import TenantContext
+except Exception:  # pragma: no cover
+    TenantContext = Any  # type: ignore[assignment,misc]
 
 
 class PromptRuntime(BusConsumer, PromptPort):
@@ -55,6 +64,11 @@ class PromptRuntime(BusConsumer, PromptPort):
         resolver: TemplateResolver,
         serializer: PromptSerializer | None = None,
         provider: str = "neutral",
+        tenancy: PromptTenancy | None = None,
+        validation: PromptValidationEngine | None = None,
+        budget_manager: PromptBudgetManager | None = None,
+        provider_profiles: dict[str, ProviderProfile] | None = None,
+        model_profiles: dict[str, ModelProfile] | None = None,
         id_factory: Callable[[], str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -73,6 +87,11 @@ class PromptRuntime(BusConsumer, PromptPort):
         self._resolver = resolver
         self._serializer = serializer or PromptSerializer()
         self._provider = provider
+        self._tenancy = tenancy
+        self._validation = validation
+        self._budget = budget_manager
+        self._providers = provider_profiles or {}
+        self._models = model_profiles or {}
 
     # ── PromptPort (frozen) — single-template render + register ───────────────
     def render(self, template_id: str, variables: Mapping[str, Any]) -> PromptFragment:
@@ -100,6 +119,12 @@ class PromptRuntime(BusConsumer, PromptPort):
     def build(self, request: PromptRequest, context: AssembledContext) -> PromptPackage:
         return run_coro_sync(self.abuild(request, context)).package
 
+    def build_scoped(
+        self, request: PromptRequest, context: AssembledContext, tenant: TenantContext | None
+    ) -> PromptResponse:
+        """Tenant-aware build (isolation enforced before template resolution)."""
+        return run_coro_sync(self.abuild(request, context, tenant=tenant))
+
     def get(self, package_id: str) -> PromptPackage | None:
         return run_coro_sync(self._repo.get_package(package_id))
 
@@ -110,7 +135,10 @@ class PromptRuntime(BusConsumer, PromptPort):
         return run_coro_sync(self._repo.packages_for_session(session_id))
 
     # ── async core: build ─────────────────────────────────────────────────────
-    async def abuild(self, request: PromptRequest, context: AssembledContext) -> PromptResponse:
+    async def abuild(
+        self, request: PromptRequest, context: AssembledContext,
+        *, tenant: TenantContext | None = None,
+    ) -> PromptResponse:
         now = self._clock()
         scope = PromptScope(
             org_id=request.org_id,
@@ -118,15 +146,23 @@ class PromptRuntime(BusConsumer, PromptPort):
             session_id=request.session_id,
             user_id=request.user_id,
         )
+        # 0. isolation FIRST — before template resolution
+        if self._tenancy is not None:
+            scope = self._tenancy.guard(scope, tenant, provider=request.provider).scope
+
         seq = len(await self._repo.packages_for_session(request.session_id))
         expires_at = (now + self._config.package_ttl_s) if self._config.package_ttl_s else None
+        provider_profile = self._providers.get(request.provider)
+        model_profile = self._models.get(request.model)
 
         with self.meter.timer(Metric.BUILD_LATENCY):
-            # REQUESTED → BUILT (sections → format → naive budget → render)
+            # REQUESTED → BUILT (sections → format → budget → render)
             self._emit_lite(PromptPhase.REQUESTED, request)
             package = self._builder.build(
                 request, context, session_id=request.session_id, scope=scope, now=now,
                 seq=seq, budget_tokens=self._config.default_budget_tokens, expires_at=expires_at,
+                provider_profile=provider_profile, model_profile=model_profile,
+                budget_manager=self._budget,
             )
             package = advance_package(package, PackageTrigger.BUILD, clock=self._clock)
             self.metrics.incr("built")
@@ -134,7 +170,17 @@ class PromptRuntime(BusConsumer, PromptPort):
             self.meter.incr(Metric.SECTIONS, len(package.sections))
             self._emit(package, PromptPhase.BUILT)
 
-            # VALIDATED (trivial pass in the core; the ValidationEngine is M5.4B-2)
+            # VALIDATION gate (verdicts only; the runtime performs the side effect)
+            report = self._validation.validate(package) if self._validation is not None else None
+            if report is not None and not report.ok:
+                reason = "; ".join(report.reasons)
+                package = advance_package(package, PackageTrigger.REJECT, clock=self._clock)
+                await self._repo.add_package(package)
+                self.metrics.incr("rejected")
+                self.meter.incr(Metric.REJECTED, 1)
+                self._emit(package, PromptPhase.REJECTED)
+                return PromptResponse(package=package, delivered=False, reason=reason)
+
             package = advance_package(package, PackageTrigger.VALIDATE, clock=self._clock)
             self.meter.incr(Metric.VALIDATED, 1)
             self._emit(package, PromptPhase.VALIDATED)

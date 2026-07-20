@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 from core.errors import ConfigError
 
+from .policies import PromptPolicies
+
 
 @dataclass(frozen=True, slots=True)
 class StoreConfig:
@@ -44,6 +46,9 @@ class PromptConfiguration:
     metadata_store: StoreConfig = field(default_factory=StoreConfig)
     tokenizer: TokenizerConfig = field(default_factory=TokenizerConfig)
     collections: CollectionsConfig = field(default_factory=CollectionsConfig)
+    policies: PromptPolicies = field(default_factory=PromptPolicies)  # M5.4B-2 intelligence
+    default_provider: str = "generic"  # provider profile chosen when intelligence is on
+    default_model: str = "default"
     default_budget_tokens: int = 0  # 0 → use the ModelProfile window − completion reserve
     package_ttl_s: float | None = 900.0  # temporary storage TTL (15 min); None → no expiry
 
