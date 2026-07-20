@@ -1,0 +1,115 @@
+"""ContextFactory — the composition root (M5.3B-1).
+
+Assembles a complete `ContextRuntime` from a `ContextConfiguration` + the **injected
+ports** (the concrete Memory/Knowledge/Prompt runtimes the composition root supplies).
+Resolves store/tokenizer kinds to local adapters, builds the temporary repository, session
+manager, source adapters, assembler, and runtime. The *only* place adapter kinds are named;
+an unknown kind fails fast with `ConfigError`. Only local deterministic adapters ship in
+M5.3B-1.
+
+Dependency inversion: the factory takes `MemoryPort`/`KnowledgePort`/`PromptPort`
+*instances* (never the packages), so `context` imports no sibling runtime.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from core.errors import ConfigError
+from core.ports.knowledge import KnowledgePort
+from core.ports.memory import MemoryPort
+from core.ports.prompt import PromptPort
+from core.providers.stores import DocumentStore, MetadataStore
+
+from .assembly import ContextAssembler
+from .builder import ContextBuilder
+from .config import ContextConfiguration, StoreConfig, TokenizerConfig
+from .ports import ContextSource, Tokenizer
+from .repositories import ContextRepository
+from .runtime import ContextRuntime
+from .serializer import ContextSerializer
+from .session import ContextSessionManager
+from .sources import (
+    KnowledgeSource,
+    MemorySource,
+    PromptDirective,
+    PromptSource,
+    SourceSelector,
+)
+from .stores import ContextStore, InMemoryDocumentStore, InMemoryMetadataStore, WordTokenizer
+
+_LOCAL = frozenset({"in_memory", "local"})
+
+
+class ContextFactory:
+    @staticmethod
+    def create(
+        config: ContextConfiguration,
+        *,
+        memory_port: MemoryPort | None = None,
+        knowledge_port: KnowledgePort | None = None,
+        prompt_port: PromptPort | None = None,
+        prompt_directives: Sequence[PromptDirective] = (),
+        extra_sources: Sequence[ContextSource] = (),
+        id_factory: Callable[[], str] | None = None,
+        clock: Callable[[], float] | None = None,
+        **kwargs: Any,
+    ) -> ContextRuntime:
+        import time
+
+        the_clock = clock or time.time
+        serializer = ContextSerializer()
+        store = ContextStore(
+            document_store=_document_store(config.document_store),
+            metadata_store=_metadata_store(config.metadata_store),
+            tokenizer=_tokenizer(config.tokenizer),
+        )
+        repository = ContextRepository(store, serializer, collections=config.collections)
+        sessions = ContextSessionManager(repository, window=config.window, clock=the_clock)
+
+        # source adapters over the injected ports (dependency inversion) + any extras
+        sources: list[ContextSource] = []
+        if memory_port is not None:
+            sources.append(MemorySource(memory_port))
+        if knowledge_port is not None:
+            sources.append(KnowledgeSource(knowledge_port))
+        if prompt_port is not None:
+            sources.append(PromptSource(prompt_port, prompt_directives))
+        sources.extend(extra_sources)
+
+        assembler = ContextAssembler(
+            sources=sources,
+            selector=SourceSelector(),
+            builder=ContextBuilder(store.tokenizer),
+        )
+        return ContextRuntime(
+            config=config, repository=repository, assembler=assembler, sessions=sessions,
+            serializer=serializer, id_factory=id_factory, clock=the_clock, **kwargs,
+        )
+
+    @staticmethod
+    def default(
+        *, id_factory: Callable[[], str] | None = None, **kwargs: Any
+    ) -> ContextRuntime:
+        return ContextFactory.create(
+            ContextConfiguration.default(), id_factory=id_factory, **kwargs
+        )
+
+
+def _document_store(cfg: StoreConfig) -> DocumentStore:
+    if cfg.kind in _LOCAL:
+        return InMemoryDocumentStore()
+    raise ConfigError(f"unknown document store kind {cfg.kind!r}")
+
+
+def _metadata_store(cfg: StoreConfig) -> MetadataStore:
+    if cfg.kind in _LOCAL:
+        return InMemoryMetadataStore()
+    raise ConfigError(f"unknown metadata store kind {cfg.kind!r}")
+
+
+def _tokenizer(cfg: TokenizerConfig) -> Tokenizer:
+    if cfg.kind in _LOCAL or cfg.kind == "word":
+        return WordTokenizer(chars_per_token=cfg.chars_per_token)
+    raise ConfigError(f"unknown tokenizer kind {cfg.kind!r}")
