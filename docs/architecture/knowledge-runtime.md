@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns the knowledge lifecycle + retrieval** · **Status:** Core implemented (M5.2B-1) |
-| **Milestone** | M5.2A — Design (approved) · M5.2B-1 — Core (2026-07-19, additive) |
+| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns the knowledge lifecycle + retrieval** · **Status:** ✅ Complete — **architecturally closed** (M5.2B-2), additive extensions + bug fixes only |
+| **Milestone** | M5.2A — Design (approved) · M5.2B-1 — Core (2026-07-19) · M5.2B-2 — Intelligence (2026-07-20, additive) |
 | **Basis** | The approved M5.2A Knowledge Runtime Design; the M5.0 [AI Runtime Foundation](ai-runtime-foundation.md); the closed [Memory Runtime](memory-runtime.md) pattern |
 | **Governs** | `platform/knowledge/` |
 
@@ -92,8 +92,86 @@ knowledge/  ── ids · domain · lifecycle · serializer · config · index �
 `knowledge/` imports only `core` (+ its own package) — never a sibling runtime, the bus
 implementation, `memory`, `api`, `gateway`, or `replay`.
 
-## Non-goals (M5.2B-2+)
-KnowledgeQueryPlanner · KnowledgeRetrievalEngine · KnowledgeRanking · KnowledgePolicies ·
-KnowledgeCache · content-event ingestion · advanced retrieval (Graph/GraphRAG/multi-vector)
-· compression/summarization/reranking · real store/parser adapters. All additive behind
-the contracts and ports already in place.
+## What landed in M5.2B-2 (intelligence — all additive)
+The intelligence layer completes the runtime. Nothing outside `platform/knowledge/`
+(+ one new test file) changed; `core`, `runtime`, `events`, `gateway`, `replay`, and
+`memory` are untouched. `knowledge/` now depends on `core` **and `tenant`** (the same
+leaf-foundation isolation seam Memory uses — see [DL-0024]; verified by the AST test).
+367 → **397 tests** (30 new intelligence tests); new code is ruff-clean.
+
+### 10. Retrieval query + result (`query.py`, `results.py`)
+`KnowledgeRetrievalQuery` is the rich internal request (scope, profile, source/tag/type
+filters, metadata filters, version pin) built from the frozen port `KnowledgeQuery`.
+`KnowledgeResult` returns **provenance-complete** `KnowledgeHit`s — document id + version
++ chunk id, `Citation` (source uri/title/author/offsets), retrieval score, full
+`RankingBreakdown`, knowledge scope, content hash — so a consumer never re-hits a
+repository. `KnowledgeHit.to_passage()` narrows to the frozen `KnowledgePassage`.
+
+### 11. Query Planner (`planner.py`) — pure decision layer
+`KnowledgeQueryPlanner.plan()` → an immutable `RetrievalPlan` choosing
+KEYWORD / SEMANTIC / HYBRID / METADATA / VERSION. Deterministic; **never retrieves,
+never touches a repository** (asserted). The extension seam for GraphRAG/MultiVector as
+new strategies behind `choose_strategy`.
+
+### 12. Retrieval profiles (`profiles.py`) — configuration, not branching
+Fast / Balanced / High-Precision / Compliance / Research are **immutable `ProfileConfig`
+bundles** that bias planner strategy + ranking weights + caps. Selected by data; the
+planner and engine never special-case a profile by name (no runtime branching).
+
+### 13. Retrieval Engine (`retrieval.py`) — orchestration only
+`KnowledgeRetrievalEngine` executes **tenancy → planner → repositories → merge →
+version/metadata/tenant filtering → policy → ranking → selection → `KnowledgeResult`**.
+Isolation is enforced **first** (asserted). It touches repositories only — never a
+provider (asserted). Semantic matches (content-hash keyed) map back onto chunks; keyword
+uses the inverted index; both feed the ranker.
+
+### 14. Ranking Engine (`ranking.py`) — deterministic
+Weighted linear blend via `core.policies.RankingPolicy` over eight neutral signals
+(semantic, keyword, freshness half-life decay under an injected clock, popularity,
+version/org/document/chunk priority). Chunk-id breaks every tie; an optional injected
+`Reranker` runs last. No randomness.
+
+### 15. Policy Engine (`policies.py`) — verdicts only
+`KnowledgePolicyEngine` turns eleven policy value objects (Retention, Version, Validation,
+Privacy, Deduplication, Chunk, Embedding, Archive, Deletion, Retrieval, Citation) into
+**verdicts** the runtime/engine execute. No I/O, no side effects. Privacy redaction is an
+injected `Redactor` port (no implementation, no LLM).
+
+### 16. Cache (`cache.py`) — repository-owned
+A deterministic LRU (`KnowledgeCache` + `LRUCacheBackend`, read-through/write-through/
+invalidate/stats) that lives **inside `ChunkRepository`**; the runtime never sees it, so a
+Redis `CacheBackend` swaps in below the repository boundary.
+
+### 17. Tenancy (`tenancy.py`) — isolation before retrieval
+`KnowledgeTenancy.guard()` enforces org/user isolation + the `tenant` hooks (permissive
+no-op defaults); `admits()` gives per-document visibility (ORG/SHARED/STATIC/REFERENCE
+visible org-wide; PRIVATE owner-only; `department` narrows). Federated cross-org knowledge
+is a future additive `KnowledgeSource`, never a widening of this boundary.
+
+### 18. Event ingestion (`ingestion.py`) — self-loop-safe by construction
+`KnowledgeIngestor` maps *other* producers' events (`REASONING_COMPLETED`/`TOOL_COMPLETED`,
+register-on-flag) to intents. `INGEST_TYPES` **structurally excludes every `knowledge.*`
+type**, and the runtime double-guards on `EventSource.KNOWLEDGE` — no self-loop (asserted).
+
+### 19. Extension interfaces (`extensions.py`) — interfaces only
+Reranker · Summarizer · Redactor · Compressor · KnowledgeSource · GraphStore ·
+GraphRetriever · MultiVectorRetriever. No implementations; the runtime never calls a model.
+These make **GraphRAG / MultiVector / Federated Knowledge** land as new retrieval
+strategies/sources **without changing the planner, engine, ranking, or repositories**.
+
+## Closure (M5.2B-2)
+The Knowledge Runtime is **architecturally closed** except for additive extensions and
+bug fixes. Ownership (knowledge lifecycle + retrieval, nothing else), dependency direction
+(`knowledge → core, tenant` only — acyclic), the repository boundary (sole store-toucher),
+provider neutrality, determinism, and replay/gateway compatibility are all verified by
+test. No future runtime (Context/Reasoning/Tool/Workflow/Agent) requires a redesign of
+Knowledge — they consume `core.ports.KnowledgePort` and observe `knowledge.*` events.
+
+## Deferred (all additive — no runtime shape change)
+Real store adapters (Postgres/pgvector/Qdrant/Redis) · reranker/summarizer/redactor/
+compressor implementations · GraphRAG + MultiVector + Federated Knowledge sources · real
+RBAC/quota/audit · richer parsers/chunkers · durable index · a shared `providers/storage/`
+local-adapter set (extracting today's Memory/Knowledge duplication) · granular
+per-lifecycle `knowledge.*` EventTypes.
+
+[DL-0024]: ../../.voxvoice/DECISION_LOG.md

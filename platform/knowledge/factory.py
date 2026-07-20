@@ -21,16 +21,23 @@ from core.providers.stores import (
     VectorStore,
 )
 
+from .cache import KnowledgeCache
 from .config import EmbedderConfig, KnowledgeConfiguration, StoreConfig
 from .index import KnowledgeIndex
+from .ingestion import KnowledgeIngestor
 from .pipeline import ChunkPipeline, DocumentPipeline, EmbeddingPipeline, PlainTextParser
 from .pipeline.chunk_pipeline import SlidingWindowChunker
+from .planner import KnowledgeQueryPlanner
+from .policies import KnowledgePolicyEngine
+from .profiles import RetrievalProfile
+from .ranking import KnowledgeRankingEngine
 from .repositories import (
     ChunkRepository,
     DocumentRepository,
     EmbeddingRepository,
     KnowledgeRepository,
 )
+from .retrieval import KnowledgeRetrievalEngine
 from .runtime import KnowledgeRuntime
 from .serializer import KnowledgeSerializer
 from .stores import (
@@ -41,6 +48,7 @@ from .stores import (
     InMemoryVectorStore,
     KnowledgeStore,
 )
+from .tenancy import KnowledgeTenancy
 from .version import VersionManager
 
 _LOCAL = frozenset({"in_memory", "local"})
@@ -67,11 +75,14 @@ class KnowledgeFactory:
             embedder=_embedder(config.embedder),
         )
 
+        cache = (
+            KnowledgeCache(maxsize=config.cache.max_items) if config.cache.enabled else None
+        )
         document_repo = DocumentRepository(
             store.document_store, store.object_store, serializer, collections=config.collections
         )
         chunk_repo = ChunkRepository(
-            store.document_store, serializer, collections=config.collections
+            store.document_store, serializer, collections=config.collections, cache=cache
         )
         embedding_repo = EmbeddingRepository(store.vector_store, store.embedder)
         index = KnowledgeIndex()
@@ -80,6 +91,18 @@ class KnowledgeFactory:
         repository = KnowledgeRepository(
             documents=document_repo, chunks=chunk_repo, embeddings=embedding_repo,
             versions=version_manager, index=index,
+        )
+
+        # ── intelligence layer (M5.2B-2) ──────────────────────────────────────
+        tenancy = KnowledgeTenancy(clock=the_clock)
+        retrieval_engine = KnowledgeRetrievalEngine(
+            repository=repository,
+            planner=KnowledgeQueryPlanner(),
+            ranking=KnowledgeRankingEngine(
+                clock=the_clock, half_life_s=config.retrieval.half_life_s
+            ),
+            policy=KnowledgePolicyEngine(),
+            tenancy=tenancy,
         )
         pipeline = DocumentPipeline(
             document_repo=document_repo,
@@ -98,6 +121,8 @@ class KnowledgeFactory:
         )
         return KnowledgeRuntime(
             config=config, repository=repository, pipeline=pipeline, serializer=serializer,
+            retrieval=retrieval_engine, tenancy=tenancy, ingestor=KnowledgeIngestor(),
+            default_profile=RetrievalProfile(config.retrieval.default_profile),
             id_factory=id_factory, clock=the_clock, **kwargs,
         )
 

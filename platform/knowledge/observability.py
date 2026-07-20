@@ -22,6 +22,23 @@ class Metric:
     CHUNKS_CREATED = "knowledge.chunks.created"
     EMBEDDINGS_CREATED = "knowledge.embeddings.created"
     INGEST_LATENCY = "knowledge.ingest.latency"
+    # ── M5.2B-2 retrieval intelligence ────────────────────────────────────────
+    RETRIEVAL_LATENCY = "knowledge.retrieval.latency"
+    RETRIEVAL_HITS = "knowledge.retrieval.hits"
+    RETRIEVAL_CANDIDATES = "knowledge.retrieval.candidates"
+    CACHE_HIT = "knowledge.cache.hit"
+    CACHE_MISS = "knowledge.cache.miss"
+    INGESTED = "knowledge.ingested"
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalStatistics:
+    """A per-retrieval snapshot (for tracing/replay): strategy + profile + counts."""
+
+    strategy: str
+    profile: str
+    candidates: int
+    hits: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,3 +53,5 @@ class KnowledgeStatistics:
     index: dict[str, int] | None = None
     embeddings: dict[str, int] | None = None
     pipeline: dict[str, int] | None = None
+    cache: dict[str, int] | None = None
+    retrieval: dict[str, Any] | None = None

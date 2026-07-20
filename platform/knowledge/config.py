@@ -52,6 +52,31 @@ class CollectionsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CacheConfig:
+    """Repository-owned hot-chunk cache (M5.2B-2). `enabled=False` → no cache."""
+
+    enabled: bool = True
+    max_items: int = 512
+
+    def __post_init__(self) -> None:
+        if self.max_items < 0:
+            raise ConfigError("CacheConfig.max_items must be >= 0")
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalConfig:
+    """Retrieval intelligence defaults (M5.2B-2). The default profile the runtime uses
+    when a caller does not specify one; the ranking freshness half-life (seconds)."""
+
+    default_profile: str = "balanced"
+    half_life_s: float = 86_400.0
+
+    def __post_init__(self) -> None:
+        if self.half_life_s <= 0:
+            raise ConfigError("RetrievalConfig.half_life_s must be > 0")
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeConfiguration:
     name: str = "knowledge"
     object_store: StoreConfig = field(default_factory=StoreConfig)
@@ -61,6 +86,8 @@ class KnowledgeConfiguration:
     embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
     chunking: ChunkConfig = field(default_factory=ChunkConfig)
     collections: CollectionsConfig = field(default_factory=CollectionsConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     vectorize: bool = True  # embed chunks during ingestion (semantic index)
 
     @classmethod

@@ -192,11 +192,12 @@ def test_runtime_remove_is_idempotent():
     rt.remove(did)  # idempotent — no raise
 
 
-def test_runtime_retrieve_is_placeholder():
+def test_runtime_retrieve_returns_passages():
     rt = _runtime()
     rt.index(TEXT, uri="doc://a", scope=_scope())
-    # retrieval intelligence is M5.2B-2 → no passages yet
-    assert list(rt.retrieve(KnowledgeQuery(text="cover drive", org_id="o1"))) == []
+    # retrieval intelligence landed in M5.2B-2 → provenance-complete passages
+    passages = list(rt.retrieve(KnowledgeQuery(text="cover drive", org_id="o1")))
+    assert passages and passages[0].source_id == document_id_for("doc://a")
 
 
 def test_runtime_sources_scoped_by_org():
@@ -281,8 +282,10 @@ def _imports(pkg: str) -> set[str]:
 
 
 def test_knowledge_dependency_rules():
-    # knowledge depends only on core (+ its own package); never a sibling runtime,
-    # the bus impl, memory, api, gateway, or replay.
+    # knowledge depends only on the foundation (core + tenant, the same isolation seam
+    # Memory uses) plus its own package; never a sibling runtime, the bus impl, memory,
+    # api, gateway, or replay. (M5.2B-2: tenancy adds the `tenant` foundation dep — see
+    # DL-0024; it is a leaf foundation package, not a sibling runtime, so no cycle.)
     forbidden = {"runtime", "api", "gateway", "replay", "events", "memory", "voicebot",
-                 "observability", "tenant"}
+                 "observability"}
     assert not (_imports("knowledge") & forbidden), _imports("knowledge")

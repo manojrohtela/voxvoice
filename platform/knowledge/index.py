@@ -13,7 +13,7 @@ extension.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from .domain import Chunk, Document
 
@@ -59,6 +59,30 @@ class KnowledgeIndex:
                     bucket.discard(chunk.id)
                     if not bucket:
                         del self._terms[t]
+
+    # ── read path (M5.2B-2) — deterministic keyword + metadata lookup ─────────
+    def match_terms(self, terms: Sequence[str]) -> set[str]:
+        """Chunk ids whose content contains ANY of the query terms (lexical OR).
+        Empty terms → empty set (the caller falls back to a broader candidate cut)."""
+        out: set[str] = set()
+        for t in terms:
+            bucket = self._terms.get(t.lower())
+            if bucket:
+                out |= bucket
+        return out
+
+    def match_metadata(self, filters: Mapping[str, str]) -> set[str] | None:
+        """Document ids matching ALL (field, value) filters (metadata AND). Returns None
+        when there are no filters (meaning 'no metadata constraint')."""
+        if not filters:
+            return None
+        result: set[str] | None = None
+        for field, value in filters.items():
+            bucket = self._meta.get((field, value), set())
+            result = set(bucket) if result is None else (result & bucket)
+            if not result:
+                return set()
+        return result or set()
 
     def statistics(self) -> dict[str, int]:
         return {
