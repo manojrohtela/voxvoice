@@ -100,8 +100,24 @@ class BudgetMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class RankingBreakdown:
+    """The per-signal contribution behind an item's context-adjusted score — the ranking
+    lineage. Deterministic + explainable; carried on every item so no downstream runtime
+    loses ranking history. `reason` is a short human-readable summary."""
+
+    signals: dict[str, float] = field(default_factory=dict)
+    total: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ContextItem:
-    """One normalized, provenance-complete piece of context. Immutable."""
+    """One normalized, provenance-complete piece of context. Immutable.
+
+    **Ranking lineage** is preserved end-to-end: `provenance.original_score` (original
+    source score), `provenance.source_runtime` (original source runtime), `confidence`
+    (original confidence at ingest — never mutated by ranking), `adjusted_score` (the
+    context-adjusted score), and `ranking` (the full breakdown + reason)."""
 
     id: str
     kind: ContextKind
@@ -110,6 +126,8 @@ class ContextItem:
     confidence_source: str  # "memory" | "knowledge" | "prompt" | "input" | "default"
     provenance: Provenance
     order_index: int = 0
+    adjusted_score: float = 0.0
+    ranking: RankingBreakdown = field(default_factory=RankingBreakdown)
     budget: BudgetMetadata = field(default_factory=BudgetMetadata)
     compression: CompressionMetadata = field(default_factory=CompressionMetadata)
     metadata: dict[str, str] = field(default_factory=dict)
@@ -123,6 +141,31 @@ class ContextItem:
 
     def with_budget(self, budget: BudgetMetadata) -> ContextItem:
         return replace(self, budget=budget)
+
+    def with_ranking(self, adjusted_score: float, ranking: RankingBreakdown) -> ContextItem:
+        return replace(self, adjusted_score=adjusted_score, ranking=ranking)
+
+    def with_merged(self, merged_ids: tuple[str, ...]) -> ContextItem:
+        """Record that duplicate items folded into this one (dedup provenance)."""
+        merged = replace(self.provenance, merged_from=self.provenance.merged_from + merged_ids)
+        return replace(self, provenance=merged)
+
+    def with_compressed_text(
+        self, text: str, *, method: str, new_tokens: int, sources: tuple[str, ...] = ()
+    ) -> ContextItem:
+        """Replace the text with a compressed form, preserving provenance + ranking lineage
+        and recording what it was compressed from."""
+        comp = CompressionMetadata(
+            compressed=True, method=method,
+            original_tokens=self.budget.token_estimate, final_tokens=new_tokens,
+        )
+        prov = replace(
+            self.provenance, compressed_from=self.provenance.compressed_from + sources
+        )
+        return replace(
+            self, text=text, compression=comp, provenance=prov,
+            budget=replace(self.budget, token_estimate=new_tokens),
+        )
 
 
 @dataclass(frozen=True, slots=True)

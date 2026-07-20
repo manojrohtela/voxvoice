@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns context assembly only** · **Status:** 🟢 Core implemented (M5.3B-1); intelligence M5.3B-2 |
-| **Milestone** | M5.3A — Design (2026-07-20, approved) · M5.3B-1 — Core (2026-07-20, additive) · M5.3B-2 — Intelligence (planned) |
+| **Scope** | The provider-neutral, deterministic, event-driven runtime that **owns context assembly only** · **Status:** ✅ Complete — **architecturally closed** (M5.3B-2), additive extensions + bug fixes only |
+| **Milestone** | M5.3A — Design (approved) · M5.3B-1 — Core (2026-07-20) · M5.3B-2 — Intelligence (2026-07-20, additive) |
 | **Basis** | The frozen M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) (`core.ports.ContextPort`); the closed [Memory Runtime](memory-runtime.md) + [Knowledge Runtime](knowledge-runtime.md) patterns |
 | **Governs** | `platform/context/` |
 
@@ -415,3 +415,77 @@ DeduplicationEngine · CompressionEngine · OrderingEngine · ValidationEngine �
 ContextPolicyEngine · ContextTenancy (adds the `tenant` foundation dep) · extension
 interfaces (`ContextSource` is already the seam; Summarizer/Compressor/Redactor/ModelProfile/
 ContextConsumer/StreamingContextSink) · observability intelligence · streaming context.
+
+---
+
+## What landed in M5.3B-2 (intelligence — all additive)
+The intelligence layer **completes and closes** the Context Runtime. Nothing outside
+`platform/context/` (+ one new test file) changed; `core`, `runtime`, `events`, `gateway`,
+`replay`, `memory`, and `knowledge` are untouched. `context/` now depends on `core` **and
+`tenant`** (the same leaf-foundation isolation seam Memory/Knowledge use — see [DL-0028];
+AST-verified). 423 → **454 tests** (31 new); ruff-clean. Intelligence is wired by
+`ContextFactory.create(..., intelligence=True)`; the naive M5.3B-1 core path is unchanged
+(`intelligence=False`, the default).
+
+1. **Ranking lineage in the domain.** `ContextItem` gains `adjusted_score` + a
+   `RankingBreakdown` (signals + total + `reason`); the original source score / source
+   runtime / confidence were already on the item and are never mutated — every downstream
+   runtime sees the full ranking history. Serializer round-trips the new fields.
+2. **`ContextRankingEngine`** — deterministic weighted blend via `core.policies.RankingPolicy`
+   over twelve neutral signals (conversation/semantic/knowledge/memory/tool/workflow
+   relevance, freshness half-life decay under injected clock, importance, confidence,
+   source/user/system priority). Source scores blended, never recomputed; id tie-break;
+   optional injected `Reranker` last.
+3. **`ContextDeduplicationEngine`** — exact content-hash dedup with **merged provenance**
+   (`merged_from`), an injected `SemanticDeduplicator` hook, and duplicate statistics.
+4. **`ContextCompressionEngine`** — conversation rollup + over-long trimming + injected
+   `Summarizer`/`Compressor`. **Provenance, ranking lineage, and citation metadata are
+   preserved**: compressed items keep `provenance`/`ranking`/`confidence` and record
+   `compressed_from` + `CompressionMetadata`.
+5. **`ContextBudgetManager`** — allocation only: global + per-source fraction caps + reserved
+   (system/developer always kept) + emergency floor + overflow strategy (compress_then_drop/
+   drop_lowest/truncate_oldest/reject) + **adaptive** (only the global cap binds). Model-aware
+   budgeting is a future `ModelProfile` injection — logic unchanged.
+6. **`ContextOrderingEngine`** — deterministic sequence by kind order (system → developer →
+   conversation → working → long-term → knowledge → tools → workflow → agent → environment →
+   user), then adjusted score desc, then id; assigns `order_index`.
+7. **`ContextValidationEngine`** — **verdicts only** (context/budget/citation/privacy/safety/
+   ordering); the runtime performs side effects (reject, or redact via injected `Redactor`).
+8. **`ContextPolicyEngine` + `ContextPolicies`** — the nine policy value objects (Budget,
+   Ranking, Compression, Ordering, Validation, Privacy, Overflow, Citation, SourceSelection)
+   in one validated bundle; the engine produces verdicts and does no I/O.
+9. **`ContextTenancy`** — org/conversation/session isolation **before assembly**
+   (isolation-first — asserted); resolved scope injected into every downstream query (defence
+   in depth). Exposed via `ContextRuntime.assemble_scoped(request, tenant)`.
+10. **Observability** — per-stage stats (`PipelineStatistics`, dedup/compression/budget
+    counters) + new metric names; `statistics().intelligent` reports the wired mode.
+11. **Extension interfaces (`extensions.py`) — interfaces only.** Tokenizer · ModelProfile ·
+    Summarizer · Compressor · Redactor · SemanticDeduplicator · Reranker · ContextSource ·
+    ContextConsumer · StreamingContextSink. No implementations, no LLM. **Prompt / Reasoning /
+    Tool / Workflow / Agent / MCP / A2A / Streaming** land as ContextSource/ContextConsumer/
+    StreamingContextSink implementations with no change to the assembler, engines, or repository.
+
+### Pipeline wiring (design §5 realized)
+`ContextAssembler` runs **select → fetch → normalize → dedup → rank → compress → budget →
+order → package**; the runtime wraps it with **tenancy (before assembly)** and the
+**validation gate (before delivery)**, driving the FSM REQUESTED→ASSEMBLED→VALIDATED→
+DELIVERED or →REJECTED. With no engines injected the assembler falls back to the naive
+M5.3B-1 path — core behaviour is byte-for-byte preserved.
+
+## Closure (M5.3B-2)
+The Context Runtime is **architecturally closed** except for additive extensions and bug
+fixes. Ownership (assembly only), dependency direction (`context → core, tenant` only —
+acyclic, dependency inversion through the ports), the repository boundary (temporary-only,
+sole store-toucher), provider neutrality, determinism, and replay/gateway compatibility are
+all verified by test. **Context Runtime never owns Memory, Knowledge, Prompts, Reasoning,
+LLMs, Tools, Workflow, or Agents** — it orchestrates their outputs through ports. No future
+runtime requires a redesign of Context — they consume the `ContextPackage` via
+`ContextConsumer` and observe `context.*` events.
+
+## Deferred (all additive — no runtime shape change)
+Real tokenizer/`ModelProfile` (tiktoken/HF) for model-exact budgeting · reranker/summarizer/
+compressor/redactor/semantic-dedup implementations · durable temporary store adapters
+(Redis) · optional content-event ingestion to populate the session window · streaming
+context delivery · the downstream Prompt/Reasoning/Tool/Workflow/Agent runtimes.
+
+[DL-0028]: ../../.voxvoice/DECISION_LOG.md

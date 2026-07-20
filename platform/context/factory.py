@@ -23,9 +23,16 @@ from core.ports.prompt import PromptPort
 from core.providers.stores import DocumentStore, MetadataStore
 
 from .assembly import ContextAssembler
+from .budget import ContextBudgetManager
 from .builder import ContextBuilder
+from .compression import ContextCompressionEngine
 from .config import ContextConfiguration, StoreConfig, TokenizerConfig
+from .dedup import ContextDeduplicationEngine
+from .extensions import Compressor, Redactor, SemanticDeduplicator, Summarizer
+from .ordering import ContextOrderingEngine
+from .policies import ContextPolicyEngine
 from .ports import ContextSource, Tokenizer
+from .ranking import ContextRankingEngine
 from .repositories import ContextRepository
 from .runtime import ContextRuntime
 from .serializer import ContextSerializer
@@ -38,6 +45,8 @@ from .sources import (
     SourceSelector,
 )
 from .stores import ContextStore, InMemoryDocumentStore, InMemoryMetadataStore, WordTokenizer
+from .tenancy import ContextTenancy
+from .validation import ContextValidationEngine
 
 _LOCAL = frozenset({"in_memory", "local"})
 
@@ -52,6 +61,11 @@ class ContextFactory:
         prompt_port: PromptPort | None = None,
         prompt_directives: Sequence[PromptDirective] = (),
         extra_sources: Sequence[ContextSource] = (),
+        intelligence: bool = False,
+        redactor: Redactor | None = None,
+        summarizer: Summarizer | None = None,
+        compressor: Compressor | None = None,
+        semantic_dedup: SemanticDeduplicator | None = None,
         id_factory: Callable[[], str] | None = None,
         clock: Callable[[], float] | None = None,
         **kwargs: Any,
@@ -78,14 +92,32 @@ class ContextFactory:
             sources.append(PromptSource(prompt_port, prompt_directives))
         sources.extend(extra_sources)
 
+        builder = ContextBuilder(store.tokenizer)
+        # ── intelligence layer (M5.3B-2), wired only when enabled ─────────────
+        engines: dict[str, Any] = {}
+        tenancy = validation = None
+        if intelligence:
+            p = config.policies
+            engines = {
+                "dedup": ContextDeduplicationEngine(semantic=semantic_dedup),
+                "ranking": ContextRankingEngine(policy=p.ranking, clock=the_clock),
+                "compression": ContextCompressionEngine(
+                    store.tokenizer, policy=p.compression,
+                    summarizer=summarizer, compressor=compressor,
+                ),
+                "budget": ContextBudgetManager(policy=p.budget),
+                "ordering": ContextOrderingEngine(policy=p.ordering),
+            }
+            tenancy = ContextTenancy(clock=the_clock)
+            validation = ContextValidationEngine(ContextPolicyEngine(p))
+
         assembler = ContextAssembler(
-            sources=sources,
-            selector=SourceSelector(),
-            builder=ContextBuilder(store.tokenizer),
+            sources=sources, selector=SourceSelector(), builder=builder, **engines
         )
         return ContextRuntime(
             config=config, repository=repository, assembler=assembler, sessions=sessions,
-            serializer=serializer, id_factory=id_factory, clock=the_clock, **kwargs,
+            serializer=serializer, tenancy=tenancy, validation=validation, redactor=redactor,
+            id_factory=id_factory, clock=the_clock, **kwargs,
         )
 
     @staticmethod

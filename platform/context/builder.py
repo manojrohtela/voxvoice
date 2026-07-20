@@ -57,27 +57,46 @@ class ContextBuilder:
         query: str | None,
         expires_at: float | None = None,
     ) -> ContextPackage:
-        items = self._normalize(contributions)
+        """The naive core path (no intelligence): normalize → fixed order → naive budget →
+        package. The intelligence assembler instead composes `normalize` + the engines +
+        `package` (M5.3B-2)."""
+        items = self.normalize(contributions)
         items = self._order_items(items)
         kept, truncated, used, per_source = self._apply_budget(items, budget_tokens)
-
-        confidence = (
-            sum(i.confidence for i in kept) / len(kept) if kept else 1.0
+        usage = BudgetUsage(used_tokens=used, limit_tokens=budget_tokens, per_source=per_source)
+        return self.package(
+            package_id=package_id, session_id=session_id, scope=scope, items=tuple(kept),
+            usage=usage, truncated=truncated, now=now, query=query, expires_at=expires_at,
+            strategy="insertion_order",
         )
-        source_counts: dict[str, int] = {}
-        for i in kept:
-            source_counts[i.kind.value] = source_counts.get(i.kind.value, 0) + 1
 
+    def package(
+        self,
+        *,
+        package_id: str,
+        session_id: str,
+        scope: ContextScope,
+        items: tuple[ContextItem, ...],
+        usage: BudgetUsage,
+        truncated: bool,
+        now: float,
+        query: str | None,
+        expires_at: float | None,
+        strategy: str,
+    ) -> ContextPackage:
+        """Assemble the immutable `ContextPackage` from final items + budget usage. Pure."""
+        confidence = sum(i.confidence for i in items) / len(items) if items else 1.0
+        source_counts: dict[str, int] = {}
+        for i in items:
+            source_counts[i.kind.value] = source_counts.get(i.kind.value, 0) + 1
         return ContextPackage(
             id=package_id,
             session_id=session_id,
             scope=scope,
             state=PackageState.REQUESTED,
-            items=tuple(kept),
-            budget=BudgetUsage(
-                used_tokens=used, limit_tokens=budget_tokens, per_source=per_source
-            ),
-            metadata=ContextMetadata(strategy="insertion_order", source_counts=source_counts),
+            items=items,
+            budget=usage,
+            metadata=ContextMetadata(strategy=strategy, source_counts=source_counts),
             truncated=truncated,
             confidence=_clamp(confidence),
             created_at=now,
@@ -88,7 +107,7 @@ class ContextBuilder:
         )
 
     # ── merge + normalize ─────────────────────────────────────────────────────
-    def _normalize(self, contributions: Sequence[SourceContribution]) -> list[ContextItem]:
+    def normalize(self, contributions: Sequence[SourceContribution]) -> list[ContextItem]:
         seen: set[str] = set()
         out: list[ContextItem] = []
         for c in contributions:

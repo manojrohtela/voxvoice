@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from core.errors import ConfigError
 
 from .domain import ContextKind
+from .policies import ContextPolicies
 
 # Deterministic default assembly order (system → developer → memory → knowledge → tools →
 # conversation → user → environment). Ordering *intelligence* is M5.3B-2; this is the
@@ -75,6 +76,7 @@ class ContextConfiguration:
     tokenizer: TokenizerConfig = field(default_factory=TokenizerConfig)
     window: WindowConfig = field(default_factory=WindowConfig)
     collections: CollectionsConfig = field(default_factory=CollectionsConfig)
+    policies: ContextPolicies = field(default_factory=ContextPolicies)  # M5.3B-2 intelligence
     default_budget_tokens: int = 0  # 0 → unbounded (naive truncation only when > 0)
     per_source_limit: int = 10  # per-source hit cap passed to each ContextSource
     package_ttl_s: float | None = 900.0  # temporary storage TTL (15 min); None → no expiry

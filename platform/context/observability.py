@@ -22,6 +22,25 @@ class Metric:
     USED_TOKENS = "context.used_tokens"
     TRUNCATED = "context.truncated"
     ASSEMBLY_LATENCY = "context.assembly.latency"
+    # ── M5.3B-2 intelligence ──────────────────────────────────────────────────
+    DEDUP_REMOVED = "context.dedup.removed"
+    COMPRESSED = "context.compressed"
+    BUDGET_DROPPED = "context.budget.dropped"
+    EMERGENCY_USED = "context.budget.emergency"
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineStatistics:
+    """A per-assembly snapshot of the intelligence stages (for tracing/replay)."""
+
+    intelligent: bool = False
+    dedup_removed: int = 0
+    compressed_items: int = 0
+    rolled_up_items: int = 0
+    budget_dropped: int = 0
+    emergency_used: bool = False
+    used_tokens: int = 0
+    limit_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,4 +53,5 @@ class ContextStatistics:
     packages: int = 0
     sessions: int = 0
     sources: tuple[str, ...] = ()
+    intelligent: bool = False
     metrics: dict[str, Any] = field(default_factory=dict)

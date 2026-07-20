@@ -343,9 +343,10 @@ def _imports(pkg: str) -> set[str]:
 
 
 def test_context_dependency_rules():
-    # context depends only on core (+ its own package); never a sibling runtime, the bus
-    # impl, memory/knowledge/prompt packages, api, gateway, or replay. (Tenancy — and thus
-    # the `tenant` dep — is M5.3B-2.)
+    # context depends only on the foundation (core + tenant, the same isolation seam
+    # Memory/Knowledge use) plus its own package; never a sibling runtime, the bus impl,
+    # the memory/knowledge/prompt packages, api, gateway, or replay. (M5.3B-2 tenancy added
+    # the `tenant` foundation dep — a leaf package, not a runtime, so no cycle; DL-0028.)
     forbidden = {"runtime", "api", "gateway", "replay", "events", "memory", "knowledge",
-                 "prompt", "voicebot", "observability", "tenant"}
+                 "prompt", "voicebot", "observability"}
     assert not (_imports("context") & forbidden), _imports("context")

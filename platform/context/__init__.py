@@ -16,8 +16,14 @@ Budget/ranking/compression/validation/policy/tenancy intelligence + observabilit
 intelligence + streaming are explicit non-goals (M5.3B-2).
 """
 
-from .assembly import ContextAssembler
+from .assembly import AssemblyOutcome, ContextAssembler
+from .budget import BudgetResult, BudgetStats, ContextBudgetManager
 from .builder import ContextBuilder
+from .compression import (
+    CompressionResult,
+    CompressionStats,
+    ContextCompressionEngine,
+)
 from .config import (
     CollectionsConfig,
     ContextConfiguration,
@@ -25,6 +31,7 @@ from .config import (
     TokenizerConfig,
     WindowConfig,
 )
+from .dedup import ContextDeduplicationEngine, DedupResult, DedupStats
 from .domain import (
     BudgetMetadata,
     BudgetUsage,
@@ -39,14 +46,41 @@ from .domain import (
     ContextWindow,
     PackageState,
     Provenance,
+    RankingBreakdown,
     SourceRuntime,
 )
 from .events import ContextPhase
+from .extensions import (
+    Compressor,
+    ContextConsumer,
+    ModelProfile,
+    Redactor,
+    Reranker,
+    SemanticDeduplicator,
+    StreamingContextSink,
+    Summarizer,
+)
 from .factory import ContextFactory
 from .ids import content_hash, item_id_for, package_id_for, request_hash_for
 from .lifecycle import PACKAGE_LIFECYCLE, PackageTrigger, advance_package
 from .observability import ContextStatistics, Metric
+from .ordering import ContextOrderingEngine
+from .policies import (
+    ContextBudgetPolicy,
+    ContextCitationPolicy,
+    ContextCompressionPolicy,
+    ContextOrderingPolicy,
+    ContextPolicies,
+    ContextPolicyEngine,
+    ContextPrivacyPolicy,
+    ContextRankingPolicy,
+    ContextSourceSelectionPolicy,
+    ContextValidationPolicy,
+    OverflowStrategy,
+    Verdict,
+)
 from .ports import AssemblyRequest, ContextSource, SourceContribution, Tokenizer
+from .ranking import ContextRankingEngine
 from .repositories import ContextRepository
 from .runtime import ContextRuntime
 from .serializer import ContextSerializer
@@ -60,6 +94,8 @@ from .sources import (
     StaticContextSource,
 )
 from .stores import ContextStore, InMemoryDocumentStore, InMemoryMetadataStore, WordTokenizer
+from .tenancy import ContextAccessDenied, ContextTenancy, ResolvedScope
+from .validation import ContextValidationEngine, ValidationReport
 
 __all__ = [
     # runtime + composition
@@ -78,12 +114,53 @@ __all__ = [
     "PackageState",
     "ContextScope",
     "Provenance",
+    "RankingBreakdown",
     "ContextMetadata",
     "BudgetUsage",
     "BudgetMetadata",
     "CompressionMetadata",
     "ContextWindow",
     "ContextSession",
+    # ── intelligence (M5.3B-2) ────────────────────────────────────────────────
+    "AssemblyOutcome",
+    "ContextRankingEngine",
+    "ContextDeduplicationEngine",
+    "DedupResult",
+    "DedupStats",
+    "ContextCompressionEngine",
+    "CompressionResult",
+    "CompressionStats",
+    "ContextBudgetManager",
+    "BudgetResult",
+    "BudgetStats",
+    "ContextOrderingEngine",
+    "ContextValidationEngine",
+    "ValidationReport",
+    "ContextTenancy",
+    "ContextAccessDenied",
+    "ResolvedScope",
+    # policies
+    "ContextPolicyEngine",
+    "ContextPolicies",
+    "ContextBudgetPolicy",
+    "ContextRankingPolicy",
+    "ContextCompressionPolicy",
+    "ContextOrderingPolicy",
+    "ContextValidationPolicy",
+    "ContextPrivacyPolicy",
+    "ContextCitationPolicy",
+    "ContextSourceSelectionPolicy",
+    "OverflowStrategy",
+    "Verdict",
+    # extension interfaces
+    "ModelProfile",
+    "Summarizer",
+    "Compressor",
+    "Redactor",
+    "SemanticDeduplicator",
+    "Reranker",
+    "ContextConsumer",
+    "StreamingContextSink",
     # ids
     "content_hash",
     "item_id_for",

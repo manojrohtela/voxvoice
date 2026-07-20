@@ -31,10 +31,11 @@ from core.ports.context import AssembledContext, ContextPort, ContextRequest
 from core.ports.context import ContextItem as PortItem
 
 from ._run import run_coro_sync
-from .assembly import ContextAssembler
+from .assembly import AssemblyOutcome, ContextAssembler
 from .config import ContextConfiguration
 from .domain import ContextKind, ContextPackage, ContextScope, PackageState
 from .events import ContextPhase
+from .extensions import Redactor
 from .ids import package_id_for, request_hash_for
 from .lifecycle import PackageTrigger, advance_package
 from .observability import ContextStatistics, Metric
@@ -42,6 +43,13 @@ from .ports import AssemblyRequest
 from .repositories import ContextRepository
 from .serializer import ContextSerializer
 from .session import ContextSessionManager
+from .tenancy import ContextTenancy
+from .validation import ContextValidationEngine
+
+try:  # tenant is a foundation package (added at M5.3B-2 for tenancy); optional at import
+    from tenant import TenantContext
+except Exception:  # pragma: no cover
+    TenantContext = Any  # type: ignore[assignment,misc]
 
 
 class ContextRuntime(BusConsumer, ContextPort):
@@ -53,6 +61,9 @@ class ContextRuntime(BusConsumer, ContextPort):
         assembler: ContextAssembler,
         sessions: ContextSessionManager,
         serializer: ContextSerializer | None = None,
+        tenancy: ContextTenancy | None = None,
+        validation: ContextValidationEngine | None = None,
+        redactor: Redactor | None = None,
         id_factory: Callable[[], str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -69,10 +80,21 @@ class ContextRuntime(BusConsumer, ContextPort):
         self._assembler = assembler
         self._sessions = sessions
         self._serializer = serializer or ContextSerializer()
+        self._tenancy = tenancy
+        self._validation = validation
+        self._redactor = redactor
 
     # ── ContextPort (synchronous) — drive the async core deterministically ────
     def assemble(self, request: ContextRequest) -> AssembledContext:
         response = run_coro_sync(self.aassemble(request))
+        return _to_assembled(request, response.package)
+
+    def assemble_scoped(
+        self, request: ContextRequest, tenant: TenantContext | None
+    ) -> AssembledContext:
+        """Tenant-aware assembly (the frozen `ContextPort.assemble` carries no tenant).
+        Isolation is enforced before any source is fetched."""
+        response = run_coro_sync(self.aassemble(request, tenant=tenant))
         return _to_assembled(request, response.package)
 
     def get(self, package_id: str) -> ContextPackage | None:
@@ -85,18 +107,22 @@ class ContextRuntime(BusConsumer, ContextPort):
         return run_coro_sync(self._repo.packages_for_session(session_id))
 
     # ── async core: assemble ──────────────────────────────────────────────────
-    async def aassemble(self, request: ContextRequest):
+    async def aassemble(self, request: ContextRequest, *, tenant: TenantContext | None = None):
         from .domain import ContextResponse
 
         now = self._clock()
+        # 0. isolation FIRST — resolve the effective, tenant-safe scope (before any fetch)
         scope = ContextScope(
             org_id=request.org_id,
             conversation_id=request.conversation_id,
             session_id=request.session_id,
         )
+        if self._tenancy is not None:
+            scope = self._tenancy.guard(scope, tenant, action="assemble").scope
+
         budget = request.budget_tokens or self._config.default_budget_tokens
         rhash = request_hash_for(
-            request.session_id, request.org_id, request.conversation_id, request.query,
+            request.session_id, scope.org_id, request.conversation_id, request.query,
             budget, request.include_memory, request.include_knowledge,
         )
         seq = len(await self._repo.packages_for_session(request.session_id))
@@ -116,17 +142,35 @@ class ContextRuntime(BusConsumer, ContextPort):
         with self.meter.timer(Metric.ASSEMBLY_LATENCY):
             # REQUESTED
             self._emit_phase_lite(ContextPhase.REQUESTED, package_id, request, len_items=0)
-            package = await self._assembler.assemble(
+            outcome: AssemblyOutcome = await self._assembler.assemble(
                 areq, package_id=package_id, scope=scope, now=now,
                 budget_tokens=budget, expires_at=expires_at,
             )
+            package = outcome.package
             # ASSEMBLED
             package = advance_package(package, PackageTrigger.ASSEMBLE, clock=self._clock)
             self.metrics.incr("assembled")
             self.meter.incr(Metric.ASSEMBLED, 1)
             self.meter.incr(Metric.ITEMS, len(package.items))
+            self._record_stats(outcome)
             self._emit_package(package, ContextPhase.BUILT)
-            # VALIDATED (trivial pass in the core; the ValidationEngine is M5.3B-2)
+
+            # VALIDATION gate (verdicts only; the runtime performs the side effects)
+            report = self._validation.validate(package) if self._validation is not None else None
+            if outcome.rejected or (report is not None and not report.ok):
+                reason = "; ".join(report.reasons) if report is not None else "budget overflow"
+                package = advance_package(package, PackageTrigger.REJECT, clock=self._clock)
+                await self._repo.add_package(package)
+                self.metrics.incr("rejected")
+                self.meter.incr(Metric.REJECTED, 1)
+                self._emit_package(package, ContextPhase.REJECTED)
+                return ContextResponse(package=package, delivered=False, reason=reason)
+
+            # privacy redaction (side effect) for items validation flagged
+            if report is not None and report.redact_item_ids and self._redactor is not None:
+                package = self._redact(package, set(report.redact_item_ids))
+
+            # VALIDATED
             package = advance_package(package, PackageTrigger.VALIDATE, clock=self._clock)
             self._emit_package(package, ContextPhase.VALIDATED)
             # DELIVERED
@@ -147,6 +191,17 @@ class ContextRuntime(BusConsumer, ContextPort):
             self._emit_truncated(package, ContextPhase.COMPRESSED)
         return ContextResponse(package=package, delivered=True)
 
+    def _redact(self, package: ContextPackage, ids: set[str]) -> ContextPackage:
+        """Apply the injected `Redactor` to flagged items (validation's side effect)."""
+        items = tuple(
+            i.with_compressed_text(
+                self._redactor.redact(i.text), method="redact",
+                new_tokens=i.token_estimate, sources=(i.id,),
+            ) if i.id in ids else i
+            for i in package.items
+        )
+        return package.with_items(items)
+
     # ── maintenance: TTL expiry sweep (deterministic; caller-driven) ─────────
     async def expire(self, *, now: float | None = None) -> int:
         """Expire TTL-elapsed delivered packages. Deterministic — no background timer;
@@ -164,6 +219,20 @@ class ContextRuntime(BusConsumer, ContextPort):
         return count
 
     # ── observability ────────────────────────────────────────────────────────
+    def _record_stats(self, outcome: AssemblyOutcome) -> None:
+        d = outcome.stats.get("dedup")
+        if d is not None and d.removed:
+            self.meter.incr(Metric.DEDUP_REMOVED, d.removed)
+        c = outcome.stats.get("compression")
+        if c is not None and c.compressed_items:
+            self.meter.incr(Metric.COMPRESSED, c.compressed_items)
+        b = outcome.stats.get("budget")
+        if b is not None:
+            if b.dropped_items:
+                self.meter.incr(Metric.BUDGET_DROPPED, b.dropped_items)
+            if b.emergency_used:
+                self.meter.incr(Metric.EMERGENCY_USED, 1)
+
     def statistics(self) -> ContextStatistics:
         return ContextStatistics(
             name=self.name,
@@ -172,6 +241,7 @@ class ContextRuntime(BusConsumer, ContextPort):
             packages=run_coro_sync(self._repo.package_count()),
             sessions=run_coro_sync(self._repo.session_count()),
             sources=tuple(s.name for s in self._assembler.sources),
+            intelligent=self._assembler.intelligent,
             metrics=self.metrics.snapshot(),
         )
 

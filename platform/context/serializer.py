@@ -23,6 +23,7 @@ from .domain import (
     ContextWindow,
     PackageState,
     Provenance,
+    RankingBreakdown,
     SourceRuntime,
 )
 
@@ -52,6 +53,12 @@ class ContextSerializer:
             "confidence": i.confidence,
             "confidence_source": i.confidence_source,
             "order_index": i.order_index,
+            "adjusted_score": i.adjusted_score,
+            "ranking": {
+                "signals": dict(i.ranking.signals),
+                "total": i.ranking.total,
+                "reason": i.ranking.reason,
+            },
             "provenance": {
                 "source_runtime": p.source_runtime.value,
                 "source_id": p.source_id,
@@ -80,12 +87,19 @@ class ContextSerializer:
         p = d.get("provenance", {})
         b = d.get("budget", {})
         c = d.get("compression", {})
+        r = d.get("ranking", {})
         return ContextItem(
             id=d["id"],
             kind=ContextKind(d["kind"]),
             text=d["text"],
             confidence=d.get("confidence", 0.0),
             confidence_source=d.get("confidence_source", "default"),
+            adjusted_score=d.get("adjusted_score", 0.0),
+            ranking=RankingBreakdown(
+                signals=dict(r.get("signals", {})),
+                total=r.get("total", 0.0),
+                reason=r.get("reason", ""),
+            ),
             provenance=Provenance(
                 source_runtime=SourceRuntime(p.get("source_runtime", SourceRuntime.INPUT.value)),
                 source_id=p.get("source_id", ""),
