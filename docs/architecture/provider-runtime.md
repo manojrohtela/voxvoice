@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Scope** | The single execution boundary between the VoxVoice Runtime and every external AI provider · **Status:** 🟡 Design approved (M5.6A); implementation M5.6B |
-| **Milestone** | M5.6A — Design (this document) · M5.6B-1 — Core (planned) · M5.6B-2 — Intelligence (planned) |
+| **Scope** | The single execution boundary between the VoxVoice Runtime and every external AI provider · **Status:** 🟢 Core implemented (M5.6B-1); intelligence M5.6B-2 |
+| **Milestone** | M5.6A — Design (approved) · M5.6B-1 — Core (2026-07-23, additive) · M5.6B-2 — Intelligence (planned) |
 | **Basis** | The frozen M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) (`core.providers.llm.LLMProvider`, `EventType.PROVIDER_CONNECTED/DISCONNECTED`, `EventSource.PROVIDER_REGISTRY`); Constitution §A6 (Provider Architecture) + §A10 (fault tolerance); the closed [Memory](memory-runtime.md)/[Knowledge](knowledge-runtime.md)/[Context](context-runtime.md)/[Prompt](prompt-runtime.md)/[Reasoning](reasoning-runtime.md) Runtime patterns |
-| **Governs** | `platform/provider/` (planned) |
+| **Governs** | `platform/provider/` |
 
 > **Design-only milestone.** No implementation, no runtime code. This is the approved
 > architecture the M5.6B milestones build to. It redesigns **nothing** already closed
@@ -539,3 +539,74 @@ or a vendor SDK). Upon M5.6B-1 + M5.6B-2 landing per this design, the Provider R
 for Memory, Knowledge, Context, Prompt, and Reasoning.
 
 **Repository certified ready for M5.6B-1 Provider Runtime Core.**
+
+---
+
+## What landed in M5.6B-1 (Core — 2026-07-23, additive)
+
+The implementation of the M5.6A design's core surface (§6 "core"-tagged components), exactly
+as designed — no architecture change.
+
+1. **Domain (`domain.py`) + ids (`ids.py`).** Immutable, frozen+slotted: `ProviderRequest`/
+   `ProviderResponse`/`ProviderChunk`/`ProviderUsage`/`ProviderMetadata`/`ProviderCapabilities`/
+   `ProviderDescriptor`/`ProviderSession`/`ProviderRegistryEntry`/`ProviderStatistics` +
+   `ProviderRequestState`/`ProviderHealthState`/`ChunkKind`/`FinishReason`/`Capability`.
+   Content-hash ids (SHA-256 hex[:16], `pr_`/`pp_`/`pc_`/`pz_` prefixes) — replay-friendly.
+2. **Two `core.fsm` lifecycles (`lifecycle.py`).** The full **request execution** machine
+   (REQUESTED→ROUTED→EXECUTING→STREAMING→COMPLETED, +FAILED/CANCELLED/FAILED_OVER/EXPIRED) and
+   the full **adapter health** machine (HEALTHY⇄DEGRADED⇄UNAVAILABLE, conservative recovery) —
+   both defined completely per the design; the core drives only the routing-free subset
+   (REQUESTED→ROUTED→EXECUTING→STREAMING→COMPLETED, FAILED on an adapter exception, EXPIRED via
+   the TTL sweep, and manual/caller-driven health transitions). CANCELLED/FAILED_OVER and
+   observed-outcome-driven health feedback are exercised by M5.6B-2.
+3. **`AdapterPort` (`ports.py`).** The vendor-neutral streaming seam (sync generator,
+   mirrors Reasoning's `ModelProvider`). No SDK, no HTTP, no transport in-runtime.
+4. **`ProviderRegistry` (`registry.py`).** Registration/discovery/lifecycle/lookup — **no
+   routing**: `register`/`update`/`deregister`, `get`/`descriptor`/`entry`, `names`/`find`
+   (capability-filtered, sorted by name — no scoring), `healthy`/`degraded`/`unavailable`
+   partitions, and deterministic caller-driven health transitions
+   (`mark_outcome_success/failure/timeout`, `mark_unavailable`, `recover`).
+5. **`CapabilityCatalog` (`catalog.py`).** A thin read-only view: `capabilities_for`/
+   `supports`/`discover`/`catalog` — no scoring, no preference ordering.
+6. **Unified streaming/response/usage/metadata (`streaming.py`, `response.py`, `usage.py`,
+   `metadata.py`).** `UnifiedStreamingAssembler` (chunk pull + partials + completion — no
+   backpressure/timeout policy yet); `ResponseNormalizer` (chunks → `ProviderResponse`,
+   deterministic `response_hash`; single-shot collapses like a streamed response, never a
+   fork); `UsageNormalizer` (word-count default counter — no billing); `MetadataNormalizer`
+   (provider/model/latency/duration/request-response ids — no vendor secrets).
+7. **`EchoProviderAdapter` (`stores/echo_adapter.py`).** Deterministic, offline default
+   `AdapterPort` — validates the whole pipeline without any vendor SDK.
+8. **Session (`session.py`) + temporary repository (`repositories/`) + local adapters
+   (`stores/`).** `ProviderSessionManager` over the `ProviderRepository` — the sole
+   store-toucher; **temporary** response + session records over in-memory Document/Metadata
+   stores.
+9. **Runtime (`runtime.py`).** `ProviderRuntime(BusConsumer)` — `execute` (resolve via
+   explicit name or "first capability-eligible adapter in sorted-name order" — **never a
+   scored/heuristic decision**; that is the M5.6B-2 `ProviderRouter`), `get`/`remove`/
+   `history`, `expire` (TTL sweep), `statistics`/`health`, read-only `registry`/`catalog`
+   exposure.
+10. **Serializer / config / factory / observability / events.** `ProviderSerializer`
+    (round-trippable request/chunk/response/session ↔ storage + event/API views);
+    `ProviderConfiguration` (validated store/TTL/default-provider/capability knobs — **no
+    vendor credentials**); `ProviderFactory` (composition root — registers the
+    `EchoProviderAdapter` + any injected `(descriptor, adapter)` pairs); `Metric` names +
+    `ProviderPhase`.
+11. **Extension hooks (`extensions.py`, M5.6B-1 scope).** Interfaces only: `AsyncAdapter`,
+    `BatchAdapter`, `StreamingAdapter`, `LocalAdapter`, `EnterpriseAdapter`. The remaining
+    M5.6A extension surface (GPU/Edge/Consensus/Ensemble/Parallel/Speculative/Multimodal) is
+    deferred to M5.6B-2, added the same additive way.
+
+### Event mapping (bus unmodified — the design's §19 realized)
+Lifecycle phases ride the **existing** `PROVIDER_CONNECTED` (`requested`/`routed`/`executing`/
+`streaming`/`completed`/`delivered`) and `PROVIDER_DISCONNECTED` (`failed`/`expired`);
+streamed chunks ride `MODEL_TOKEN`; usage rides `MODEL_USAGE` — no new `EventType`, no bus
+change (Memory/Knowledge/Context/Prompt/Reasoning precedent).
+
+### Deferred to M5.6B-2 (all additive — no core shape change)
+`ProviderRouter` (14 deterministic strategies) · `ProviderHealthMonitor` (observed-outcome
+feedback driving the already-complete health FSM) · `ProviderPolicyEngine` (7 policies) ·
+`ProviderTenancy` (adds the `tenant` foundation dep) · the remaining `extensions.py` surface
+(GPU/Edge/Consensus/Ensemble/Parallel/Speculative/Multimodal) · `ProviderModelBridge`
+(the composition-root seam implementing Reasoning's `ModelProvider` — not required for the
+core milestone; Reasoning remains untouched and un-integrated until that bridge lands) ·
+real vendor adapters (OpenAI/Claude/Gemini/Groq/Together/Fireworks/Azure/Ollama/local).
