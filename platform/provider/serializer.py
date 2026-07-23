@@ -15,6 +15,7 @@ from .domain import (
     FinishReason,
     GenerationParameters,
     ProviderChunk,
+    ProviderExecutionTrace,
     ProviderMessage,
     ProviderMetadata,
     ProviderRequest,
@@ -25,7 +26,21 @@ from .domain import (
     ProviderSession,
     ProviderUsage,
     StreamingMetadata,
+    TraceEvent,
 )
+
+
+def _trace_to_dict(t: ProviderExecutionTrace) -> list[dict[str, Any]]:
+    return [{"stage": e.stage, "detail": e.detail, "seq": e.seq, "at": e.at} for e in t.events]
+
+
+def _trace_from_dict(items: Any) -> ProviderExecutionTrace:
+    events = tuple(
+        TraceEvent(stage=e["stage"], detail=e.get("detail", ""),
+                   seq=e.get("seq", 0), at=e.get("at", 0.0))
+        for e in (items or ())
+    )
+    return ProviderExecutionTrace(events=events)
 
 
 def _scope_to_dict(s: ProviderScope) -> dict[str, Any]:
@@ -138,6 +153,7 @@ class ProviderSerializer:
             "response_version": resp.response_version,
             "created_at": resp.created_at, "expires_at": resp.expires_at,
             "org_id": resp.org_id, "conversation_id": resp.conversation_id,
+            "trace": _trace_to_dict(resp.trace),
         }
 
     def response_from_document(self, d: Mapping[str, Any]) -> ProviderResponse:
@@ -173,6 +189,7 @@ class ProviderSerializer:
             response_version=d.get("response_version", "1"),
             created_at=d.get("created_at", 0.0), expires_at=d.get("expires_at"),
             org_id=d.get("org_id"), conversation_id=d.get("conversation_id"),
+            trace=_trace_from_dict(d.get("trace")),
         )
 
     # ── ProviderSession ───────────────────────────────────────────────────────

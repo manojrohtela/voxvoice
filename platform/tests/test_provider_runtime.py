@@ -422,10 +422,11 @@ def _imports(pkg: str) -> set[str]:
 
 
 def test_provider_dependency_rules():
-    # provider depends only on core (+ its own package); never a sibling runtime, the bus
-    # impl, memory/knowledge/context/prompt/reasoning, api, gateway, or replay. (Tenancy — and
-    # thus the `tenant` dep — is M5.6B-2, mirroring the Memory/Knowledge/Context/Prompt/
-    # Reasoning precedent.)
+    # provider depends only on the foundation (core + tenant, the same isolation seam
+    # Memory/Knowledge/Context/Prompt/Reasoning use) plus its own package; never a sibling
+    # runtime, the bus impl, memory/knowledge/context/prompt/reasoning, api, gateway, or
+    # replay. (M5.6B-2 tenancy added the `tenant` foundation dep — a leaf package, not a
+    # runtime, so no cycle; DL-0039.)
     forbidden = {"runtime", "api", "gateway", "replay", "events", "memory", "knowledge",
-                 "context", "prompt", "reasoning", "voicebot", "observability", "tenant"}
+                 "context", "prompt", "reasoning", "voicebot", "observability"}
     assert not (_imports("provider") & forbidden), _imports("provider")

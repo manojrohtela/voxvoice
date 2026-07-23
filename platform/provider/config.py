@@ -1,10 +1,12 @@
-"""Provider Runtime configuration (M5.6B-1) — frozen, validated value objects.
+"""Provider Runtime configuration (M5.6B-1 core + M5.6B-2 intelligence) — frozen, validated
+value objects.
 
 Declarative wiring: store kinds, the temporary-storage TTL, collection names, and the
 default capability/model. **No vendor credentials** — adapters are injected `AdapterPort`
 instances (the default `EchoProviderAdapter`), never configured here. Validated at
 construction (fail fast). `default()` yields an all-in-memory development config.
-Router/health/policy/tenancy intelligence knobs are **not** here — that is M5.6B-2.
+Router/health/circuit-breaker/policy knobs are opt-in (`policies`) — the M5.6B-1 core shape
+and defaults are unchanged when intelligence is disabled.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from core.errors import ConfigError
+
+from .policies import ProviderPolicies
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +41,8 @@ class ProviderConfiguration:
     default_model: str = "default"
     default_capability: str = "chat"
     response_ttl_s: float | None = 900.0  # temporary storage TTL (15 min); None → no expiry
+    # ── M5.6B-2 intelligence (opt-in; the core path is unchanged when disabled) ──
+    policies: ProviderPolicies = field(default_factory=ProviderPolicies)
 
     def __post_init__(self) -> None:
         if self.response_ttl_s is not None and self.response_ttl_s <= 0:

@@ -223,6 +223,33 @@ class ProviderMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class TraceEvent:
+    """One ordered intelligence event in the provider execution trace (metadata only — never
+    changes execution). M5.6B-2."""
+
+    stage: str  # provider_selection | routing_decision | policy_verdict | failover |
+    #             health_change | execution | completion
+    detail: str = ""
+    seq: int = 0
+    at: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderExecutionTrace:
+    """The ordered intelligence trace preserved on the response (provider selection → routing
+    decision → policy verdict → failover → health change → execution → completion). Metadata
+    only; empty by default so the M5.6B-1 core path stays byte-for-byte unchanged. M5.6B-2."""
+
+    events: tuple[TraceEvent, ...] = ()
+
+    def with_event(
+        self, stage: str, *, detail: str = "", at: float = 0.0
+    ) -> ProviderExecutionTrace:
+        ev = TraceEvent(stage=stage, detail=detail, seq=len(self.events), at=at)
+        return replace(self, events=(*self.events, ev))
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderResponse:
     """The execute-once artifact: identity + lifecycle state + the assembled text + the
     streamed chunks + usage + finish reason + normalized metadata. Immutable and
@@ -249,6 +276,8 @@ class ProviderResponse:
     expires_at: float | None = None
     org_id: str | None = None
     conversation_id: str | None = None
+    # ── M5.6B-2 additive: intelligence trace (empty by default; core-unchanged) ──
+    trace: ProviderExecutionTrace = field(default_factory=ProviderExecutionTrace)
 
     # ── pure derivations (return a new response; never mutate) ────────────────
     def with_state(self, state: ProviderRequestState) -> ProviderResponse:

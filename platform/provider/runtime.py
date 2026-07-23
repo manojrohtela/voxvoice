@@ -1,11 +1,12 @@
-"""ProviderRuntime — the Provider Runtime core (M5.6B-1).
+"""ProviderRuntime — the Provider Runtime core (M5.6B-1) + intelligence (M5.6B-2).
 
-A `BusConsumer` that owns **registry-based execution only**: it receives a `ProviderRequest`,
-resolves the adapter (explicit name, or the first capability-eligible adapter in
-deterministic sorted-name order — **never a scored/heuristic routing decision**, that is the
-`ProviderRouter`'s job in M5.6B-2), executes it through the injected `AdapterPort`, assembles
-the unified `ProviderResponse`, emits `provider.*`/`model.*` events, and persists to the
-**temporary** repository.
+A `BusConsumer` that owns **registry-based execution** (core) plus, when intelligence is
+enabled, deterministic routing/failover/health/circuit-breaking/policy/tenancy. It receives a
+`ProviderRequest`, resolves the adapter — the M5.6B-1 core path (explicit name, or the first
+capability-eligible adapter in deterministic sorted-name order — **never a scored/heuristic
+decision**) is byte-for-byte unchanged when intelligence is off — executes it through the
+injected `AdapterPort`, assembles the unified `ProviderResponse`, emits `provider.*`/`model.*`
+events, and persists to the **temporary** repository.
 
 What lands in M5.6B-1 (core):
 - **execute** — resolve → stream → normalize, drive the lifecycle
@@ -14,9 +15,18 @@ What lands in M5.6B-1 (core):
 - **expire** — deterministic TTL sweep (caller-driven). **statistics / health**.
 - **registry / catalog** — read-only exposure for discovery (no routing intelligence).
 
+What lands in M5.6B-2 (intelligence, opt-in via injected members — `None` → core path):
+- **Routing** — `ProviderRouter` produces a deterministic ordered candidate chain.
+- **Failover** — `FailoverController` walks the chain on a candidate's failure/exclusion; no
+  retry loop against the same candidate, no sleeping.
+- **Health** — `ProviderHealthManager` records outcomes, driving the registry's health FSM.
+- **Circuit breaking** — `CircuitBreaker` gates a candidate before it is tried.
+- **Tenancy** — isolation before provider selection (mirrors Memory/Knowledge/Context/Prompt/
+  Reasoning's `tenant`-seam pattern).
+- **Execution trace** — metadata-only, attached to the response; never changes behaviour.
+
 The pipeline is async-first; the synchronous `execute`/`get`/`remove`/`history` drive it via
-the non-blocking sync bridge (local adapters only). Routing strategies, health-outcome
-feedback, policies, and tenancy are M5.6B-2.
+the non-blocking sync bridge (local adapters only).
 """
 
 from __future__ import annotations
@@ -31,9 +41,11 @@ from core.module import BusConsumer
 
 from ._run import run_coro_sync
 from .catalog import CapabilityCatalog
+from .circuit_breaker import CircuitBreaker
 from .config import ProviderConfiguration
 from .domain import (
     ProviderExecutionResult,
+    ProviderExecutionTrace,
     ProviderRequest,
     ProviderRequestState,
     ProviderResponse,
@@ -41,14 +53,24 @@ from .domain import (
     ProviderStatistics,
 )
 from .events import ProviderPhase
+from .failover import FailoverController, FailoverReason
+from .health import ProviderHealthManager
 from .ids import request_hash_for
 from .lifecycle import ProviderTrigger, advance
-from .observability import Metric
+from .observability import Metric, PipelineStatistics
+from .policies import ProviderPolicyEngine
 from .registry import ProviderRegistry
 from .repositories import ProviderRepository
 from .response import ResponseNormalizer
+from .router import ProviderRouter
 from .serializer import ProviderSerializer
 from .session import ProviderSessionManager
+from .tenancy import ProviderTenancy
+
+try:  # tenant is a foundation package (added at M5.6B-2 for tenancy); optional at import
+    from tenant import TenantContext
+except Exception:  # pragma: no cover
+    TenantContext = Any  # type: ignore[assignment,misc]
 
 
 class ProviderRuntime(BusConsumer):
@@ -61,6 +83,12 @@ class ProviderRuntime(BusConsumer):
         normalizer: ResponseNormalizer,
         sessions: ProviderSessionManager,
         serializer: ProviderSerializer | None = None,
+        router: ProviderRouter | None = None,
+        health: ProviderHealthManager | None = None,
+        failover: FailoverController | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        policy: ProviderPolicyEngine | None = None,
+        tenancy: ProviderTenancy | None = None,
         id_factory: Callable[[], str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -79,6 +107,13 @@ class ProviderRuntime(BusConsumer):
         self._normalizer = normalizer
         self._sessions = sessions
         self._serializer = serializer or ProviderSerializer()
+        # ── M5.6B-2 intelligence (opt-in; None → the core path is unchanged) ────
+        self._router = router
+        self._health = health
+        self._failover = failover
+        self._circuit_breaker = circuit_breaker
+        self._policy = policy
+        self._tenancy = tenancy
 
     # ── read-only discovery exposure (no routing intelligence) ────────────────
     @property
@@ -93,6 +128,12 @@ class ProviderRuntime(BusConsumer):
     def execute(self, request: ProviderRequest) -> ProviderResponse:
         return run_coro_sync(self.aexecute(request)).response
 
+    def execute_scoped(
+        self, request: ProviderRequest, tenant: TenantContext | None
+    ) -> ProviderExecutionResult:
+        """Tenant-aware execute (isolation enforced before provider selection)."""
+        return run_coro_sync(self.aexecute(request, tenant=tenant))
+
     def get(self, response_id: str) -> ProviderResponse | None:
         return run_coro_sync(self._repo.get_response(response_id))
 
@@ -103,22 +144,28 @@ class ProviderRuntime(BusConsumer):
         return run_coro_sync(self._repo.responses_for_session(session_id))
 
     # ── async core: execute ────────────────────────────────────────────────────
-    async def aexecute(self, request: ProviderRequest) -> ProviderExecutionResult:
+    async def aexecute(
+        self, request: ProviderRequest, *, tenant: TenantContext | None = None
+    ) -> ProviderExecutionResult:
         now = self._clock()
         request = self._resolve(request)
         scope = request.scope
+
+        # 0. isolation FIRST — before provider selection (M5.6B-2; guarded)
+        if self._tenancy is not None:
+            scope = self._tenancy.guard(scope, tenant, provider=request.provider).scope
+            request = replace(request, scope=scope)
+
         seq = len(await self._repo.responses_for_session(request.session_id))
         expires_at = (now + self._config.response_ttl_s) if self._config.response_ttl_s else None
 
+        trace = ProviderExecutionTrace() if self._is_intelligent else None
         with self.meter.timer(Metric.REQUEST_LATENCY):
             self._emit_lite(ProviderPhase.REQUESTED, request)
             try:
-                name = self._select(request)
+                name, chunks, request, trace = await self._resolve_and_stream(request, now, trace)
                 self.meter.incr(Metric.PROVIDER_SELECTED, 1)
-                adapter = self._registry.get(name)
-                request = replace(request, provider=name)
                 request_id = f"{name}:{request.request_hash or seq}"
-                chunks = list(adapter.stream(request))
                 streamed = request.streaming
                 if not streamed:
                     chunks = [self._normalizer.collapse(request, chunks)]
@@ -127,6 +174,9 @@ class ProviderRuntime(BusConsumer):
                     seq=seq, streamed=streamed, expires_at=expires_at, request_id=request_id,
                 )
                 response = response.with_state(ProviderRequestState.REQUESTED)
+                if trace is not None:
+                    trace = trace.with_event("completion", detail=name, at=now)
+                    response = replace(response, trace=trace)
             except Exception as exc:  # noqa: BLE001 — surface as a FAILED event, then re-raise
                 self.metrics.incr("failed")
                 self.meter.incr(Metric.FAILED, 1)
@@ -206,12 +256,100 @@ class ProviderRuntime(BusConsumer):
             metrics=self.metrics.snapshot(),
         )
 
+    def pipeline_statistics(self, response: ProviderResponse) -> PipelineStatistics:
+        """A per-execution intelligence snapshot (tracing/replay) for a finished response."""
+        circuit_state = (
+            self._circuit_breaker.state_for(response.provider).value
+            if self._circuit_breaker is not None else "closed"
+        )
+        return PipelineStatistics(
+            provider=response.provider, model=response.model, chunks=len(response.chunks),
+            used_tokens=response.usage.total_tokens,
+            failovers=self._failover.statistics["failovers"] if self._failover else 0,
+            circuit_state=circuit_state,
+            trace_events=len(response.trace.events),
+        )
+
     # ── no content-event ingestion in the core milestone ──────────────────────
     def should_handle(self, event: Event) -> bool:
         return False
 
     # ── internals ──────────────────────────────────────────────────────────────
-    def _select(self, request: ProviderRequest) -> str:
+    @property
+    def _is_intelligent(self) -> bool:
+        return any((self._router, self._health, self._failover,
+                   self._circuit_breaker, self._tenancy))
+
+    async def _resolve_and_stream(
+        self, request: ProviderRequest, now: float, trace: ProviderExecutionTrace | None,
+    ) -> tuple[str, list, ProviderRequest, ProviderExecutionTrace | None]:
+        """Resolve a provider and pull its chunk stream. The M5.6B-1 core path (no router) is
+        unchanged: explicit name, else the first capability-eligible adapter in sorted-name
+        order — never scored. The M5.6B-2 path routes, then walks the deterministic failover
+        chain, consulting the circuit breaker and recording health outcomes; no retry loop
+        against the same candidate, no sleeping."""
+        if self._router is None:
+            name = self._select_core(request)
+            adapter = self._registry.get(name)
+            req = replace(request, provider=name)
+            return name, list(adapter.stream(req)), req, trace
+
+        decision = self._router.route(request)
+        if trace is not None:
+            trace = trace.with_event(
+                "routing_decision",
+                detail=f"{decision.strategy.value}:{','.join(decision.candidates)}", at=now,
+            )
+        if not decision.candidates:
+            raise ConfigError(f"no provider available for capability {request.capability!r}")
+
+        attempted: tuple[str, ...] = ()
+        last_exc: Exception | None = None
+        while True:
+            outcome = (self._failover.next(decision, attempted=attempted,
+                                           reason=FailoverReason.UNAVAILABLE)
+                      if self._failover is not None
+                      else _default_next(decision, attempted))
+            if outcome.exhausted:
+                if trace is not None:
+                    trace = trace.with_event("failover", detail="exhausted", at=now)
+                if last_exc is not None:
+                    raise last_exc
+                raise ConfigError(f"no available provider for capability {request.capability!r}")
+            name = outcome.candidate
+            attempted = outcome.attempted
+
+            if self._policy is not None and trace is not None:
+                verdict = self._policy.admit_provider(name)
+                trace = trace.with_event("policy_verdict", detail=f"{name}:{verdict.ok}", at=now)
+            if self._circuit_breaker is not None and not self._circuit_breaker.allow(name, now=now):
+                if trace is not None:
+                    trace = trace.with_event("failover", detail=f"circuit_open:{name}", at=now)
+                continue
+            try:
+                adapter = self._registry.get(name)
+                req = replace(request, provider=name)
+                chunks = list(adapter.stream(req))
+            except Exception as exc:  # noqa: BLE001 — recorded, then failed over
+                last_exc = exc
+                if self._health is not None:
+                    self._health.record_failure(name)
+                if self._circuit_breaker is not None:
+                    self._circuit_breaker.record_failure(name, now=now)
+                if trace is not None:
+                    trace = trace.with_event("health_change", detail=f"failure:{name}", at=now)
+                continue
+
+            if self._health is not None:
+                self._health.record_success(name)
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_success(name)
+            if trace is not None:
+                trace = trace.with_event("provider_selection", detail=name, at=now)
+                trace = trace.with_event("execution", detail=name, at=now)
+            return name, chunks, req, trace
+
+    def _select_core(self, request: ProviderRequest) -> str:
         """Deterministic, routing-free selection: explicit name, else the first
         capability-eligible adapter in sorted-name order. No scoring, no strategy."""
         if request.provider:
@@ -253,6 +391,20 @@ class ProviderRuntime(BusConsumer):
             type, data, session_id=scope.session_id or "", org_id=scope.org_id or "",
             conversation_id=scope.conversation_id,
         )
+
+
+def _default_next(decision, attempted: tuple[str, ...]):
+    """A stateless fallback identical to `FailoverController.next` for the (uncommon) case a
+    router is injected without an explicit `FailoverController` — factory-built runtimes
+    always wire both together."""
+    from .failover import FailoverOutcome
+
+    tried = set(attempted)
+    remaining = [c for c in decision.candidates if c not in tried]
+    if not remaining:
+        return FailoverOutcome(candidate=None, exhausted=True, attempted=attempted)
+    return FailoverOutcome(candidate=remaining[0], exhausted=False,
+                           attempted=(*attempted, remaining[0]))
 
 
 _PHASE_TYPE: dict[ProviderPhase, EventType] = {

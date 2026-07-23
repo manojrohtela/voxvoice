@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Scope** | The single execution boundary between the VoxVoice Runtime and every external AI provider · **Status:** 🟢 Core implemented (M5.6B-1); intelligence M5.6B-2 |
-| **Milestone** | M5.6A — Design (approved) · M5.6B-1 — Core (2026-07-23, additive) · M5.6B-2 — Intelligence (planned) |
+| **Scope** | The single execution boundary between the VoxVoice Runtime and every external AI provider · **Status:** 🔒 Closed (additive extensions + bug fixes only) — core M5.6B-1 + intelligence M5.6B-2 |
+| **Milestone** | M5.6A — Design (approved) · M5.6B-1 — Core (2026-07-23, additive) · M5.6B-2 — Intelligence + Closure (2026-07-23, additive) |
 | **Basis** | The frozen M5.0 [AI Runtime Foundation](ai-runtime-foundation.md) (`core.providers.llm.LLMProvider`, `EventType.PROVIDER_CONNECTED/DISCONNECTED`, `EventSource.PROVIDER_REGISTRY`); Constitution §A6 (Provider Architecture) + §A10 (fault tolerance); the closed [Memory](memory-runtime.md)/[Knowledge](knowledge-runtime.md)/[Context](context-runtime.md)/[Prompt](prompt-runtime.md)/[Reasoning](reasoning-runtime.md) Runtime patterns |
-| **Governs** | `platform/provider/` |
+| **Governs** | `platform/provider/` + `platform/bridge/` (the `ProviderModelBridge` composition-root seam) |
 
 > **Design-only milestone.** No implementation, no runtime code. This is the approved
 > architecture the M5.6B milestones build to. It redesigns **nothing** already closed
@@ -610,3 +610,83 @@ feedback driving the already-complete health FSM) · `ProviderPolicyEngine` (7 p
 (the composition-root seam implementing Reasoning's `ModelProvider` — not required for the
 core milestone; Reasoning remains untouched and un-integrated until that bridge lands) ·
 real vendor adapters (OpenAI/Claude/Gemini/Groq/Together/Fireworks/Azure/Ollama/local).
+
+---
+
+## What landed in M5.6B-2 (Intelligence & Closure — 2026-07-23, additive)
+
+The intelligence layer that completes the runtime, exactly per the M5.6A design. **Fully
+additive**: six new modules + guarded hooks in `runtime`/`factory` + a new, separate
+composition-root package (`bridge/`); the core path is byte-for-byte unchanged when
+intelligence is off (asserted by `test_core_path_unchanged_when_intelligence_off`). The only
+non-`provider/` change (besides docs and the new `bridge/` package) is dropping `tenant` from
+the core dependency-rules forbidden set (now a leaf foundation dep — DL-0039).
+
+### Components
+1. **`ProviderRouter` (`router.py`).** All 13 deterministic strategies from the design:
+   Manual, Auto, Cheapest, Lowest Latency, Highest Quality, Region-aware, Organization
+   Policy, User Policy, Weighted, Canary, A/B Testing, Failover, Backup Provider. Every
+   strategy is a pure function of `(request, registry snapshot, policy verdicts, a
+   deterministic hash seed)` — **no `random()` anywhere** (AST-verified). Eligibility already
+   excludes `UNAVAILABLE` adapters and policy-denied names before any strategy runs.
+2. **`ProviderHealthManager` (`health.py`).** The observed-outcome feedback loop the core's
+   registry FSM needed to become automatic: debounces blips behind a configurable
+   consecutive-outcome threshold, then drives `mark_outcome_success/failure/timeout`;
+   `excluded()`/`reactivate()` for exclusion + conservative reactivation. **No networking.**
+3. **`FailoverController` (`failover.py`).** Deterministic candidate-chain walk — `next()`
+   returns the next untried name from a `RoutingDecision` or reports exhaustion. **No retry
+   loop** against the same candidate, no sleeping; the runtime's bounded `while` loop over the
+   chain is the only iteration, and it terminates because attempted names only grow.
+4. **`CircuitBreaker` (`circuit_breaker.py`).** Classic CLOSED→OPEN→HALF_OPEN→CLOSED per
+   adapter name. The "reset timeout" is evaluated against an **injected clock** reading —
+   never a background timer/thread/sleep. A single half-open failure reopens immediately
+   (conservative, mirrors the health FSM's stance).
+5. **`ProviderPolicyEngine` (`policies.py`).** All 7 policies: allow list, deny list,
+   organization restrictions, region restrictions, compliance (region-match), quotas (a hook),
+   feature restrictions — **verdicts only**, no I/O.
+6. **`ProviderTenancy` (`tenancy.py`).** Org isolation + provider allow-list + regional
+   restrictions, enforced **before provider selection**; wires the M5.0 `tenant` seams — the
+   same isolation seam Memory/Knowledge/Context/Prompt/Reasoning use.
+7. **`ProviderModelBridge` (new `bridge/` package, separate from both `provider/` and
+   `reasoning/`).** Implements Reasoning's **already-frozen** `ModelProvider` port by
+   delegating to an injected `ProviderRuntime`. **Reasoning is completely untouched** — the
+   bridge is simply a new implementation of an existing interface, exactly as Reasoning's own
+   `EchoProvider` already is. `ProviderChunk`/`ResponseChunk` share the same `ChunkKind`
+   string values, so translation is a structural pass-through. Verified end-to-end: Reasoning
+   → bridge → Provider Runtime → `EchoProviderAdapter`.
+8. **Remaining extension interfaces (`extensions.py`).** GPU / Edge / Consensus / Ensemble /
+   Parallel / Speculative / Multimodal providers — completing all 12 from the M5.6A design.
+   Interfaces only.
+
+### Execution trace + observability
+`ProviderExecutionTrace` (a new field on `ProviderResponse`, default-empty) records ordered,
+seq-stamped stages — provider selection, routing decision, policy verdict, failover, health
+change, execution, completion — **metadata only, never changing behaviour**; the serializer
+round-trips it. `PipelineStatistics` + new `Metric` constants (routing decisions, failovers,
+circuit state, health transitions, policy rejections) give a per-execution intelligence
+snapshot.
+
+### Runtime behaviour
+`ProviderFactory.create(..., intelligence=False)` (the default) executes the **exact**
+M5.6B-1 path. `intelligence=True` wires `ProviderRouter`/`ProviderHealthManager`/
+`FailoverController`/`CircuitBreaker`/`ProviderPolicyEngine`/`ProviderTenancy` from
+`config.policies`; `ProviderRuntime._resolve_and_stream` branches on whether a router is
+injected — the core's `_select_core` (unchanged) or the router→failover→circuit-breaker→health
+walk. `execute_scoped(request, tenant)` mirrors the tenant-aware entry point already
+established by Reasoning/Prompt.
+
+### Dependency direction
+`provider → core, tenant` only (AST-enforced; `tenant` a leaf foundation dep, not a runtime).
+`bridge → core, provider, reasoning` — the **only** module in the entire platform importing
+both sibling runtimes; neither `provider` nor `reasoning` imports `bridge` or each other.
+
+### Closure certification
+The Provider Runtime is **architecturally closed** except for additive extensions and bug
+fixes. It owns exactly what M5.6A specified — registration/discovery/lifecycle, capability
+cataloguing, routing/selection, failover/fallback, health, unified streaming/response,
+usage/metadata normalization, policy, tenancy, and observability. Memory, Knowledge, Context,
+Prompt, Reasoning (orchestration), Tool execution, Workflow, Agents, Transport, and durable
+persistence remain outside its ownership. Real vendor adapters (OpenAI/Claude/Gemini/Groq/
+Together/Fireworks/Azure/Ollama/local) integrate as `AdapterPort` implementations — one
+adapter + one registry entry, no redesign. Repository certified ready for **M5.7 Runtime
+Integration**.
