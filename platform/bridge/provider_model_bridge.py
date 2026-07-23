@@ -12,6 +12,14 @@ both. Per the M5.6A design's dependency diagram: `[composition root] → reasoni
 an interface that already existed, exactly as `EchoProvider` (Reasoning's own deterministic
 default) already is. `ProviderChunk` mirrors `ResponseChunk` 1:1 (same `ChunkKind` string
 values), so translation is a structural pass-through, not a remapping.
+
+`last_response` (M5.7, additive): the frozen `ModelProvider.stream` contract returns only
+`Iterator[ResponseChunk]`, so the rich `provider.ProviderResponse` (its `ProviderMetadata` +
+`ProviderExecutionTrace`) has no path back to a caller through that interface alone. Rather
+than re-executing the call a second time (non-deterministic duplication) or widening the
+frozen port, the bridge records the response it just produced on this plain attribute so the
+Runtime Pipeline's composition root can read it immediately after `reasoning_rt.infer(...)`
+returns — no change to `stream`'s signature or behaviour, no new interface.
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from provider.domain import GenerationParameters as ProviderGenerationParameters
-from provider.domain import ProviderMessage, ProviderRequest, ProviderScope
+from provider.domain import ProviderMessage, ProviderRequest, ProviderResponse, ProviderScope
 from provider.runtime import ProviderRuntime
 from reasoning.domain import ChunkKind, InferenceRequest, ResponseChunk
 from reasoning.ports import ModelProvider
@@ -32,10 +40,12 @@ class ProviderModelBridge(ModelProvider):
     def __init__(self, runtime: ProviderRuntime, *, name: str = "provider-runtime") -> None:
         self.name = name
         self._runtime = runtime
+        self.last_response: ProviderResponse | None = None
 
     def stream(self, request: InferenceRequest) -> Iterator[ResponseChunk]:
         provider_request = self._to_provider_request(request)
         response = self._runtime.execute(provider_request)
+        self.last_response = response
         for chunk in response.chunks:
             yield ResponseChunk(
                 id=chunk.id, index=chunk.index, delta=chunk.delta,
