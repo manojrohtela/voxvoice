@@ -148,6 +148,17 @@ class EventType(StrEnum):
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
     WORKFLOW_COMPLETED = "workflow.completed"
+    # workflow execution (producer: Workflow Runtime, M6.4B-2) — additive
+    # vocabulary extension (no existing member changed; AR-32). WORKFLOW_STARTED/
+    # WORKFLOW_STEP/WORKFLOW_COMPLETED (Phase 0 scaffolding, above) are reused
+    # verbatim for the started/checkpoint/completed cases; only the terminal
+    # failure/cancellation and replay/diagnostics cases are genuinely new.
+    WORKFLOW_FAILED = "workflow.failed"
+    WORKFLOW_CANCELLED = "workflow.cancelled"
+    WORKFLOW_REPLAY_RECORDED = "workflow.replay.recorded"
+    WORKFLOW_REPLAY_VALIDATED = "workflow.replay.validated"
+    WORKFLOW_REPLAY_MISMATCH = "workflow.replay.mismatch"
+    WORKFLOW_DIAGNOSTICS_GENERATED = "workflow.diagnostics.generated"
     AGENT_ACTIVATED = "agent.activated"
     AGENT_HANDOFF = "agent.handoff"
     # cost / metering (producer: Metering)
