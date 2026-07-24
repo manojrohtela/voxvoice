@@ -218,12 +218,15 @@ def test_agent_goal_carries_no_state_field_in_this_bundle():
 
 
 def test_no_execution_engine_module_exists_in_bundle_1():
+    """`agent.execution` (the goal-driving engine, Bundle 3) does not exist
+    yet. `agent.planning` is deliberately *not* asserted absent here — it is
+    Bundle 2's own legitimate scope and exists from that bundle onward (see
+    `test_agent_planning.py::test_no_agent_execution_module_exists_in_bundle_2`
+    for the still-current constraint going forward)."""
     import importlib
 
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("agent.execution")
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("agent.planning")
 
 
 # ── Registry ────────────────────────────────────────────────────────────────
