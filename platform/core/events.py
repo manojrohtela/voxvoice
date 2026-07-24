@@ -135,6 +135,15 @@ class EventType(StrEnum):
     SKILL_REPLAY_MISMATCH = "skill.replay.mismatch"
     SKILL_DIAGNOSTICS_GENERATED = "skill.diagnostics.generated"
     SKILL_PLANNING_FAILED = "skill.planning.failed"
+    # hook framework (producer: Hook Framework, M6.3B) — additive vocabulary
+    # extension anticipated by the M6.3A design (no existing member changed;
+    # AR-32). A hook never executes a multi-phase action — only run-completion
+    # + replay + diagnostics events exist, no hook.execution.* counterpart.
+    HOOK_RUN_COMPLETED = "hook.run.completed"
+    HOOK_REPLAY_RECORDED = "hook.replay.recorded"
+    HOOK_REPLAY_VALIDATED = "hook.replay.validated"
+    HOOK_REPLAY_MISMATCH = "hook.replay.mismatch"
+    HOOK_DIAGNOSTICS_GENERATED = "hook.diagnostics.generated"
     # workflow / agent (producers: Workflow Runtime / Agent Runtime)
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
@@ -168,6 +177,7 @@ class EventSource(StrEnum):
     REASONING = "reasoning"
     TOOL = "tool"
     SKILL = "skill"
+    HOOKS = "hooks"
     MCP = "mcp"
     WORKFLOW = "workflow"
     AGENT = "agent"
