@@ -116,6 +116,13 @@ class EventType(StrEnum):
     TOOL_DIAGNOSTICS_GENERATED = "tool.diagnostics.generated"
     TOOL_METRICS_UPDATED = "tool.metrics.updated"
     TOOL_FAILURE_ANALYZED = "tool.failure.analyzed"
+    # tool streaming + cancellation (producer: Tool Streaming Runtime, M6.1B-4)
+    # — additive vocabulary extension (no existing member changed; AR-32).
+    TOOL_STREAM_STARTED = "tool.stream.started"
+    TOOL_STREAM_CHUNK = "tool.stream.chunk"
+    TOOL_STREAM_COMPLETED = "tool.stream.completed"
+    TOOL_STREAM_CANCELLED = "tool.stream.cancelled"
+    TOOL_STREAM_TIMED_OUT = "tool.stream.timed_out"
     # workflow / agent (producers: Workflow Runtime / Agent Runtime)
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
