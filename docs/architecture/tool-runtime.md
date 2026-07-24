@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The execution layer for external capabilities an Agent invokes · **Status:** 🟡 Core (M6.1B-1) + Governance (M6.1B-2) implemented; observability-engine/streaming/workflow/MCP/A2A integration are explicit non-goals, deferred to M6.1B-3+ |
-| **Milestone** | M6.1A — Design (approved, [tool-runtime-design.md](epic6/tool-runtime-design.md)) · M6.1B-1 — Core (2026-07-24) · M6.1B-2 — Governance (2026-07-24, additive to the repository; zero Epic 5 changes; zero `tool` core changes) |
+| **Scope** | The execution layer for external capabilities an Agent invokes · **Status:** 🟡 Core (M6.1B-1) + Governance (M6.1B-2) + Observability & Replay (M6.1B-3) implemented; streaming/cancellation/workflow/MCP/A2A integration are explicit non-goals, deferred to M6.1B-4+ |
+| **Milestone** | M6.1A — Design (approved, [tool-runtime-design.md](epic6/tool-runtime-design.md)) · M6.1B-1 — Core (2026-07-24) · M6.1B-2 — Governance (2026-07-24) · M6.1B-3 — Observability & Replay (2026-07-24, additive to the repository; zero Epic 5 changes; zero `tool`/`tool.governance` core changes) |
 | **Basis** | The frozen M5.0 `core.ports.tool.ToolPort` (unexercised until now); the closed [Provider Runtime](provider-runtime.md)'s registry/catalog/normalizer/repository/lifecycle shape, mirrored, not imported |
 | **Governs** | `platform/tool/` |
 
@@ -328,4 +328,156 @@ out-of-scope `voicebot/bot.py` findings certified at M5.8.
 Governance implemented, tested, ruff-clean, zero Epic 5/M6.0/M6.1A/M6.1B-1 regressions
 (`tool/runtime.py` untouched). Repository ready for **M6.1B-3 — Tool Runtime Observability &
 Replay** next (per the M6.1A design's own milestone breakdown). Do not begin M6.1B-3 without an
+explicit new commissioning prompt.
+
+---
+
+## 20. M6.1B-3 — Tool Runtime Observability & Replay
+
+New additive `platform/tool/observability/` **subpackage of `tool`** (converted from the single
+M6.1B-1 `observability.py` module — the legacy `Metric` class moved verbatim into `legacy.py`
+and is still re-exported at the package's top level, so `tool/runtime.py`'s frozen
+`from .observability import Metric` keeps resolving unchanged). Ties execution tracing,
+governance-decision tracing, replay recording/validation, metrics, diagnostics, failure
+analysis, and audit recording into one `ToolObservability` facade. **Never executes a tool,
+never evaluates governance** — every value here is built *from* an already-finished
+`ToolResult`/`GovernanceDecision`, never the other way around; `tool/runtime.py` and
+`tool/governance/` are untouched by this milestone.
+
+## 21. Observability Domain Model
+
+- **`ExecutionTrace`** — a pure projection of a finished `ToolResult`: trace/request id, tool
+  id/version/classification, FSM `transitions` (reconstructed deterministically — see §22),
+  duration/start/end, `arguments_hash`/`output_hash`/`replay_hash` (content hashes only — never
+  raw payloads), metadata.
+- **`ToolGovernanceDecisionTrace`** — a pure projection of a `governance.GovernanceDecision`:
+  policy verdict, `DecisionReason`, authorization verdict, approval state, tenant/feature-gate/
+  rate-limit allowed flags, which secrets provider (if any) was consulted. No execution data.
+- **`DecisionReason`** — `ReasonCode` + `SourceLevel` + optional `matched_rule` + `policy_version`
+  + a mechanically-derived `explanation`. Deterministic by construction — never AI/free-text.
+- **`ReplayRecord`** — the serialized `ToolRequest`, the governance + execution traces, the
+  serialized `ToolResult`, and the `replay_hash` — everything needed to re-verify an execution
+  later without a live registry/adapter reference.
+- **`ReplayComparison`** — `matches` + `expected_hash`/`actual_hash` + named `mismatches`.
+- **`FailureCategory`**/**`FailureAnalysis`** — a fixed, deterministic classification (§22): no
+  AI, no heuristics.
+- **`ToolAuditRecord`** — identity/org/workspace/tool/action/decision/timestamp + optional
+  replay/trace references. Never secrets, arguments, or output.
+
+## 22. Deterministic Reconstruction (Key Clarification)
+
+`tool/runtime.py` (frozen at M6.1B-1) never populates `ToolResult.trace` (the embedded, always-
+empty `tool.domain.ToolExecutionTrace` placeholder) and always leaves `ToolResult.state` as the
+terminal FSM state (`COMPLETED`/`FAILED`) — the intermediate phase a failure occurred at is not
+separately recorded on the result. Rather than touching the frozen runtime to add tracking, this
+milestone reconstructs both **deterministically** from what already exists, verified directly
+against `ToolRuntime.aexecute`'s own frozen control flow (read, not guessed) before writing
+`reasons.classify_error`:
+
+- `unknown_tool:` / `tool_retired` / `validation_error:` prefixes only ever occur during
+  `VALIDATING` (before dispatch); `execution_error:` only ever occurs during `EXECUTING` (an
+  adapter exception). These four are the *only* failure paths in the frozen runtime.
+- `ExecutionTrace.transitions` is therefore reconstructed as `(received, validating, executing,
+  completed)` on success, `(received, validating, failed)` for the three validation-phase
+  failures, or `(received, validating, executing, failed)` for `execution_error`.
+- `FailureAnalysis.category`/`.phase` use the exact same lookup table — one source of truth
+  (`reasons.classify_error`), never duplicated logic.
+
+A second clarification: `result.request_hash` (always correctly resolved by
+`ToolRuntime._resolve`, which operates on an internal copy) is the *only* authoritative hash
+source for `ExecutionTrace`/`ReplayRecord` — the caller-supplied `ToolRequest` object is never
+mutated by the runtime, so its own `request_hash` field may still be empty. `replay.py` writes
+`result.request_hash` into the stored `request_document` before persisting, so a later
+`ReplayEngine.validate()` deserializes a request whose hash already matches what was used to
+compute the original `output_hash`/`replay_hash` — without this, replay validation would spuriously
+mismatch on every record (caught and fixed during this milestone's own smoke-testing).
+
+## 23. ReplayEngine
+
+Deterministic replay validation against **`EchoToolAdapter` only** — never a live registry
+lookup, never a vendor SDK. `validate(record)` re-executes the deserialized request through
+`EchoToolAdapter`, recomputes the hash chain, and compares it to the hash chain captured at
+record time; `compare(a, b)` is a pure hash-equality check between two records (no re-execution).
+Replaying a record whose *original* execution used a different (but still deterministic)
+adapter than `EchoToolAdapter` correctly reports a mismatch — replay proves determinism of the
+platform's own reference adapter, not of arbitrary registered tools (a test asserts this).
+
+## 24. Metrics, Diagnostics, Statistics
+
+- **`ToolRuntimeMetrics`** — in-memory counters only (executions/success/failure/cancelled
+  [reserved]/replay counts/approval/policy/authorization counts, average/max latency, per-tool
+  and per-classification usage). No Prometheus, no OpenTelemetry, no exporters.
+- **`ToolRuntimeDiagnostics`** — a read-only aggregator (`build_diagnostics`) over an already-
+  live `ToolRegistry`/`ToolCapabilityCatalog`, a `ToolRuntimeMetrics` snapshot, and caller-
+  supplied governance/repository/replay counts — never mutates what it inspects.
+- **`ToolRuntimeStatistics`** — pure functions (`compute_statistics`, `latency_distribution`)
+  over a sequence of `ToolResult`/`ExecutionTrace`: per-tool/per-classification/per-namespace/
+  per-organization counts, replay ratio, failure ratio, and a nearest-rank latency distribution
+  (min/max/avg/p50/p95 — no external stats library).
+
+## 25. Events, Repository, Extension Interfaces
+
+Reuses the existing `Event`/`EventBus`/`EventSource.TOOL` envelope unchanged; the only change to
+`core.events` is eight additive `EventType` members (`tool.execution.traced`,
+`tool.replay.recorded/validated/mismatch`, `tool.audit.recorded`, `tool.diagnostics.generated`,
+`tool.metrics.updated`, `tool.failure.analyzed` — no existing member touched). `ReplayRepository`
+(temporary, `DocumentStore`-backed, mirrors `ToolRepository`/`GovernanceRepository`) stores
+`ReplayRecord`s and `ToolAuditRecord`s only — no durable persistence. Nine enterprise extension
+interfaces (`OpenTelemetryExporter`, `PrometheusExporter`, `GrafanaDashboardProvider`,
+`CloudLoggingSink`, `EnterpriseSIEMSink`, `ExternalAuditSink`) are reserved, interface-only.
+
+## 26. Observability Package Structure
+
+```
+platform/tool/observability/
+├── legacy.py            # Metric (M6.1B-1, verbatim) — re-exported at top level
+├── domain.py              # ReasonCode/SourceLevel/DecisionReason, ExecutionTrace, ReplayRecord,
+│                           #   ReplayComparison, FailureCategory/Analysis, ToolAuditRecord
+├── ids.py                  # content-hash ids: tt_ / rp_ / ad_
+├── reasons.py                # classify_error, reason_for_decision, matched_rule_repr
+├── trace.py                    # execution_trace_for (ExecutionTrace builder)
+├── governance_trace.py           # governance_trace_for (ToolGovernanceDecisionTrace builder)
+├── replay.py                       # replay_record_for (ReplayRecord builder)
+├── replay_engine.py                 # ReplayEngine — validate/compare (EchoToolAdapter only)
+├── metrics.py                         # ToolRuntimeMetrics (in-memory counters only)
+├── failure.py                          # analyze_failure (fixed lookup table)
+├── audit.py                             # audit_record_for (ToolAuditRecord builder)
+├── statistics.py                         # compute_statistics, latency_distribution
+├── diagnostics.py                          # ToolRuntimeDiagnostics + build_diagnostics
+├── config.py                                # ObservabilityConfiguration (validated)
+├── serializer.py                              # ObservabilitySerializer (versioned, round-trippable)
+├── repository.py                                # ReplayRepository (temporary; DocumentStore-backed)
+├── events.py                                      # ObservabilityPhase -> EventType mapping
+├── extensions.py                                    # OTel/Prometheus/Grafana/SIEM/... (interfaces only)
+├── runtime.py                                         # ToolObservability — the facade
+├── factory.py                                          # ObservabilityFactory.create/default
+└── __init__.py
+```
+
+## 27. Observability Testing
+
+`tests/test_tool_observability.py` — 40 tests: `ExecutionTrace` (success/failure transitions,
+no-raw-payload assertion, determinism), `DecisionReason`/`ToolGovernanceDecisionTrace` (allowed,
+policy-denied-with-matched-rule, tenant-short-circuit, determinism/immutability), `ReplayRecord`
++ `ReplayEngine` (round-trip validation, tampered-record mismatch detection, two-record
+comparison, EchoToolAdapter-only replay proof), `ToolRuntimeMetrics` (execution/failure/
+classification tracking), `FailureAnalysis` (success->None, unknown-tool/validation
+classification, runtime-error-prefix mapping), the `ToolObservability` facade (trace->metrics,
+replay round-trip, unknown-replay error, audit never includes secrets, diagnostics, statistics,
+injected-publisher event capture, no-publisher no-op), the temporary `ReplayRepository`,
+serialization round-trips (execution trace/governance trace/replay record/reason/audit/failure
+analysis), configuration validation, dependency rules (still no `tenant`/sibling-runtime import),
+and no-execution-or-governance-ownership-leakage (`ToolObservability` exposes no `execute`/
+`invoke`/`run`/`aexecute`/`evaluate`/`authorize`).
+
+**793/793 repository tests pass** (753 prior + 40 new). Ruff clean across `tool/observability/`
+and its test file — the only ruff findings anywhere in the repository remain the 2 pre-existing,
+out-of-scope `voicebot/bot.py` findings certified at M5.8.
+
+## 28. M6.1B-3 Recommendation
+
+Observability & Replay implemented, tested, ruff-clean, zero Epic 5/M6.0/M6.1A/M6.1B-1/M6.1B-2
+regressions (`tool/runtime.py` and `tool/governance/` untouched). Repository ready for
+**M6.1B-4 — Tool Streaming & Cancellation** next (per the M6.1A design's own milestone
+breakdown). Do not begin M6.1B-4 without an
 explicit new commissioning prompt.

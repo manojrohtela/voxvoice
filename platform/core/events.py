@@ -106,6 +106,16 @@ class EventType(StrEnum):
     TOOL_RATE_LIMIT_EVALUATED = "tool.rate_limit.evaluated"
     TOOL_SECRET_REQUESTED = "tool.secret.requested"
     TOOL_GOVERNANCE_COMPLETED = "tool.governance.completed"
+    # tool observability + replay (producer: Tool Runtime Observability, M6.1B-3)
+    # — additive vocabulary extension (no existing member changed; AR-32).
+    TOOL_EXECUTION_TRACED = "tool.execution.traced"
+    TOOL_REPLAY_RECORDED = "tool.replay.recorded"
+    TOOL_REPLAY_VALIDATED = "tool.replay.validated"
+    TOOL_REPLAY_MISMATCH = "tool.replay.mismatch"
+    TOOL_AUDIT_RECORDED = "tool.audit.recorded"
+    TOOL_DIAGNOSTICS_GENERATED = "tool.diagnostics.generated"
+    TOOL_METRICS_UPDATED = "tool.metrics.updated"
+    TOOL_FAILURE_ANALYZED = "tool.failure.analyzed"
     # workflow / agent (producers: Workflow Runtime / Agent Runtime)
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
