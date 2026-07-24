@@ -123,6 +123,18 @@ class EventType(StrEnum):
     TOOL_STREAM_COMPLETED = "tool.stream.completed"
     TOOL_STREAM_CANCELLED = "tool.stream.cancelled"
     TOOL_STREAM_TIMED_OUT = "tool.stream.timed_out"
+    # skill planning (producer: Skill Runtime Planning, M6.2B-2) — additive
+    # vocabulary extension anticipated by the M6.2A design (no existing member
+    # changed; AR-32). Skill Runtime never executes, so there is no
+    # skill.execution.* counterpart — only planning + planning-replay events.
+    SKILL_PLAN_CREATED = "skill.plan.created"
+    SKILL_CONTEXT_CREATED = "skill.context.created"
+    SKILL_POLICY_EVALUATED = "skill.policy.evaluated"
+    SKILL_REPLAY_RECORDED = "skill.replay.recorded"
+    SKILL_REPLAY_VALIDATED = "skill.replay.validated"
+    SKILL_REPLAY_MISMATCH = "skill.replay.mismatch"
+    SKILL_DIAGNOSTICS_GENERATED = "skill.diagnostics.generated"
+    SKILL_PLANNING_FAILED = "skill.planning.failed"
     # workflow / agent (producers: Workflow Runtime / Agent Runtime)
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
@@ -155,6 +167,7 @@ class EventSource(StrEnum):
     CONTEXT = "context"
     REASONING = "reasoning"
     TOOL = "tool"
+    SKILL = "skill"
     MCP = "mcp"
     WORKFLOW = "workflow"
     AGENT = "agent"
