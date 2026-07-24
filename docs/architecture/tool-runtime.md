@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Scope** | The execution layer for external capabilities an Agent invokes · **Status:** 🟡 Core implemented (M6.1B-1); policy/security/observability-engine/streaming/workflow/MCP/A2A integration are explicit non-goals, deferred to M6.1B-2+ |
-| **Milestone** | M6.1A — Design (approved, [tool-runtime-design.md](epic6/tool-runtime-design.md)) · M6.1B-1 — Core (2026-07-24, additive to the repository; zero Epic 5 changes) |
+| **Scope** | The execution layer for external capabilities an Agent invokes · **Status:** 🟡 Core (M6.1B-1) + Governance (M6.1B-2) implemented; observability-engine/streaming/workflow/MCP/A2A integration are explicit non-goals, deferred to M6.1B-3+ |
+| **Milestone** | M6.1A — Design (approved, [tool-runtime-design.md](epic6/tool-runtime-design.md)) · M6.1B-1 — Core (2026-07-24) · M6.1B-2 — Governance (2026-07-24, additive to the repository; zero Epic 5 changes; zero `tool` core changes) |
 | **Basis** | The frozen M5.0 `core.ports.tool.ToolPort` (unexercised until now); the closed [Provider Runtime](provider-runtime.md)'s registry/catalog/normalizer/repository/lifecycle shape, mirrored, not imported |
 | **Governs** | `platform/tool/` |
 
@@ -195,15 +195,137 @@ its test file — the only ruff findings anywhere in the repository are the 2 pr
 out-of-scope `voicebot/bot.py` findings certified at M5.8 (predate Epic 5, git-blamed to the M0
 foundation-freeze commit).
 
-## 11. Explicit Non-Goals (this milestone)
+## 11. Explicit Non-Goals (M6.1B-1)
 
 No policy engine. No approval workflow. No secrets manager. No observability engine (basic
 counters only). No streaming. No async execution. No Workflow/Agent/MCP/A2A integration. No
 Skills. No Hooks. No Loop Engine. No external SDK. Offline deterministic execution only — all
-per the M6.1B-1 prompt's explicit scope. These are the next milestones (M6.1B-2 through
-M6.1B-5, per the M6.1A design's breakdown).
+per the M6.1B-1 prompt's explicit scope. Governance landed at M6.1B-2 (§13-19 below); the rest
+remain the next milestones (M6.1B-3 through M6.1B-5, per the M6.1A design's breakdown).
 
-## 12. Recommendation
+## 12. M6.1B-1 Recommendation
 
-Core implemented, tested, ruff-clean, zero Epic 5/M6.0/M6.1A regressions. Repository ready for
-**M6.1B-2 — Tool Policy & Security** next (per the M6.1A design's own milestone breakdown).
+Core implemented, tested, ruff-clean, zero Epic 5/M6.0/M6.1A regressions.
+
+---
+
+## 13. M6.1B-2 — Tool Runtime Governance
+
+New additive `platform/tool/governance/` **subpackage of `tool`** (not a sibling runtime):
+`ToolGovernance`, the facade tying tenancy → policy → authorization → feature gates → rate
+limiting → approval into one deterministic `evaluate()` call producing a `GovernanceDecision`
+(`ALLOW`/`DENY`/`PENDING`) + a full `ToolGovernanceTrace`. **Never executes a tool** —
+`tool/runtime.py` (`ToolRuntime`) is untouched by this milestone; wiring `ToolGovernance` into
+the execution path via the already-frozen `tool.extensions.PolicyEngine`/`ApprovalEngine`/
+`SecretsManager` seams is additive, deferred integration work.
+
+## 14. Governance Domain Model
+
+- **`ToolPolicyEngine`** (implements `tool.extensions.PolicyEngine`) — deterministic six-level
+  precedence: `SYSTEM → ORGANIZATION → WORKSPACE → AGENT → SKILL (reserved) → TOOL`. Conflict
+  resolution (documented once, in `policies.py`, and here): a `DENY` at *any* level is absolute
+  and can never be overridden by a narrower `ALLOW`/`PENDING` (fail-safe); absent a `DENY`, the
+  most specific applicable rule wins (last-match-in-precedence-order, i.e. `TOOL` beats
+  `SYSTEM`); absent any applicable rule, the default is `ALLOW` (open-unless-restricted, the
+  same convention `ProviderAccessPolicy`'s empty allow-list already uses).
+- **`ToolApprovalEngine`** (implements `tool.extensions.ApprovalEngine`) — offline, no UI/
+  notifications. A 5-state FSM (`ApprovalState`: `PENDING → APPROVED/REJECTED/EXPIRED/
+  CANCELLED`, all four direct from `PENDING`, `core.fsm`-based). One approval per request
+  (content-hash `approval_id`).
+- **`AuthorizationEngine`** + `GovernanceIdentity` (`USER`/`ORGANIZATION`/`WORKSPACE`/`SERVICE`/
+  `AGENT` [future]) — a permissive `AllowAllAuthorizer` default, real RBAC/ABAC/OIDC/SSO
+  reserved as extension interfaces only.
+- **`EchoSecretsProvider`** (implements the existing `tool.extensions.SecretsManager` seam
+  directly — no parallel interface) — deterministic, content-hashed placeholder token; never
+  echoes a caller-supplied value back (there is none to echo).
+- **`ToolTenancy`** — organization/workspace isolation, tool allow/deny-lists, regional
+  restrictions, and manifest `Visibility` (`PUBLIC`/`ORG`/`PRIVATE`) gating. Runs *first*, before
+  policy — mirrors `ProviderTenancy` running before provider selection.
+- **`FeatureGateRegistry`** — deterministic, caller-supplied `{name: ENABLED|DISABLED|PREVIEW|
+  INTERNAL}` mapping; ungated names default to `ENABLED`. No remote config.
+- **`RateLimitEngine`** — a pure `evaluate_rate_limit` fixed-window function over an injected
+  `RateLimitStore` (default `InMemoryRateLimitStore`); the caller always supplies `now` — no
+  timers, no background sweep, no Redis.
+- **`GovernanceRepository`** — temporary-only storage (mirrors `ToolRepository`) for approval
+  records (mutable, FSM-advanced) and append-only policy/authorization/rate-limit evaluation
+  logs.
+- **`ToolGovernanceTrace`** — `tenant`/`policy`/`authorization`/`feature_gate`/`rate_limit`/
+  `approval`. No execution data (that's `ToolResult`'s job).
+
+## 15. Why No `tenant` Import (Key Clarification)
+
+`tool/governance` does **not** import `tenant`, even though the M6.1A design anticipated
+`tool → core[, tenant]`. Two reasons converge on the same answer: (a) `tool`'s own frozen
+M6.1B-1 dependency test already asserts `tool` imports no `tenant`, and importing it now would
+be exactly the reverse-dependency risk DL-0044 flagged for `pipeline`; (b) `GovernanceIdentity`
+needed a richer, kind-tagged shape (user/organization/workspace/service/future-agent) than
+widening the frozen M5.0 `tenant.TenantContext` would have allowed without touching a floor
+package. So `governance/domain.py` locally duplicates the *shape* of `tenant.access`'s
+permissive-default-hook pattern (`Effect`, `GovernanceIdentity`) — the same "duplicate, don't
+cross-import" precedent already established for `_run.py`/`ids.py` across every closed runtime.
+The dependency-rules test (`test_tool_governance_dependency_rules`) still forbids `tenant`.
+
+## 16. Governance Events
+
+Reuses the existing `Event`/`EventBus`/`EventSource.TOOL` envelope architecture unchanged. The
+only change to `core.events`: nine additive `EventType` members (no existing member touched,
+AR-32) — `TOOL_POLICY_EVALUATED`, `TOOL_APPROVAL_REQUESTED`, `TOOL_APPROVAL_GRANTED`,
+`TOOL_APPROVAL_REJECTED`, `TOOL_APPROVAL_EXPIRED`, `TOOL_AUTHORIZATION_COMPLETED`,
+`TOOL_RATE_LIMIT_EVALUATED`, `TOOL_SECRET_REQUESTED`, `TOOL_GOVERNANCE_COMPLETED`. Emission is
+via a caller-injected `publish` callable (matching `BusConsumer.publish`'s signature) — `None` by
+default, a safe no-op — since `ToolGovernance` is not itself a `BusConsumer` (it is a
+stateless-per-call facade over injected engines + a repository, not a subscriber).
+
+## 17. Governance Package Structure
+
+```
+platform/tool/governance/
+├── domain.py          # PolicyLevel/Rule/Decision, ApprovalState/Record, GovernanceIdentity,
+│                       #   Effect, AuthorizationDecision, TenantDecision, FeatureGate*,
+│                       #   RateLimit*, ToolGovernanceTrace, GovernanceDecision
+├── lifecycle.py        # ApprovalState FSM (core.fsm-based)
+├── ids.py               # content-hash ids: ap_ / pe_ / az_ / rl_
+├── policies.py           # ToolPolicies + ToolPolicyEngine (precedence + conflict resolution)
+├── approval.py            # ToolApprovalEngine (implements tool.extensions.ApprovalEngine)
+├── authorization.py        # IdentityAuthorizer, AllowAllAuthorizer, AuthorizationEngine
+├── secrets.py                # EchoSecretsProvider (implements tool.extensions.SecretsManager)
+├── tenancy.py                 # ToolTenancy — isolation + allow/deny-lists + visibility gating
+├── feature_gates.py            # FeatureGateRegistry
+├── rate_limit.py                 # RateLimitRule/State/Store + evaluate_rate_limit + Engine
+├── config.py                      # GovernanceConfiguration (validated, no credentials)
+├── serializer.py                   # GovernanceSerializer (round-trippable dict shapes)
+├── repository.py                    # GovernanceRepository (temporary; DocumentStore-backed)
+├── events.py                         # GovernancePhase -> EventType mapping
+├── observability.py                   # Metric constants (basic counters only)
+├── extensions.py                       # Enterprise seams: RBAC/ABAC/OIDC/SSO/Vault/KMS/... (interfaces only)
+├── runtime.py                          # ToolGovernance — the facade (evaluate/approve/reject/...)
+├── factory.py                          # GovernanceFactory.create/default (composition root)
+└── __init__.py
+```
+
+## 18. Governance Testing
+
+`tests/test_tool_governance.py` — 55 tests: policy precedence (deny-absolute, narrower-wins,
+scoped-rule non-match, trail recording), the approval FSM (all 4 terminal transitions,
+illegal-transition rejection, `status_for` narrow-seam mapping), authorization (default-allow,
+custom-denial), the `EchoSecretsProvider` (deterministic, never echoes the raw key), tenancy
+(deny-list, allow-list, org/region restriction, private/org visibility gating), feature gates
+(ungated-enabled default, disabled/preview/internal opt-in semantics), rate limiting (allow-
+then-deny, window reset, unbounded, non-mutating peek), the temporary repository (approval
+round-trip, pending-filter), the `ToolGovernance` facade (allow/deny/pending paths, approve/
+reject/cancel, TTL expiry sweep, feature-gate denial, rate-limit denial, secret request,
+statistics), determinism (identical input -> identical decision; content-derived ids),
+governance events (injected-publisher capture + no-publisher no-op), serialization round-trips,
+configuration validation, dependency rules (no `tenant` import), and no-execution-ownership-
+leakage (`ToolGovernance` exposes no `execute`/`invoke`/`run`/`aexecute`).
+
+**753/753 repository tests pass** (698 prior + 55 new). Ruff clean across `tool/governance/` and
+its test file — the only ruff findings anywhere in the repository remain the 2 pre-existing,
+out-of-scope `voicebot/bot.py` findings certified at M5.8.
+
+## 19. M6.1B-2 Recommendation
+
+Governance implemented, tested, ruff-clean, zero Epic 5/M6.0/M6.1A/M6.1B-1 regressions
+(`tool/runtime.py` untouched). Repository ready for **M6.1B-3 — Tool Runtime Observability &
+Replay** next (per the M6.1A design's own milestone breakdown). Do not begin M6.1B-3 without an
+explicit new commissioning prompt.

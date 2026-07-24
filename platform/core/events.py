@@ -94,6 +94,18 @@ class EventType(StrEnum):
     TOOL_REQUESTED = "tool.requested"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    # tool governance (producer: Tool Runtime Governance, M6.1B-2) — additive
+    # vocabulary extension anticipated by the M6.1A design (no existing member
+    # changed; AR-32).
+    TOOL_POLICY_EVALUATED = "tool.policy.evaluated"
+    TOOL_APPROVAL_REQUESTED = "tool.approval.requested"
+    TOOL_APPROVAL_GRANTED = "tool.approval.granted"
+    TOOL_APPROVAL_REJECTED = "tool.approval.rejected"
+    TOOL_APPROVAL_EXPIRED = "tool.approval.expired"
+    TOOL_AUTHORIZATION_COMPLETED = "tool.authorization.completed"
+    TOOL_RATE_LIMIT_EVALUATED = "tool.rate_limit.evaluated"
+    TOOL_SECRET_REQUESTED = "tool.secret.requested"
+    TOOL_GOVERNANCE_COMPLETED = "tool.governance.completed"
     # workflow / agent (producers: Workflow Runtime / Agent Runtime)
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_STEP = "workflow.step"
