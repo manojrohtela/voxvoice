@@ -429,15 +429,19 @@ def test_loop_imports_only_core_and_own_package():
     assert tops <= allowed_extra | {"loop"}, tops
 
 
-def test_no_pipeline_module_exists_in_bundle_1():
-    """M6.6B-2 owns `loop/core/pipeline.py` (actual propose/critique/repair/
-    validate/stop-check sequencing calling ReasoningPort + LoopValidator).
-    Bundle 1 ships model shapes, policy checks, and interfaces only."""
-    with pytest.raises(ModuleNotFoundError):
-        import loop.core.pipeline  # noqa: F401
+def test_pipeline_module_did_not_exist_as_of_bundle_1():
+    """As of M6.6B-1, `loop/core/pipeline.py` did not yet exist — Bundle 1
+    shipped model shapes, policy checks, and interfaces only. M6.6B-2
+    legitimately added it (actual propose/critique/repair/validate/
+    stop-check sequencing calling ReasoningPort + LoopValidator); see
+    `tests/test_loop_pipeline.py` for its own test suite. This test is
+    rewritten, not deleted, to preserve the historical boundary Bundle 1
+    once represented."""
+    import loop.core.pipeline  # noqa: F401
 
 
-def test_no_replay_package_exists_in_bundle_1():
-    """M6.6B-2 owns `loop/replay/` (LoopReplayRecord + replay engine)."""
-    with pytest.raises(ModuleNotFoundError):
-        import loop.replay  # noqa: F401
+def test_replay_package_did_not_exist_as_of_bundle_1():
+    """As of M6.6B-1, `loop/replay/` did not yet exist. M6.6B-2 legitimately
+    added it (`LoopReplayRecord` + replay engine); see
+    `tests/test_loop_pipeline.py` for its own test suite."""
+    import loop.replay  # noqa: F401
