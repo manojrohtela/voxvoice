@@ -161,6 +161,22 @@ class EventType(StrEnum):
     WORKFLOW_DIAGNOSTICS_GENERATED = "workflow.diagnostics.generated"
     AGENT_ACTIVATED = "agent.activated"
     AGENT_HANDOFF = "agent.handoff"
+    # agent goal execution (producer: Agent Runtime, M6.5B-3) — additive
+    # vocabulary extension (no existing member changed; AR-32). AGENT_ACTIVATED/
+    # AGENT_HANDOFF (Phase 0 scaffolding, above) are pre-existing and unrelated
+    # to goal execution; a goal genuinely executes over time (§7.1 of the
+    # M6.5A design), so it gets its own started/completed/failed/cancelled/
+    # revised/replay/diagnostics vocabulary, mirroring Workflow Runtime's own
+    # execution-side extension.
+    AGENT_GOAL_STARTED = "agent.goal.started"
+    AGENT_GOAL_COMPLETED = "agent.goal.completed"
+    AGENT_GOAL_FAILED = "agent.goal.failed"
+    AGENT_GOAL_CANCELLED = "agent.goal.cancelled"
+    AGENT_GOAL_REVISED = "agent.goal.revised"
+    AGENT_REPLAY_RECORDED = "agent.replay.recorded"
+    AGENT_REPLAY_VALIDATED = "agent.replay.validated"
+    AGENT_REPLAY_MISMATCH = "agent.replay.mismatch"
+    AGENT_DIAGNOSTICS_GENERATED = "agent.diagnostics.generated"
     # cost / metering (producer: Metering)
     COST_UPDATED = "cost.updated"
 

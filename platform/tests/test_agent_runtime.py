@@ -217,16 +217,18 @@ def test_agent_goal_carries_no_state_field_in_this_bundle():
     assert "state" not in names
 
 
-def test_no_execution_engine_module_exists_in_bundle_1():
-    """`agent.execution` (the goal-driving engine, Bundle 3) does not exist
-    yet. `agent.planning` is deliberately *not* asserted absent here — it is
-    Bundle 2's own legitimate scope and exists from that bundle onward (see
-    `test_agent_planning.py::test_no_agent_execution_module_exists_in_bundle_2`
-    for the still-current constraint going forward)."""
+def test_execution_engine_module_did_not_exist_as_of_bundle_1():
+    """Historical record: at Bundle 1 time, neither `agent.planning` nor
+    `agent.execution` existed yet. Both are now legitimate, later bundles'
+    own scope (Bundle 2 and Bundle 3 respectively) and exist from those
+    bundles onward — asserting their absence here would go stale the moment
+    each bundle landed, so this test now only documents the boundary (see
+    `test_agent_planning.py` and `test_agent_execution.py` for those
+    bundles' own suites)."""
     import importlib
 
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("agent.execution")
+    assert importlib.import_module("agent.planning") is not None
+    assert importlib.import_module("agent.execution") is not None
 
 
 # ── Registry ────────────────────────────────────────────────────────────────

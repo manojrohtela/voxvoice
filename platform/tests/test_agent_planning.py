@@ -413,8 +413,14 @@ def test_agent_planning_imports_only_core_and_own_package():
     assert not non_stdlib_like, non_stdlib_like
 
 
-def test_no_agent_execution_module_exists_in_bundle_2():
+def test_agent_execution_module_did_not_exist_as_of_bundle_2():
+    """Historical record: at Bundle 2 time, `agent.execution` (the goal-
+    driving engine) did not exist yet -- that was Bundle 3's own legitimate
+    scope, and it exists from that bundle onward. This test now only
+    documents the boundary rather than asserting the module's absence,
+    since asserting absence would go stale the moment Bundle 3 landed (see
+    `test_agent_execution.py` for that bundle's own suite)."""
     import importlib
 
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("agent.execution")
+    module = importlib.import_module("agent.execution")
+    assert module is not None
