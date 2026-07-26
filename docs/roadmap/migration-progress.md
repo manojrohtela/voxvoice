@@ -165,3 +165,39 @@ provider/AI logic; no runtime globals.
 **Quality gates:** 20 tests pass (12 new + 8 existing) · ruff clean · zero
 import-layer violations (`runtime` imports no `api`; substrate confined). See
 DL-0006 for the "one session per worker" interpretation.
+
+## Epic 5 closed (2026-07-24)
+
+**Runtime Platform v1.0** — Memory/Knowledge/Context/Prompt/Reasoning/Provider +
+the Runtime Pipeline composition root, production-certified (M5.8) and frozen. See
+[`releases/epic5-runtime-platform-v1.0.md`](../releases/epic5-runtime-platform-v1.0.md)
+and [`architecture/epic5-closure-certification.md`](../architecture/epic5-closure-certification.md).
+
+## Epic 6 FROZEN (2026-07-26, M6.8F)
+
+**Execution Platform v1.0** — the execution/agent layer atop Epic 5:
+
+| Milestone | Capability | State |
+|---|---|---|
+| M6.1 | Tool Runtime | ✅ certified |
+| M6.2 | Skill Runtime | ✅ certified |
+| M6.3 | Hook Framework | ✅ certified |
+| M6.4 | Workflow Runtime | ✅ certified |
+| M6.5 | Agent Runtime | ✅ certified |
+| M6.6 | Loop Engine | ✅ certified (93/100) |
+| M6.7 (+M6.7.1) | Platform Integration | ✅ certified + hardened |
+| M6.8 (+M6.8.1) | MCP Runtime | ✅ certified + hardened |
+| **M6.8F** | **Epic 6 Freeze** | 🔒 **FROZEN** |
+
+**Freeze audit (verified 2026-07-26):** 1411 tests pass · ruff-clean (Epic 6
+scope) · dependency graph acyclic (AST scan + cycle detection) · every capability
+imports only `core` (+ `tenant` for provider/mcp) · no capability imports a
+sibling or a composition root · both composition roots (`integration/`, `bridge/`)
+are pure sinks · replay/observability ownership unchanged (capability-local;
+Integration correlates by `trace_id`).
+
+Epic 6 is the permanent execution foundation. Future Epics **extend** it
+(composition/adapters/bridges/plugins/config/new capabilities) and never modify
+it. Full manifest, invariants, and extension policy:
+[`releases/epic6-execution-platform-v1.0.md`](../releases/epic6-execution-platform-v1.0.md).
+Rationale DL-0085.
