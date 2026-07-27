@@ -47,3 +47,21 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0015](ADR-0015-agent-workflow-port-seam.md) | Agent Runtime delegates via its own `AgentWorkflowPort` seam, not literal `WorkflowPort` | Epic 6 Agent Platform Architecture | Accepted 2026-07-25 |
 | [ADR-0016](ADR-0016-loop-engine-no-registrable-identity.md) | Loop Engine has no registrable identity | Epic 6 Agent Platform Architecture | Accepted 2026-07-25 |
 | [ADR-0017](ADR-0017-execution-context-duplication-lineage.md) | Execution-context shapes extend by structural duplication within one delegation lineage; Loop Engine is deliberately outside it | Epic 6 Agent Platform Architecture | Accepted 2026-07-25 |
+| [ADR-0018](ADR-0018-product-runtime-declarative-composition-layer.md) | Product Runtime is a declarative composition layer above the frozen Execution Platform, in a new `platform/product/` package | Epic 7 Product Platform (new) | Accepted 2026-07-26 |
+| [ADR-0019](ADR-0019-binding-resolution-against-registry-snapshot.md) | Binding resolution resolves against an injected immutable RegistrySnapshot, never live Execution Platform runtimes | Epic 7 Product Platform (refines ADR-0018) | Accepted 2026-07-26 — **terminology superseded by ADR-0020**: the type ADR-0019 calls `RegistrySnapshot`/`RegistryEntry` is implemented as `BindingSnapshot`/`BindingSnapshotEntry` (`product.compiler`); ADR-0019's substance is unchanged |
+| [ADR-0020](ADR-0020-registry-nouns-reserved-for-product-registry.md) | "Registry" nouns are reserved for the Product Registry of packages; the compiler's binding catalog is a `BindingSnapshot` | Epic 7 Product Platform (refines ADR-0019 terminology) | Accepted 2026-07-27 |
+
+> **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
+> `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
+> binding-resolution catalog. ADR-0020 reserved the "Registry" nouns for the Product
+> Registry of packages and renamed that catalog to **`BindingSnapshot`** /
+> **`BindingSnapshotEntry`** (`product/compiler/snapshot.py`). ADR-0019 remains
+> Accepted and immutable; only the *name* of the type it describes changed — read
+> `RegistrySnapshot` in ADR-0019 as `BindingSnapshot`. The resolve-against-an-injected-
+> immutable-snapshot decision itself is unchanged.
+
+> **Epic 7 freeze (M7.0F).** ADR-0018, ADR-0019, and ADR-0020 are ratified and
+> implemented under **Product Runtime v1.0** (🔒 frozen — see
+> [`docs/releases/epic7-product-runtime-v1.0.md`](../releases/epic7-product-runtime-v1.0.md)).
+> They are binding until superseded; changing an Epic 7 architectural invariant they
+> encode requires a new superseding ADR.
