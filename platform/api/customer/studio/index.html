@@ -1,0 +1,1793 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoxVoice Studio — Organizations</title>
+<style>
+  :root { --bg:#0e1116; --panel:#171b22; --panel2:#1e232c; --line:#2a313c; --fg:#e6edf3;
+          --muted:#9aa7b4; --accent:#4c8bf5; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:12px 18px;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; }
+  header .brand { font-weight:700; letter-spacing:.2px; }
+  header .brand span { color:var(--accent); }
+  header .spacer { flex:1; }
+  main { max-width:1000px; margin:0 auto; padding:18px; display:grid; gap:18px; }
+  .grid { display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { margin:0 0 12px; font-size:15px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  input,select { width:100%; padding:8px 10px; background:var(--panel2); color:var(--fg);
+                 border:1px solid var(--line); border-radius:7px; }
+  button { padding:8px 12px; background:var(--accent); color:#fff; border:0; border-radius:7px;
+           cursor:pointer; font-weight:600; }
+  button.secondary { background:var(--panel2); color:var(--fg); border:1px solid var(--line); }
+  button.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .muted { color:var(--muted); }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:13px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); }
+  .pill.active { color:var(--ok); border-color:var(--ok); }
+  .pill.invited { color:var(--warn); border-color:var(--warn); }
+  .pill.suspended,.pill.declined,.pill.cancelled,.pill.expired { color:var(--err); border-color:var(--err); }
+  .empty { color:var(--muted); padding:14px; text-align:center; border:1px dashed var(--line); border-radius:8px; }
+  .banner { padding:10px 12px; border-radius:8px; margin:6px 0; }
+  .banner.err { background:rgba(248,81,73,.12); color:var(--err); border:1px solid var(--err); }
+  .banner.ok  { background:rgba(63,185,80,.12); color:var(--ok); border:1px solid var(--ok); }
+  .feed { max-height:280px; overflow:auto; }
+  .feed .item { padding:6px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .hidden { display:none; }
+  .spinner { color:var(--muted); font-size:13px; }
+  @media (max-width:520px){ header{padding:10px 12px} main{padding:12px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Vox<span>Voice</span> Studio</div>
+  <div class="spacer"></div>
+  <div id="whoami" class="muted"></div>
+  <button id="signout" class="secondary hidden">Sign out</button>
+</header>
+<main>
+  <div id="globalError"></div>
+
+  <!-- Sign in -->
+  <section id="signinCard" class="card">
+    <h2>Sign in</h2>
+    <p class="muted">Register (or reuse) a user, then get a session token. No password —
+      dev/test identity issuance.</p>
+    <div class="grid">
+      <div>
+        <label>Email</label><input id="email" value="founder@acme.io" />
+        <label>Display name</label><input id="displayName" value="Founder" />
+        <div class="row" style="margin-top:10px">
+          <button id="btnRegister">Register &amp; sign in</button>
+          <span id="signinStatus" class="spinner"></span>
+        </div>
+      </div>
+      <div>
+        <label>Existing user id (optional)</label><input id="existingUser" placeholder="usr_…" />
+        <div class="row" style="margin-top:10px"><button id="btnToken" class="secondary">Sign in with user id</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Workspace (org) -->
+  <section id="app" class="hidden">
+    <div class="grid">
+      <div class="card">
+        <h2>Create organization</h2>
+        <label>Name</label><input id="newOrgName" value="Acme Inc" />
+        <div class="row" style="margin-top:10px"><button id="btnCreateOrg">Create</button></div>
+        <div style="margin-top:14px">
+          <label>Your organizations</label>
+          <div id="orgPicker" class="row"></div>
+        </div>
+      </div>
+
+      <div class="card" id="settingsCard">
+        <h2>Organization settings</h2>
+        <div id="noOrg" class="empty">Create or select an organization.</div>
+        <div id="settingsForm" class="hidden">
+          <label>Name</label><input id="setName" />
+          <div class="grid">
+            <div><label>Timezone</label><input id="setTz" /></div>
+            <div><label>Language</label><input id="setLang" /></div>
+          </div>
+          <label>Logo URL</label><input id="setLogo" placeholder="https://…" />
+          <div class="row" style="margin-top:12px">
+            <button id="btnSaveSettings">Save settings</button>
+            <button id="btnDeleteOrg" class="danger">Soft-delete org</button>
+            <span id="settingsStatus" class="spinner"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Members <span id="memberCount" class="muted"></span></h2>
+      <div id="membersBody"></div>
+      <hr style="border-color:var(--line);margin:14px 0" />
+      <h2>Invite member</h2>
+      <div class="row">
+        <input id="inviteUser" placeholder="user id (usr_…)" style="max-width:240px" />
+        <select id="inviteTier" style="max-width:140px">
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+          <option value="viewer">Viewer</option>
+          <option value="owner">Owner</option>
+        </select>
+        <button id="btnInvite">Send invite</button>
+        <span id="inviteStatus" class="spinner"></span>
+      </div>
+      <p class="muted" style="font-size:12px">Tip: register a second user in another tab to get a user id.</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Pending invitations</h2>
+        <div id="pendingBody"></div>
+      </div>
+      <div class="card">
+        <h2>Organization activity</h2>
+        <div id="activityBody" class="feed"></div>
+      </div>
+    </div>
+
+    <!-- Workspaces (M8.7) -->
+    <div class="grid">
+      <div class="card">
+        <h2>Workspaces <span id="wsCount" class="muted"></span></h2>
+        <div class="row" style="margin-bottom:10px">
+          <input id="wsSearch" placeholder="search…" style="max-width:180px" />
+          <button id="btnWsSearch" class="secondary">Search</button>
+          <button id="btnWsSearchClear" class="secondary">Clear</button>
+        </div>
+        <div id="wsListBody"></div>
+        <hr style="border-color:var(--line);margin:14px 0" />
+        <h2>Create workspace</h2>
+        <div class="row">
+          <input id="newWsName" placeholder="Name" style="max-width:180px" />
+          <input id="newWsSlug" placeholder="slug" style="max-width:140px" />
+          <button id="btnCreateWs">Create</button>
+          <span id="wsStatus" class="spinner"></span>
+        </div>
+      </div>
+
+      <div class="card" id="wsDetailCard">
+        <h2>Workspace dashboard <span id="wsCurrentName" class="muted"></span></h2>
+        <div id="noWs" class="empty">Select a workspace from the switcher.</div>
+        <div id="wsForm" class="hidden">
+          <label>Name</label><input id="wsName" />
+          <label>Description</label><input id="wsDesc" />
+          <div class="grid">
+            <div><label>Icon</label><input id="wsIcon" placeholder="🚀" /></div>
+            <div><label>Color</label><input id="wsColor" placeholder="#4c8bf5" /></div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button id="btnSaveWs">Save settings</button>
+            <button id="btnFavWs" class="secondary">★ Favorite</button>
+            <button id="btnDefaultWs" class="secondary">Set default</button>
+            <button id="btnArchiveWs" class="danger">Archive</button>
+            <button id="btnRestoreWs" class="secondary hidden">Restore</button>
+            <span id="wsDetailStatus" class="spinner"></span>
+          </div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Workspace members <span id="wsMemberCount" class="muted"></span></h2>
+          <div id="wsMembersBody"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="wsAddUser" placeholder="org member user id" style="max-width:200px" />
+            <select id="wsAddRole" style="max-width:130px">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <button id="btnAddWsMember">Add</button>
+            <span id="wsMemberStatus" class="spinner"></span>
+          </div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Workspace activity</h2>
+          <div id="wsActivityBody" class="feed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Observability Platform (M8.17) -->
+    <div id="observabilitySection" class="grid hidden">
+      <div class="card">
+        <h2>Observability <span id="obHealthPill" class="pill"></span></h2>
+        <div class="muted" style="margin-bottom:6px">A passive read-model over the audit stream — no polling, no execution. Metrics, logs, traces, health, usage & cost are projections; only alert rules are stored.</div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="btnObRefresh" class="secondary">Refresh</button>
+          <span id="obStatus" class="spinner"></span>
+        </div>
+        <div id="obErr"></div>
+
+        <h2 style="font-size:13px">Metrics Dashboard</h2>
+        <div id="obMetrics"></div>
+
+        <h2 style="font-size:13px">Health Dashboard</h2>
+        <div id="obHealth"></div>
+
+        <h2 style="font-size:13px">Usage Dashboard</h2>
+        <div id="obUsage"></div>
+
+        <h2 style="font-size:13px">Cost Dashboard <span class="muted">(estimated — not billing)</span></h2>
+        <div id="obCost"></div>
+
+        <h2 style="font-size:13px">Provider Analytics · Knowledge Analytics · Deployment Analytics</h2>
+        <div id="obAnalytics"></div>
+
+        <h2 style="font-size:13px">Trace Viewer</h2>
+        <div id="obTraces"></div>
+
+        <h2 style="font-size:13px">Log Explorer</h2>
+        <div class="row" style="margin:4px 0">
+          <select id="obLogLevel"><option value="">all levels</option><option value="error">error</option><option value="warning">warning</option><option value="info">info</option></select>
+          <button id="btnObLogs" class="secondary">Filter</button>
+        </div>
+        <div id="obLogs"></div>
+
+        <h2 style="font-size:13px">Alert Center</h2>
+        <div class="row" style="margin:4px 0;flex-wrap:wrap;gap:4px">
+          <input id="obAlertName" placeholder="rule name" style="max-width:120px" />
+          <select id="obAlertMetric"></select>
+          <select id="obAlertCmp"><option value="gt">&gt;</option><option value="gte">&ge;</option><option value="lt">&lt;</option><option value="lte">&le;</option></select>
+          <input id="obAlertThreshold" type="number" value="1" style="max-width:70px" />
+          <button id="btnObAlertCreate">Add rule</button>
+        </div>
+        <div id="obAlerts"></div>
+      </div>
+    </div>
+
+    <!-- Projects (M8.8) -->
+    <div id="projectsSection" class="grid hidden">
+      <div class="card">
+        <h2>Projects <span id="projCount" class="muted"></span> <span id="projWsName" class="muted"></span></h2>
+        <div class="row" style="margin-bottom:10px">
+          <input id="projSearch" placeholder="search…" style="max-width:180px" />
+          <button id="btnProjSearch" class="secondary">Search</button>
+          <button id="btnProjSearchClear" class="secondary">Clear</button>
+        </div>
+        <div id="projListBody"></div>
+        <hr style="border-color:var(--line);margin:14px 0" />
+        <h2>Create project</h2>
+        <div class="row">
+          <input id="newProjName" placeholder="Name" style="max-width:180px" />
+          <input id="newProjSlug" placeholder="slug" style="max-width:140px" />
+          <button id="btnCreateProj">Create</button>
+          <span id="projStatus" class="spinner"></span>
+        </div>
+      </div>
+
+      <div class="card" id="projDetailCard">
+        <h2>Project dashboard <span id="projCurrentName" class="muted"></span></h2>
+        <div id="noProj" class="empty">Select a project from the list.</div>
+        <div id="projForm" class="hidden">
+          <label>Name</label><input id="projName" />
+          <label>Description</label><input id="projDesc" />
+          <label>Icon</label><input id="projIcon" placeholder="📦" />
+          <div class="row" style="margin-top:12px">
+            <button id="btnSaveProj">Save settings</button>
+            <button id="btnArchiveProj" class="danger">Archive</button>
+            <button id="btnRestoreProj" class="secondary hidden">Restore</button>
+            <span id="projDetailStatus" class="spinner"></span>
+          </div>
+          <label style="margin-top:14px">Environment</label>
+          <div class="row">
+            <select id="projEnvSelect" style="max-width:180px"></select>
+            <span id="projEnvStatus" class="spinner"></span>
+          </div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Project members <span id="projMemberCount" class="muted"></span></h2>
+          <div id="projMembersBody"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="projAddUser" placeholder="org member user id" style="max-width:200px" />
+            <select id="projAddRole" style="max-width:130px">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <button id="btnAddProjMember">Add</button>
+            <span id="projMemberStatus" class="spinner"></span>
+          </div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Project activity</h2>
+          <div id="projActivityBody" class="feed"></div>
+        </div>
+      </div>
+
+      <!-- Agent Builder (M8.10) -->
+      <div class="card" id="agentsCard">
+        <h2>Agents <span id="agentCount" class="muted"></span></h2>
+        <div id="noProjForAgents" class="empty">Select a project to build agents.</div>
+        <div id="agentsPanel" class="hidden">
+          <div class="row" style="margin-bottom:10px">
+            <input id="agentSearch" placeholder="search agents…" style="max-width:180px" />
+            <button id="btnAgentSearch" class="secondary">Search</button>
+            <button id="btnAgentSearchClear" class="secondary">Clear</button>
+          </div>
+          <div id="agentListBody"></div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Create agent</h2>
+          <div class="row">
+            <input id="newAgentName" placeholder="Agent name" style="max-width:200px" />
+            <input id="newAgentCategory" placeholder="category" style="max-width:130px" />
+            <button id="btnCreateAgent">Create</button>
+            <span id="agentStatus" class="spinner"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent editor / dashboard -->
+      <div class="card hidden" id="agentEditorCard">
+        <h2>Agent editor <span id="agentCurrentName" class="muted"></span>
+          <span id="agentStatePill"></span></h2>
+        <div id="agentEditor">
+          <label>Name</label><input id="agName" />
+          <label>Description</label><input id="agDesc" />
+          <div class="row">
+            <div style="flex:1"><label>Icon</label><input id="agIcon" placeholder="🤖" /></div>
+            <div style="flex:1"><label>Category</label><input id="agCategory" /></div>
+            <div style="flex:1"><label>Language</label><input id="agLanguage" placeholder="en" /></div>
+          </div>
+          <label>Tags (comma-separated)</label><input id="agTags" placeholder="support, sales" />
+          <label>Default greeting</label><input id="agGreeting" />
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Prompt Builder</h2>
+          <label>System prompt <span id="agPromptCount" class="muted"></span></label>
+          <textarea id="agSystemPrompt" rows="4" placeholder="You are a helpful assistant for {{company_name}}…"></textarea>
+          <label>Persona</label><textarea id="agPersona" rows="2"></textarea>
+          <label>Instructions</label><textarea id="agInstructions" rows="3"></textarea>
+          <label>Conversation style</label><input id="agStyle" placeholder="concise, friendly" />
+          <div id="agPromptPreview" class="feed" style="margin-top:8px"></div>
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Model configuration</h2>
+          <div class="row">
+            <div style="flex:1"><label>Provider</label><input id="agProvider" placeholder="provider" /></div>
+            <div style="flex:1"><label>Model</label><input id="agModel" placeholder="model" /></div>
+            <div style="flex:1"><label>Model version</label><input id="agModelVersion" /></div>
+          </div>
+          <div class="row">
+            <div style="flex:1"><label>Temperature</label><input id="agTemp" type="number" step="0.1" value="0.7" /></div>
+            <div style="flex:1"><label>Top P</label><input id="agTopP" type="number" step="0.05" value="1.0" /></div>
+            <div style="flex:1"><label>Max tokens</label><input id="agMaxTokens" type="number" value="1024" /></div>
+          </div>
+          <div class="row">
+            <label class="row" style="gap:6px"><input id="agStreaming" type="checkbox" checked /> Streaming</label>
+            <label class="row" style="gap:6px"><input id="agStructured" type="checkbox" /> Structured output</label>
+            <div style="flex:1"><label>Reasoning</label>
+              <select id="agReasoning"><option>none</option><option>light</option><option>extended</option></select></div>
+          </div>
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Voice configuration</h2>
+          <label class="row" style="gap:6px"><input id="agVoiceEnabled" type="checkbox" /> Voice enabled</label>
+          <div class="row">
+            <div style="flex:1"><label>Voice provider</label><input id="agVoiceProvider" /></div>
+            <div style="flex:1"><label>Voice name</label><input id="agVoiceName" /></div>
+            <div style="flex:1"><label>Speaking rate</label><input id="agVoiceRate" type="number" step="0.1" value="1.0" /></div>
+          </div>
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Variables <span class="muted">(secrets never leave the server)</span></h2>
+          <div id="agVarBody"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="agVarName" placeholder="name" style="max-width:130px" />
+            <select id="agVarType" style="max-width:110px">
+              <option value="string">string</option><option value="number">number</option>
+              <option value="boolean">boolean</option><option value="secret">secret</option>
+            </select>
+            <input id="agVarValue" placeholder="value" style="max-width:150px" />
+            <button id="btnAddVar" class="secondary">Add variable</button>
+          </div>
+
+          <div class="row" style="margin-top:14px">
+            <button id="btnSaveAgent">Save draft</button>
+            <button id="btnPublishAgent">Publish</button>
+            <button id="btnUnpublishAgent" class="secondary">Unpublish</button>
+            <button id="btnDuplicateAgent" class="secondary">Duplicate</button>
+            <button id="btnArchiveAgent" class="danger">Archive</button>
+            <button id="btnRestoreAgent" class="secondary hidden">Restore</button>
+            <button id="btnDeleteAgent" class="danger">Delete</button>
+            <span id="agentEditStatus" class="spinner"></span>
+          </div>
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Agent Tool Assignment <span id="agToolCount" class="muted"></span></h2>
+          <div id="agToolValidation"></div>
+          <div id="agToolsBody"></div>
+          <div class="row" style="margin-top:8px">
+            <select id="agAttachTool" style="max-width:220px"></select>
+            <button id="btnAttachTool" class="secondary">Attach tool</button>
+            <span id="agToolStatus" class="spinner"></span>
+          </div>
+          <div class="muted" style="margin-top:4px">Use ▲/▼ to change Tool Ordering.</div>
+
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Version history <span id="agVersionCount" class="muted"></span></h2>
+          <div id="agVersionsBody"></div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Agent activity</h2>
+          <div id="agActivityBody" class="feed"></div>
+        </div>
+      </div>
+
+      <!-- Tool Framework (M8.11) -->
+      <div class="card" id="toolsCard">
+        <h2>Tool Catalog <span id="toolCount" class="muted"></span></h2>
+        <div id="noProjForTools" class="empty">Select a project to manage tools.</div>
+        <div id="toolsPanel" class="hidden">
+          <div class="row" style="margin-bottom:10px">
+            <input id="toolSearch" placeholder="search tools…" style="max-width:170px" />
+            <button id="btnToolSearch" class="secondary">Search</button>
+            <button id="btnToolSearchClear" class="secondary">Clear</button>
+          </div>
+          <h2 class="muted" style="font-size:13px">Tool Library</h2>
+          <div id="toolListBody"></div>
+          <hr style="border-color:var(--line);margin:14px 0" />
+          <h2>Register tool</h2>
+          <div class="row">
+            <input id="newToolName" placeholder="Tool name" style="max-width:170px" />
+            <select id="newToolCategory" style="max-width:140px">
+              <option value="knowledge">Knowledge</option>
+              <option value="http_api">HTTP API</option>
+              <option value="webhook">Webhook</option>
+              <option value="database">Database</option>
+              <option value="function">Function</option>
+              <option value="mcp">MCP</option>
+              <option value="custom" selected>Custom</option>
+            </select>
+            <button id="btnCreateTool">Create</button>
+            <span id="toolStatus" class="spinner"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tool details / configuration -->
+      <div class="card hidden" id="toolDetailCard">
+        <h2>Tool Details <span id="toolCurrentName" class="muted"></span>
+          <span id="toolStatePill"></span></h2>
+        <div id="toolValidation"></div>
+        <label>Name</label><input id="tlName" />
+        <label>Description</label><input id="tlDesc" />
+        <div class="row">
+          <div style="flex:1"><label>Category</label>
+            <select id="tlCategory">
+              <option value="knowledge">Knowledge</option><option value="http_api">HTTP API</option>
+              <option value="webhook">Webhook</option><option value="database">Database</option>
+              <option value="function">Function</option><option value="mcp">MCP</option>
+              <option value="custom">Custom</option>
+            </select></div>
+          <div style="flex:1"><label>Visibility</label>
+            <select id="tlVisibility">
+              <option value="project">Project</option><option value="workspace">Workspace</option>
+              <option value="organization">Organization</option>
+            </select></div>
+          <div style="flex:1"><label>Icon</label><input id="tlIcon" placeholder="🔧" /></div>
+        </div>
+        <h2 style="font-size:14px;margin-top:12px">Tool Configuration <span class="muted">(typed data)</span></h2>
+        <div class="row">
+          <div style="flex:1"><label>Timeout (ms)</label><input id="tlTimeout" type="number" value="30000" /></div>
+          <div style="flex:1"><label>Max retries</label><input id="tlRetries" type="number" value="0" /></div>
+        </div>
+        <label>Settings (JSON)</label>
+        <textarea id="tlSettings" rows="3" placeholder='{"url": "https://…"}'></textarea>
+        <div class="row" style="margin-top:12px">
+          <button id="btnSaveTool">Save configuration</button>
+          <button id="btnToggleTool" class="secondary">Disable</button>
+          <button id="btnArchiveTool" class="danger">Archive</button>
+          <button id="btnRestoreTool" class="secondary hidden">Restore</button>
+          <button id="btnDeleteTool" class="danger">Delete</button>
+          <span id="toolDetailStatus" class="spinner"></span>
+        </div>
+        <hr style="border-color:var(--line);margin:14px 0" />
+        <h2>Tool history</h2>
+        <div id="toolActivityBody" class="feed"></div>
+      </div>
+
+      <!-- Knowledge Tool (M8.15) -->
+      <div class="card" id="knowledgeCard">
+        <h2>Knowledge Dashboard <span id="kbCount" class="muted"></span></h2>
+        <div id="noProjForKb" class="empty">Select a project to manage knowledge.</div>
+        <div id="kbPanel" class="hidden">
+          <div class="muted" style="margin-bottom:6px">Knowledge is a Tool Framework capability — attach a <b>knowledge</b> tool (with a collection_id) to an agent to retrieve context during execution.</div>
+          <h2 style="font-size:13px">Collections</h2>
+          <div id="kbCollections"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="newKbName" placeholder="collection name" style="max-width:160px" />
+            <input id="newKbChunk" type="number" placeholder="chunk size" value="800" style="max-width:100px" />
+            <button id="btnCreateKb">Create</button>
+            <span id="kbStatus" class="spinner"></span>
+          </div>
+          <div id="kbErr"></div>
+
+          <div id="kbDetail" class="hidden">
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Collection <span id="kbCurrent" class="muted"></span></h2>
+            <div class="row">
+              <button id="btnKbEmbed" class="secondary">Generate embeddings</button>
+              <button id="btnKbIndex" class="secondary">Index vectors</button>
+              <button id="btnKbArchive" class="danger">Archive</button>
+            </div>
+            <h2 style="margin-top:12px">Vector Status</h2>
+            <div id="kbVectorStatus"></div>
+
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Documents / Upload</h2>
+            <div id="kbDocuments"></div>
+            <div class="row" style="margin-top:8px">
+              <input id="kbDocName" placeholder="document name" style="max-width:150px" />
+              <button id="btnKbUpload">Upload</button>
+            </div>
+            <textarea id="kbDocContent" rows="3" placeholder="document text (text/plain — no OCR)"></textarea>
+
+            <h2 style="margin-top:12px">Chunk Viewer / Metadata Viewer</h2>
+            <div id="kbChunks"></div>
+
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Search Playground / Retrieval Inspector</h2>
+            <div class="row">
+              <input id="kbQuery" placeholder="search query…" style="flex:1" />
+              <input id="kbTopK" type="number" value="3" style="max-width:70px" />
+              <button id="btnKbSearch">Search</button>
+            </div>
+            <div id="kbResults"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deployment Actuator (M8.16, ADR-0022) -->
+      <div class="card" id="deployCard">
+        <h2>Deployment Dashboard <span id="depCount" class="muted"></span></h2>
+        <div id="noProjForDeploy" class="empty">Open a project to manage deployments.</div>
+        <div id="depPanel" class="hidden">
+          <div class="muted" style="margin-bottom:6px">Studio <b>requests</b> deployment; the Deployment Actuator (ADR-0022) <b>executes</b> it. Only a <b>published</b> agent deploys. Only the <b>Local</b> adapter executes; production is approval-gated.</div>
+          <h2 style="font-size:13px">Environment Selector</h2>
+          <div class="row" style="margin-bottom:6px">
+            <input id="depAgentId" placeholder="published agent id (agt_…)" style="flex:1" />
+            <select id="depEnv">
+              <option value="development">development</option>
+              <option value="testing">testing</option>
+              <option value="staging">staging</option>
+              <option value="production">production (approval-gated)</option>
+            </select>
+            <select id="depStrategy">
+              <option value="rolling">rolling</option>
+              <option value="blue_green">blue_green</option>
+              <option value="canary">canary</option>
+              <option value="recreate">recreate</option>
+            </select>
+            <label class="muted"><input type="checkbox" id="depAuto" /> auto-approve</label>
+            <button id="btnDepPlan" class="secondary">Plan</button>
+            <button id="btnDepSubmit">Deploy</button>
+            <span id="depStatus" class="spinner"></span>
+          </div>
+          <div id="depPlan"></div>
+          <div id="depErr"></div>
+          <h2 style="font-size:13px">Deployment History <span id="depTargets" class="muted"></span></h2>
+          <div id="depHistory"></div>
+
+          <div id="depDetail" class="hidden">
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Deployment <span id="depCurrent" class="muted"></span></h2>
+            <h2 style="font-size:13px">Approval Queue &amp; Rollback Manager</h2>
+            <div class="row" style="flex-wrap:wrap;gap:4px">
+              <input id="depReason" placeholder="reason (approve/reject/rollback)" style="max-width:180px" />
+              <button id="btnDepApprove" class="secondary">Approve</button>
+              <button id="btnDepReject" class="secondary">Reject</button>
+              <button id="btnDepCancel" class="secondary">Cancel</button>
+              <button id="btnDepRetry" class="secondary">Retry</button>
+              <button id="btnDepRollback" class="danger">Roll back</button>
+            </div>
+            <h2 style="font-size:13px;margin-top:10px">Health Viewer</h2>
+            <div id="depHealth"></div>
+            <h2 style="font-size:13px">Deployment Timeline</h2>
+            <div id="depTimeline"></div>
+            <h2 style="font-size:13px">Execution Logs</h2>
+            <div id="depLogs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conversation Runtime Inspector (M8.12) -->
+      <div class="card" id="runtimeCard">
+        <h2>Runtime Inspector <span id="sessionCount" class="muted"></span></h2>
+        <div id="noAgentForRuntime" class="empty">Open a published agent to inspect the runtime.</div>
+        <div id="runtimePanel" class="hidden">
+          <div class="muted" style="margin-bottom:8px">Sessions run the <b>published</b> version only — drafts never execute. No chat, no LLM, no tool execution.</div>
+          <h2 style="font-size:13px">Session</h2>
+          <div id="sessionListBody"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="newSessionVars" placeholder='runtime variables JSON {"company_name":"Acme"}' style="max-width:280px" />
+            <button id="btnCreateSession">Create session</button>
+            <span id="sessionStatus" class="spinner"></span>
+          </div>
+          <div id="runtimeErr"></div>
+
+          <div id="sessionDetail" class="hidden">
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Session Viewer <span id="sessionCurrent" class="muted"></span></h2>
+            <div class="row">
+              <button id="btnResumeSession" class="secondary">Resume</button>
+              <button id="btnCloseSession" class="danger">Close</button>
+            </div>
+
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Execution Plan — Resolved Prompt</h2>
+            <pre id="rtPrompt" class="feed" style="white-space:pre-wrap"></pre>
+
+            <h2>Variable Inspector</h2>
+            <div id="rtVariables"></div>
+
+            <h2 style="margin-top:12px">Tool Plan</h2>
+            <div id="rtToolPlan"></div>
+            <div id="rtAdapters" class="muted" style="margin-top:6px"></div>
+
+            <h2 style="margin-top:12px">Diagnostics</h2>
+            <div id="rtDiagnostics"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conversation Playground (M8.13) -->
+      <div class="card" id="playgroundCard">
+        <h2>Conversation Playground <span id="pgCount" class="muted"></span></h2>
+        <div id="noAgentForPg" class="empty">Open a published agent to start a conversation.</div>
+        <div id="pgPanel" class="hidden">
+          <div class="muted" style="margin-bottom:8px">Mock runtime only — no real provider, no real LLM, no real tool execution, no audio.</div>
+          <h2 style="font-size:13px">Session Browser</h2>
+          <div id="pgSessionBrowser"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="pgStartVars" placeholder='runtime variables JSON {"company_name":"Acme"}' style="max-width:280px" />
+            <button id="btnStartConversation">Start conversation</button>
+            <span id="pgStatus" class="spinner"></span>
+          </div>
+          <div id="pgErr"></div>
+
+          <div id="pgDetail" class="hidden">
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Chat Window <span id="pgCurrent" class="muted"></span></h2>
+            <div id="pgChat" class="feed" style="max-height:240px;overflow:auto"></div>
+            <div class="row" style="margin-top:8px">
+              <input id="pgInput" placeholder="type a message…" style="flex:1" />
+              <button id="btnSendTurn">Send</button>
+              <button id="btnResetConversation" class="secondary">Reset</button>
+              <button id="btnCloseConversation" class="danger">Close</button>
+            </div>
+
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Prompt Inspector</h2>
+            <pre id="pgPrompt" class="feed" style="white-space:pre-wrap"></pre>
+
+            <h2>Variable Inspector</h2>
+            <div id="pgVariables"></div>
+
+            <h2 style="margin-top:12px">Execution Timeline</h2>
+            <div id="pgTimeline"></div>
+
+            <h2 style="margin-top:12px">Tool Invocation Viewer</h2>
+            <div id="pgToolInvocations"></div>
+
+            <h2 style="margin-top:12px">Adapter Output Viewer</h2>
+            <pre id="pgAdapters" class="feed" style="white-space:pre-wrap"></pre>
+
+            <h2 style="margin-top:12px">Diagnostics Panel</h2>
+            <div id="pgDiagnostics"></div>
+
+            <hr style="border-color:var(--line);margin:14px 0" />
+            <h2>Real Provider Execution <span class="muted">(M8.14)</span></h2>
+            <div class="muted" style="margin-bottom:6px">Executes through the real provider adapters (offline transport in this build).</div>
+            <div class="row">
+              <input id="execInput" placeholder="message to execute…" style="flex:1" />
+              <button id="btnExecuteReal">Execute</button>
+              <button id="btnStreamReal" class="secondary">Stream</button>
+              <span id="execStatus" class="spinner"></span>
+            </div>
+            <div id="execErr"></div>
+
+            <h2 style="margin-top:12px">Provider Inspector</h2>
+            <div id="execProvider"></div>
+
+            <h2 style="margin-top:12px">Token Usage &amp; Latency</h2>
+            <div id="execUsage"></div>
+
+            <h2 style="margin-top:12px">Streaming View</h2>
+            <pre id="execStream" class="feed" style="white-space:pre-wrap"></pre>
+
+            <h2 style="margin-top:12px">Execution Timeline / Retry Timeline</h2>
+            <div id="execTimeline"></div>
+
+            <h2 style="margin-top:12px">Provider Diagnostics</h2>
+            <pre id="execDiagnostics" class="feed" style="white-space:pre-wrap"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API = ""; // same origin
+let token = null, me = null, orgs = [], currentOrg = null;
+let currentWs = null, nav = null;  // M8.7 — workspace selection + navigation payload
+let currentProj = null;  // M8.8 — project selection within the open workspace
+let currentAgent = null; // M8.10 — agent selection within the open project
+let currentTool = null;  // M8.11 — tool selection within the open project
+let currentSession = null; // M8.12 — runtime session selection for the open agent
+let currentConversation = null; // M8.13 — playground conversation for the open agent
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => el.classList.toggle("hidden", !on);
+function banner(el, msg, kind){ el.innerHTML = msg ? `<div class="banner ${kind}">${msg}</div>` : ""; }
+
+async function api(method, path, body){
+  const headers = {"Content-Type":"application/json"};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(API + path, {method, headers, body: body?JSON.stringify(body):undefined});
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok){ const e = new Error((data&&data.error&&data.error.message)||res.statusText); e.status=res.status; e.data=data; throw e; }
+  return data;
+}
+
+async function register(){
+  banner($("globalError"),"","");
+  $("signinStatus").textContent = "…";
+  try{
+    const email = $("email").value.trim(), display_name = $("displayName").value.trim();
+    const u = await api("POST","/v1/auth/register",{email, display_name});
+    await getToken(u.id);
+  }catch(e){ banner($("globalError"), "Sign-in failed: "+e.message, "err"); }
+  finally{ $("signinStatus").textContent=""; }
+}
+async function getToken(userId){
+  const t = await api("POST","/v1/auth/token",{user_id:userId});
+  token = t.access_token;
+  me = await api("GET","/v1/auth/me");
+  $("whoami").textContent = "user " + me.user_id;
+  show($("signinCard"), false); show($("app"), true); show($("signout"), true);
+  await loadOrgs();
+}
+
+async function createOrg(){
+  try{
+    const org = await api("POST","/v1/organizations",{name:$("newOrgName").value.trim()});
+    orgs.push(org); selectOrg(org.id); renderOrgPicker(); await refresh();
+  }catch(e){ banner($("globalError"),"Create failed: "+e.message,"err"); }
+}
+async function loadOrgs(){
+  // No list endpoint by design; track created orgs client-side for this session.
+  renderOrgPicker();
+  if (currentOrg) await refresh();
+}
+function renderOrgPicker(){
+  $("orgPicker").innerHTML = orgs.length ? "" : '<span class="muted">none yet</span>';
+  orgs.forEach(o=>{
+    const b=document.createElement("button");
+    b.className = (currentOrg===o.id)?"":"secondary"; b.textContent=o.name;
+    b.onclick=()=>{selectOrg(o.id);refresh();renderOrgPicker();};
+    $("orgPicker").appendChild(b);
+  });
+}
+function selectOrg(id){ currentOrg=id; }
+
+async function refresh(){
+  if(!currentOrg){ show($("noOrg"),true); show($("settingsForm"),false); return; }
+  try{
+    const org = await api("GET","/v1/organizations/"+currentOrg);
+    show($("noOrg"),false); show($("settingsForm"),true);
+    $("setName").value=org.name; $("setTz").value=org.timezone;
+    $("setLang").value=org.language; $("setLogo").value=org.logo_url||"";
+    await Promise.all([loadMembers(), loadPending(), loadActivity(), loadWorkspaces()]);
+    await loadObservability();  // M8.17
+  }catch(e){ banner($("globalError"),"Load failed: "+e.message,"err"); }
+}
+async function saveSettings(){
+  $("settingsStatus").textContent="…";
+  try{
+    await api("PATCH","/v1/organizations/"+currentOrg,{
+      name:$("setName").value.trim(), timezone:$("setTz").value.trim(),
+      language:$("setLang").value.trim(), logo_url:$("setLogo").value.trim()||null});
+    banner($("globalError"),"Settings saved.","ok"); await refresh();
+  }catch(e){ banner($("globalError"),"Save failed: "+e.message,"err"); }
+  finally{ $("settingsStatus").textContent=""; }
+}
+async function deleteOrg(){
+  if(!confirm("Soft-delete this organization?")) return;
+  try{ await api("DELETE","/v1/organizations/"+currentOrg);
+    orgs=orgs.filter(o=>o.id!==currentOrg); currentOrg=null;
+    banner($("globalError"),"Organization soft-deleted.","ok"); renderOrgPicker(); refresh();
+  }catch(e){ banner($("globalError"),"Delete failed: "+e.message,"err"); }
+}
+async function loadMembers(){
+  const m = await api("GET","/v1/organizations/"+currentOrg+"/members");
+  $("memberCount").textContent = "("+m.length+")";
+  if(!m.length){ $("membersBody").innerHTML='<div class="empty">No members yet.</div>'; return; }
+  let h='<table><tr><th>User</th><th>Status</th><th>Roles</th><th></th></tr>';
+  m.forEach(x=>{ h+=`<tr><td>${x.user_id}</td><td><span class="pill ${x.status}">${x.status}</span></td>
+    <td>${(x.roles||[]).join(", ")||"—"}</td>
+    <td>${x.status==="active"?`<button class="danger" data-rm="${x.user_id}">Remove</button>`:""}</td></tr>`; });
+  $("membersBody").innerHTML=h+"</table>";
+  $("membersBody").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>removeMember(b.dataset.rm));
+}
+async function removeMember(uid){
+  try{ await api("DELETE","/v1/organizations/"+currentOrg+"/members/"+uid); await refresh(); }
+  catch(e){ banner($("globalError"),"Remove failed: "+e.message,"err"); }
+}
+async function invite(){
+  $("inviteStatus").textContent="…";
+  try{
+    await api("POST","/v1/organizations/"+currentOrg+"/invitations",
+      {user_id:$("inviteUser").value.trim(), tier:$("inviteTier").value, ttl_seconds:0});
+    $("inviteUser").value=""; banner($("globalError"),"Invitation sent.","ok"); await refresh();
+  }catch(e){ banner($("globalError"),"Invite failed: "+e.message,"err"); }
+  finally{ $("inviteStatus").textContent=""; }
+}
+async function loadPending(){
+  const p = await api("GET","/v1/organizations/"+currentOrg+"/invitations");
+  if(!p.length){ $("pendingBody").innerHTML='<div class="empty">No pending invitations.</div>'; return; }
+  let h='<table><tr><th>User</th><th>Tier</th><th></th></tr>';
+  p.forEach(x=>{ h+=`<tr><td>${x.user_id}</td><td>${x.invited_role}</td>
+    <td class="row">
+      <button data-acc="${x.user_id}">Accept</button>
+      <button class="secondary" data-dec="${x.user_id}">Decline</button>
+      <button class="danger" data-can="${x.user_id}">Cancel</button>
+    </td></tr>`; });
+  $("pendingBody").innerHTML=h+"</table>";
+  const act=(sel,verb)=>$("pendingBody").querySelectorAll(sel).forEach(b=>b.onclick=async()=>{
+    try{ await api("POST",`/v1/organizations/${currentOrg}/invitations/${b.dataset[verb]}/${verb}`); await refresh(); }
+    catch(e){ banner($("globalError"),"Action failed: "+e.message,"err"); }});
+  act("[data-acc]","accept"); act("[data-dec]","decline"); act("[data-can]","cancel");
+}
+// ── Reusable durable activity feed (M8.9) — filter + time range + infinite scroll ──
+const _act = {};
+function mountActivity(containerId, urlFn){
+  const st = _act[containerId] = { urlFn, limit:20, offset:0, items:[], total:0, hasMore:false };
+  const el = $(containerId);
+  el.innerHTML = `
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      <input data-f="evt" placeholder="event type(s), comma" style="max-width:170px"/>
+      <input data-f="user" placeholder="user id" style="max-width:130px"/>
+      <input data-f="since" type="datetime-local" style="max-width:190px"/>
+      <input data-f="until" type="datetime-local" style="max-width:190px"/>
+      <button data-a="apply" class="secondary">Filter</button>
+      <button data-a="clear" class="secondary">Clear</button>
+    </div>
+    <div data-role="summary" class="muted"></div>
+    <div data-role="list" class="feed"></div>
+    <div class="row" style="margin-top:8px">
+      <button data-a="more" class="secondary">Load more</button>
+      <span data-role="count" class="muted"></span>
+    </div>`;
+  el.querySelector("[data-a=apply]").onclick=()=>reloadActivity(containerId);
+  el.querySelector("[data-a=clear]").onclick=()=>{ el.querySelectorAll("[data-f]").forEach(i=>i.value=""); reloadActivity(containerId); };
+  el.querySelector("[data-a=more]").onclick=()=>loadActivityPage(containerId,true);
+  reloadActivity(containerId);
+}
+function _actQuery(id){
+  const el=$(id), st=_act[id], p=new URLSearchParams();
+  const g=f=>el.querySelector(`[data-f=${f}]`).value.trim();
+  p.set("limit",st.limit); p.set("offset",st.offset);
+  const evt=g("evt"); if(evt) evt.split(",").map(s=>s.trim()).filter(Boolean).forEach(t=>p.append("event_type",t));
+  const user=g("user"); if(user) p.set("actor",user);
+  const since=g("since"); if(since) p.set("since", Math.floor(new Date(since).getTime()/1000));
+  const until=g("until"); if(until) p.set("until", Math.floor(new Date(until).getTime()/1000));
+  return p.toString();
+}
+async function reloadActivity(id){ _act[id].offset=0; _act[id].items=[]; await loadActivityPage(id,false); }
+async function loadActivityPage(id, append){
+  const el=$(id), st=_act[id];
+  const list=el.querySelector("[data-role=list]");
+  try{
+    const res = await api("GET", st.urlFn()+"?"+_actQuery(id));
+    st.items = append ? st.items.concat(res.feed) : res.feed.slice();
+    st.total=res.total; st.offset=res.offset+res.feed.length; st.hasMore=res.has_more;
+    const sm=res.summary;
+    el.querySelector("[data-role=summary]").innerHTML = sm
+      ? `status: <b>${sm.status||"—"}</b> · members: <b>${sm.total_members ?? "—"}</b>` : "";
+    list.innerHTML = st.items.length
+      ? st.items.map(f=>`<div class="item"><b>${f.type}</b> <span class="muted">by ${f.actor||"—"}${f.data&&f.data.workspace_id?" · ws":""}</span></div>`).join("")
+      : '<div class="empty">No activity.</div>';
+    el.querySelector("[data-a=more]").style.display = st.hasMore ? "" : "none";
+    el.querySelector("[data-role=count]").textContent = `${st.items.length} / ${st.total}`;
+  }catch(e){ list.innerHTML=`<div class="banner err">${e.message}</div>`; }
+}
+
+function loadActivity(){ mountActivity("activityBody", ()=>"/v1/organizations/"+currentOrg+"/activity"); }
+// ── Workspaces (M8.7) ─────────────────────────────────────────────────────────
+const wsBase = () => "/v1/organizations/"+currentOrg+"/workspaces";
+const navBase = () => "/v1/organizations/"+currentOrg+"/workspace-navigation";
+
+async function loadWorkspaces(searchTerm){
+  nav = await api("GET", navBase());
+  let list = nav.workspaces;
+  if(searchTerm){ list = await api("GET", wsBase()+"/search?q="+encodeURIComponent(searchTerm)); }
+  $("wsCount").textContent = "("+nav.workspaces.length+")";
+  renderWsList(list);
+  if(currentWs && !nav.workspaces.some(w=>w.id===currentWs)) currentWs=null;
+  await loadWsDetail();
+}
+function renderWsList(list){
+  if(!list.length){ $("wsListBody").innerHTML='<div class="empty">No workspaces yet.</div>'; return; }
+  const fav=new Set(nav.favorites||[]), def=nav.default_workspace_id;
+  let h='<table><tr><th>Workspace</th><th></th><th></th></tr>';
+  list.forEach(w=>{
+    const marks=[fav.has(w.id)?"★":"", w.id===def?"default":""].filter(Boolean).join(" ");
+    h+=`<tr><td>${w.icon?w.icon+" ":""}${w.name} <span class="muted">${marks}</span></td>
+      <td><span class="pill ${w.status==="active"?"active":"suspended"}">${w.status}</span></td>
+      <td><button class="secondary" data-open="${w.id}">Open</button></td></tr>`;
+  });
+  $("wsListBody").innerHTML=h+"</table>";
+  $("wsListBody").querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openWs(b.dataset.open));
+}
+async function openWs(id){
+  currentWs=id;
+  try{ await api("POST", navBase()+"/"+id+"/recent"); }catch(e){}
+  await loadWsDetail();
+}
+async function createWorkspace(){
+  $("wsStatus").textContent="…";
+  try{
+    await api("POST", wsBase(), {name:$("newWsName").value.trim(), slug:$("newWsSlug").value.trim()});
+    $("newWsName").value=""; $("newWsSlug").value="";
+    banner($("globalError"),"Workspace created.","ok"); await loadWorkspaces();
+  }catch(e){ banner($("globalError"),"Create failed: "+e.message,"err"); }
+  finally{ $("wsStatus").textContent=""; }
+}
+async function loadWsDetail(){
+  if(!currentWs){
+    show($("noWs"),true); show($("wsForm"),false); $("wsCurrentName").textContent="";
+    show($("projectsSection"),false); currentProj=null; return;
+  }
+  const w = (nav.workspaces.find(x=>x.id===currentWs)) || await api("GET", wsBase()+"/"+currentWs);
+  show($("noWs"),false); show($("wsForm"),true);
+  $("wsCurrentName").textContent = w.name;
+  $("wsName").value=w.name; $("wsDesc").value=w.description||"";
+  $("wsIcon").value=w.icon||""; $("wsColor").value=w.color||"";
+  const archived = w.status==="archived";
+  show($("btnArchiveWs"), !archived); show($("btnRestoreWs"), archived);
+  await Promise.all([loadWsMembers(), loadWsActivity(), loadProjects()]);
+  // Projects live inside the open workspace.
+  show($("projectsSection"), true);
+  $("projWsName").textContent = "· "+w.name;
+}
+async function saveWs(){
+  $("wsDetailStatus").textContent="…";
+  try{
+    await api("PATCH", wsBase()+"/"+currentWs, {name:$("wsName").value.trim(),
+      description:$("wsDesc").value, icon:$("wsIcon").value, color:$("wsColor").value});
+    banner($("globalError"),"Workspace saved.","ok"); await loadWorkspaces();
+  }catch(e){ banner($("globalError"),"Save failed: "+e.message,"err"); }
+  finally{ $("wsDetailStatus").textContent=""; }
+}
+async function archiveWs(){ await wsAction("/archive","Archived"); }
+async function restoreWs(){ await wsAction("/restore","Restored"); }
+async function wsAction(suffix,label){
+  try{ await api("POST", wsBase()+"/"+currentWs+suffix); banner($("globalError"),label+".","ok"); await loadWorkspaces(); }
+  catch(e){ banner($("globalError"),"Action failed: "+e.message,"err"); }
+}
+async function favWs(){ try{ await api("POST", navBase()+"/"+currentWs+"/favorite"); await loadWorkspaces(); }catch(e){} }
+async function defaultWs(){ try{ await api("POST", navBase()+"/"+currentWs+"/default"); await loadWorkspaces(); }catch(e){} }
+async function loadWsMembers(){
+  const m = await api("GET", wsBase()+"/"+currentWs+"/members");
+  $("wsMemberCount").textContent="("+m.length+")";
+  if(!m.length){ $("wsMembersBody").innerHTML='<div class="empty">No members yet.</div>'; return; }
+  let h='<table><tr><th>User</th><th>Role</th><th></th></tr>';
+  m.forEach(x=>{ h+=`<tr><td>${x.user_id}</td><td>${x.role}</td>
+    <td><button class="danger" data-wsrm="${x.user_id}">Remove</button></td></tr>`; });
+  $("wsMembersBody").innerHTML=h+"</table>";
+  $("wsMembersBody").querySelectorAll("[data-wsrm]").forEach(b=>b.onclick=async()=>{
+    try{ await api("DELETE", wsBase()+"/"+currentWs+"/members/"+b.dataset.wsrm); await loadWsDetail(); }
+    catch(e){ banner($("globalError"),"Remove failed: "+e.message,"err"); }});
+}
+async function addWsMember(){
+  $("wsMemberStatus").textContent="…";
+  try{
+    await api("POST", wsBase()+"/"+currentWs+"/members",
+      {user_id:$("wsAddUser").value.trim(), role:$("wsAddRole").value});
+    $("wsAddUser").value=""; banner($("globalError"),"Member added.","ok"); await loadWsDetail();
+  }catch(e){ banner($("globalError"),"Add failed: "+e.message,"err"); }
+  finally{ $("wsMemberStatus").textContent=""; }
+}
+function loadWsActivity(){ mountActivity("wsActivityBody", ()=>wsBase()+"/"+currentWs+"/activity"); }
+
+// ── Projects (M8.8) ───────────────────────────────────────────────────────────
+const projBase = () => "/v1/organizations/"+currentOrg+"/workspaces/"+currentWs+"/projects";
+
+async function loadProjects(searchTerm){
+  let list = searchTerm
+    ? await api("GET", projBase()+"/search?q="+encodeURIComponent(searchTerm))
+    : await api("GET", projBase());
+  if(!searchTerm){ $("projCount").textContent="("+list.length+")"; }
+  renderProjList(list);
+  if(currentProj && !list.some(p=>p.id===currentProj)) currentProj=null;
+  await loadProjDetail();
+}
+function renderProjList(list){
+  if(!list.length){ $("projListBody").innerHTML='<div class="empty">No projects yet.</div>'; return; }
+  let h='<table><tr><th>Project</th><th></th><th></th></tr>';
+  list.forEach(p=>{ h+=`<tr><td>${p.icon?p.icon+" ":""}${p.name}</td>
+    <td><span class="pill ${p.status==="active"?"active":"suspended"}">${p.status}</span></td>
+    <td><button class="secondary" data-popen="${p.id}">Open</button></td></tr>`; });
+  $("projListBody").innerHTML=h+"</table>";
+  $("projListBody").querySelectorAll("[data-popen]").forEach(b=>b.onclick=()=>{currentProj=b.dataset.popen;loadProjDetail();});
+}
+async function createProject(){
+  $("projStatus").textContent="…";
+  try{
+    await api("POST", projBase(), {name:$("newProjName").value.trim(), slug:$("newProjSlug").value.trim()});
+    $("newProjName").value=""; $("newProjSlug").value="";
+    banner($("globalError"),"Project created.","ok"); await loadProjects();
+  }catch(e){ banner($("globalError"),"Create failed: "+e.message,"err"); }
+  finally{ $("projStatus").textContent=""; }
+}
+async function loadProjDetail(){
+  if(!currentProj){ show($("noProj"),true); show($("projForm"),false); $("projCurrentName").textContent=""; return; }
+  const p = await api("GET", projBase()).then(list=>list.find(x=>x.id===currentProj));
+  if(!p){ currentProj=null; show($("noProj"),true); show($("projForm"),false); return; }
+  show($("noProj"),false); show($("projForm"),true);
+  $("projCurrentName").textContent=p.name;
+  $("projName").value=p.name; $("projDesc").value=p.description||""; $("projIcon").value=p.icon||"";
+  const archived=p.status==="archived";
+  show($("btnArchiveProj"), !archived); show($("btnRestoreProj"), archived);
+  await Promise.all([loadProjMembers(), loadProjActivity(), loadProjEnv()]);
+  await loadAgents();  // M8.10
+  await loadTools();   // M8.11
+  await loadKnowledge();  // M8.15
+  await loadDeployments();  // M8.16
+}
+async function saveProj(){
+  $("projDetailStatus").textContent="…";
+  try{
+    await api("PATCH", projBase()+"/"+currentProj,
+      {name:$("projName").value.trim(), description:$("projDesc").value, icon:$("projIcon").value});
+    banner($("globalError"),"Project saved.","ok"); await loadProjects();
+  }catch(e){ banner($("globalError"),"Save failed: "+e.message,"err"); }
+  finally{ $("projDetailStatus").textContent=""; }
+}
+async function projAction(suffix,label){
+  try{ await api("POST", projBase()+"/"+currentProj+suffix); banner($("globalError"),label+".","ok"); await loadProjects(); }
+  catch(e){ banner($("globalError"),"Action failed: "+e.message,"err"); }
+}
+async function loadProjEnv(){
+  const sel = await api("GET", projBase()+"/"+currentProj+"/environment");
+  $("projEnvSelect").innerHTML = sel.environments.map(e=>
+    `<option value="${e}" ${e===sel.current?"selected":""}>${e}</option>`).join("");
+}
+async function switchProjEnv(){
+  $("projEnvStatus").textContent="…";
+  try{ await api("POST", projBase()+"/"+currentProj+"/environment", {environment:$("projEnvSelect").value});
+    banner($("globalError"),"Environment switched.","ok");
+  }catch(e){ banner($("globalError"),"Switch failed: "+e.message,"err"); await loadProjEnv(); }
+  finally{ $("projEnvStatus").textContent=""; }
+}
+async function loadProjMembers(){
+  const m = await api("GET", projBase()+"/"+currentProj+"/members");
+  $("projMemberCount").textContent="("+m.length+")";
+  if(!m.length){ $("projMembersBody").innerHTML='<div class="empty">No members yet.</div>'; return; }
+  let h='<table><tr><th>User</th><th>Role</th><th></th></tr>';
+  m.forEach(x=>{ h+=`<tr><td>${x.user_id}</td><td>${x.role}</td>
+    <td><button class="danger" data-prm="${x.user_id}">Remove</button></td></tr>`; });
+  $("projMembersBody").innerHTML=h+"</table>";
+  $("projMembersBody").querySelectorAll("[data-prm]").forEach(b=>b.onclick=async()=>{
+    try{ await api("DELETE", projBase()+"/"+currentProj+"/members/"+b.dataset.prm); await loadProjDetail(); }
+    catch(e){ banner($("globalError"),"Remove failed: "+e.message,"err"); }});
+}
+async function addProjMember(){
+  $("projMemberStatus").textContent="…";
+  try{
+    await api("POST", projBase()+"/"+currentProj+"/members",
+      {user_id:$("projAddUser").value.trim(), role:$("projAddRole").value});
+    $("projAddUser").value=""; banner($("globalError"),"Member added.","ok"); await loadProjDetail();
+  }catch(e){ banner($("globalError"),"Add failed: "+e.message,"err"); }
+  finally{ $("projMemberStatus").textContent=""; }
+}
+function loadProjActivity(){ mountActivity("projActivityBody", ()=>projBase()+"/"+currentProj+"/activity"); }
+
+// ── Knowledge Tool (M8.15) ─────────────────────────────────────────────────────
+let currentKb = null;
+function kbBase(){ return projBase()+"/"+currentProj+"/knowledge"; }
+async function loadKnowledge(){
+  if(!currentProj){ show($("noProjForKb"),true); show($("kbPanel"),false); $("kbCount").textContent=""; return; }
+  show($("noProjForKb"),false); show($("kbPanel"),true);
+  const list=await api("GET", kbBase()+"/collections");
+  $("kbCount").textContent="("+list.length+")";
+  $("kbCollections").innerHTML = list.length
+    ? '<table><tr><th>Collection</th><th>Status</th><th></th></tr>'+list.map(c=>`<tr><td>${c.name} <span class="muted">${c.embedding_provider}</span></td><td><span class="pill ${c.status==="active"?"active":"suspended"}">${c.status}</span></td><td><button class="secondary" data-kbopen="${c.id}">Open</button></td></tr>`).join("")+"</table>"
+    : '<div class="empty">No collections yet.</div>';
+  $("kbCollections").querySelectorAll("[data-kbopen]").forEach(b=>b.onclick=()=>{currentKb=b.dataset.kbopen;openKb();});
+  if(currentKb && !list.some(c=>c.id===currentKb)){ currentKb=null; show($("kbDetail"),false); }
+}
+async function createKb(){
+  $("kbStatus").textContent="…"; banner($("kbErr"),"","");
+  try{ const c=await api("POST", kbBase()+"/collections", {name:$("newKbName").value.trim(), chunk_size:parseInt($("newKbChunk").value)||800});
+    $("newKbName").value=""; currentKb=c.id; await loadKnowledge(); await openKb();
+  }catch(e){ banner($("kbErr"),"Create failed: "+e.message,"err"); }
+  finally{ $("kbStatus").textContent=""; }
+}
+async function openKb(){
+  if(!currentKb){ show($("kbDetail"),false); return; }
+  show($("kbDetail"),true);
+  const c=await api("GET", kbBase()+"/collections/"+currentKb);
+  $("kbCurrent").textContent=c.name+" (chunk "+c.chunk_size+"/"+c.chunk_overlap+")";
+  const vs=await api("GET", kbBase()+"/collections/"+currentKb+"/vector-status");
+  $("kbVectorStatus").innerHTML=`<table><tr><th>Chunks</th><th>Embedded</th><th>Indexed</th></tr><tr><td>${vs.total_chunks}</td><td>${vs.embedded}</td><td>${vs.indexed}</td></tr></table>`;
+  const docs=await api("GET", kbBase()+"/collections/"+currentKb+"/documents");
+  $("kbDocuments").innerHTML = docs.length
+    ? '<table><tr><th>Doc</th><th>MIME</th><th>Ver</th><th></th></tr>'+docs.map(d=>`<tr><td>${d.name} <span class="muted">${d.checksum.slice(0,8)}</span></td><td class="muted">${d.mime_type}</td><td>v${d.version}</td><td><button class="secondary" data-kbchunk="${d.id}">Chunk</button> <button class="secondary" data-kbview="${d.id}">Chunks</button></td></tr>`).join("")+"</table>"
+    : '<div class="empty">No documents.</div>';
+  $("kbDocuments").querySelectorAll("[data-kbchunk]").forEach(b=>b.onclick=async()=>{ await api("POST", kbBase()+"/collections/"+currentKb+"/documents/"+b.dataset.kbchunk+"/chunk"); await openKb(); });
+  $("kbDocuments").querySelectorAll("[data-kbview]").forEach(b=>b.onclick=()=>viewChunks(b.dataset.kbview));
+}
+async function uploadKbDoc(){
+  banner($("kbErr"),"","");
+  try{ await api("POST", kbBase()+"/collections/"+currentKb+"/documents", {name:$("kbDocName").value.trim()||"document", content:$("kbDocContent").value});
+    $("kbDocContent").value=""; $("kbDocName").value=""; await openKb();
+  }catch(e){ banner($("kbErr"),"Upload failed: "+e.message,"err"); }
+}
+async function viewChunks(did){
+  const chunks=await api("GET", kbBase()+"/collections/"+currentKb+"/documents/"+did+"/chunks");
+  $("kbChunks").innerHTML = chunks.length
+    ? '<table><tr><th>#</th><th>Text</th><th>Embed</th><th>Index</th><th>Dims</th></tr>'+chunks.map(c=>`<tr><td>${c.index}</td><td class="muted">${c.text.slice(0,40)}</td><td><span class="pill">${c.embedding_status}</span></td><td><span class="pill">${c.index_status}</span></td><td>${c.dimensions}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No chunks — click Chunk on the document.</div>';
+}
+async function kbAction(suffix, method){
+  banner($("kbErr"),"","");
+  try{ await api(method||"POST", kbBase()+"/collections/"+currentKb+suffix); await loadKnowledge(); await openKb(); }
+  catch(e){ banner($("kbErr"),"Action failed: "+e.message,"err"); }
+}
+async function searchKb(){
+  banner($("kbErr"),"","");
+  try{ const res=await api("POST", kbBase()+"/collections/"+currentKb+"/search", {query:$("kbQuery").value, top_k:parseInt($("kbTopK").value)||3});
+    $("kbResults").innerHTML = res.chunks.length
+      ? '<table><tr><th>Score</th><th>Chunk</th></tr>'+res.chunks.map(r=>`<tr><td>${r.score}</td><td class="muted">${r.text.slice(0,50)}</td></tr>`).join("")+`</table><div class="muted" style="margin-top:4px">embedder: ${res.metadata.embedder} · store: ${res.metadata.vector_store} · candidates: ${res.total_candidates}</div>`
+      : '<div class="empty">No matches.</div>';
+  }catch(e){ banner($("kbErr"),"Search failed: "+e.message,"err"); }
+}
+
+// ── Deployment Actuator (M8.16, ADR-0022) ──────────────────────────────────────
+let currentDep = null;
+function depBase(){ return projBase()+"/"+currentProj+"/deployments"; }
+async function loadDeployments(){
+  if(!currentProj){ show($("noProjForDeploy"),true); show($("depPanel"),false); $("depCount").textContent=""; return; }
+  show($("noProjForDeploy"),false); show($("depPanel"),true);
+  const list=await api("GET", depBase());
+  $("depCount").textContent="("+list.length+")";
+  try{ const t=await api("GET", depBase()+"/targets"); $("depTargets").textContent="· targets: "+Object.keys(t).join(", "); }catch(e){}
+  $("depHistory").innerHTML = list.length
+    ? '<table><tr><th>Env</th><th>State</th><th>Ver</th><th>Attempts</th><th></th></tr>'+list.map(d=>`<tr><td>${d.environment}</td><td><span class="pill ${d.state==="completed"?"active":(d.state==="failed"||d.state==="rolled_back"||d.state==="cancelled")?"suspended":""}">${d.state}</span></td><td class="muted">${d.live_version||"-"}</td><td>${d.attempts}</td><td><button class="secondary" data-depopen="${d.id}">Open</button></td></tr>`).join("")+"</table>"
+    : '<div class="empty">No deployments yet.</div>';
+  $("depHistory").querySelectorAll("[data-depopen]").forEach(b=>b.onclick=()=>{currentDep=b.dataset.depopen;openDep();});
+  if(currentDep && !list.some(d=>d.id===currentDep)){ currentDep=null; show($("depDetail"),false); }
+}
+async function planDep(){
+  banner($("depErr"),"","");
+  try{ const p=await api("POST", depBase()+"/plan", {agent_id:$("depAgentId").value.trim(), environment:$("depEnv").value, strategy:$("depStrategy").value});
+    $("depPlan").innerHTML=`<div class="muted">Plan <b>${p.deployment_id}</b> · profile ${p.profile} · strategy ${p.strategy} · target ${p.target} · approval ${p.requires_approval} · valid ${p.valid}</div>`;
+  }catch(e){ banner($("depErr"),"Plan failed: "+e.message,"err"); }
+}
+async function submitDep(){
+  banner($("depErr"),""," "); $("depStatus").textContent="…";
+  try{ const d=await api("POST", depBase(), {agent_id:$("depAgentId").value.trim(), environment:$("depEnv").value, strategy:$("depStrategy").value, auto_approve:$("depAuto").checked});
+    currentDep=d.id; await loadDeployments(); await openDep();
+  }catch(e){ banner($("depErr"),"Deploy failed: "+e.message,"err"); }
+  finally{ $("depStatus").textContent=""; }
+}
+async function openDep(){
+  if(!currentDep){ show($("depDetail"),false); return; }
+  show($("depDetail"),true);
+  const d=await api("GET", depBase()+"/"+currentDep);
+  $("depCurrent").textContent=`${d.deployment_id} · ${d.environment} · ${d.state}`+(d.live_version?` · live ${d.live_version}`:"");
+  const h=await api("GET", depBase()+"/"+currentDep+"/health");
+  $("depHealth").innerHTML=`<table><tr><th>Infra</th><th>Startup</th><th>Ready</th><th>Live</th><th>Healthy</th></tr><tr><td>${h.infra_status}</td><td>${h.startup_ok}</td><td>${h.ready}</td><td>${h.live}</td><td>${h.healthy}</td></tr></table>`;
+  const tl=await api("GET", depBase()+"/"+currentDep+"/timeline");
+  $("depTimeline").innerHTML = tl.transitions.length
+    ? '<table><tr><th>From</th><th>To</th><th>Actor</th></tr>'+tl.transitions.map(t=>`<tr><td class="muted">${t.from}</td><td><span class="pill">${t.to}</span></td><td class="muted">${t.actor||"-"}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No transitions.</div>';
+  const lg=await api("GET", depBase()+"/"+currentDep+"/logs");
+  $("depLogs").innerHTML = lg.logs.length
+    ? '<table><tr><th>Stage</th><th>Message</th></tr>'+lg.logs.map(l=>`<tr><td class="muted">${l.stage}</td><td>${l.message}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No logs.</div>';
+}
+async function depAction(suffix, withReason){
+  banner($("depErr"),"","");
+  try{ const body=withReason?{reason:$("depReason").value}:undefined;
+    await api("POST", depBase()+"/"+currentDep+suffix, body); await loadDeployments(); await openDep();
+  }catch(e){ banner($("depErr"),"Action failed: "+e.message,"err"); }
+}
+
+// ── Observability Platform (M8.17) ─────────────────────────────────────────────
+function obBase(){ return "/v1/organizations/"+currentOrg+"/observability"; }
+async function loadObservability(){
+  if(!currentOrg){ show($("observabilitySection"),false); return; }
+  show($("observabilitySection"),true);
+  banner($("obErr"),"","");
+  try{
+    const dash = await api("GET", obBase()+"/dashboards/organization");
+    const health = dash.health;
+    $("obHealthPill").textContent = health.status;
+    $("obHealthPill").className = "pill "+(health.status==="healthy"?"active":health.status==="unhealthy"?"suspended":"");
+    $("obHealth").innerHTML = '<table><tr><th>Component</th><th>Status</th><th>OK/Fail</th></tr>'+
+      health.components.map(c=>`<tr><td>${c.component}</td><td><span class="pill ${c.status==="healthy"?"active":c.status==="unhealthy"?"suspended":""}">${c.status}</span></td><td class="muted">${c.total-c.failures}/${c.failures}</td></tr>`).join("")+"</table>";
+    const m = dash.metrics.metrics;
+    $("obMetrics").innerHTML = '<table><tr><th>Metric</th><th>Total</th><th>Count</th><th>Avg</th></tr>'+
+      Object.entries(m).filter(([,v])=>v.count>0).map(([k,v])=>`<tr><td>${k}</td><td>${v.total}</td><td class="muted">${v.count}</td><td class="muted">${v.average}</td></tr>`).join("")+"</table>" || '<div class="empty">No metrics yet.</div>';
+    const u = dash.usage;
+    $("obUsage").innerHTML = `<table><tr><th>Conversations</th><th>Tokens</th><th>Tools</th><th>Retrievals</th><th>Deployments</th></tr><tr><td>${u.conversations}</td><td>${u.tokens}</td><td>${u.tools}</td><td>${u.knowledge_retrievals}</td><td>${u.deployments}</td></tr></table>`;
+    const cost = dash.cost;
+    $("obCost").innerHTML = `<table><tr><th>Tokens</th><th>Embeddings</th><th>Vector</th><th>Tools</th><th>Deploy</th><th>Total (${cost.currency})</th></tr><tr><td>${cost.token_cost}</td><td>${cost.embedding_cost}</td><td>${cost.vector_search_cost}</td><td>${cost.tool_cost}</td><td>${cost.deployment_cost}</td><td><b>${cost.estimated_total}</b></td></tr></table>`;
+    const prov = await api("GET", obBase()+"/dashboards/provider");
+    $("obAnalytics").innerHTML = `<div class="muted">Providers: ${JSON.stringify(prov.usage)} · cost ${JSON.stringify(prov.cost)} · failures ${prov.failures}</div>`;
+    await loadObTraces(); await loadObLogs(); await loadObAlerts();
+    // populate alert metric options
+    const defs = await api("GET", obBase()+"/metrics/definitions");
+    $("obAlertMetric").innerHTML = defs.metrics.map(d=>`<option value="${d.key}">${d.key}</option>`).join("");
+  }catch(e){ banner($("obErr"),"Observability load failed: "+e.message,"err"); }
+}
+async function loadObTraces(){
+  const t = await api("GET", obBase()+"/traces?limit=8");
+  $("obTraces").innerHTML = t.traces.length
+    ? '<table><tr><th>Trace</th><th>Spans</th><th>Duration</th><th>Status</th></tr>'+t.traces.map(x=>`<tr><td class="muted">${x.correlation_key.slice(0,16)}</td><td>${x.span_count}</td><td class="muted">${x.duration_ms}ms</td><td><span class="pill ${x.status==="error"?"suspended":"active"}">${x.status}</span></td></tr>`).join("")+"</table>"
+    : '<div class="empty">No traces yet.</div>';
+}
+async function loadObLogs(){
+  const lvl = $("obLogLevel").value;
+  const r = await api("GET", obBase()+"/logs?limit=12"+(lvl?"&level="+lvl:""));
+  $("obLogs").innerHTML = r.entries.length
+    ? '<table><tr><th>Level</th><th>Category</th><th>Event</th></tr>'+r.entries.map(e=>`<tr><td><span class="pill ${e.level==="error"?"suspended":e.level==="warning"?"":"active"}">${e.level}</span></td><td class="muted">${e.category}</td><td>${e.message}</td></tr>`).join("")+`</table><div class="muted">${r.total} total</div>`
+    : '<div class="empty">No logs.</div>';
+}
+async function loadObAlerts(){
+  const rules = await api("GET", obBase()+"/alerts");
+  let evalMap = {};
+  try{ (await api("GET", obBase()+"/alerts/evaluate")).alerts.forEach(a=>evalMap[a.rule_id]=a); }catch(e){}
+  $("obAlerts").innerHTML = rules.length
+    ? '<table><tr><th>Rule</th><th>Condition</th><th>State</th><th></th></tr>'+rules.map(r=>`<tr><td>${r.name}</td><td class="muted">${r.metric_key} ${r.comparator} ${r.threshold}</td><td><span class="pill ${evalMap[r.id]&&evalMap[r.id].state==="firing"?"suspended":"active"}">${evalMap[r.id]?evalMap[r.id].state:"?"}</span></td><td><button class="danger" data-obdel="${r.id}">Delete</button></td></tr>`).join("")+"</table>"
+    : '<div class="empty">No alert rules.</div>';
+  $("obAlerts").querySelectorAll("[data-obdel]").forEach(b=>b.onclick=async()=>{ await api("DELETE", obBase()+"/alerts/"+b.dataset.obdel); await loadObAlerts(); });
+}
+async function createObAlert(){
+  banner($("obErr"),"","");
+  try{ await api("POST", obBase()+"/alerts", {name:$("obAlertName").value.trim()||"rule", metric_key:$("obAlertMetric").value, comparator:$("obAlertCmp").value, threshold:parseFloat($("obAlertThreshold").value)||0});
+    $("obAlertName").value=""; await loadObAlerts();
+  }catch(e){ banner($("obErr"),"Alert create failed: "+e.message,"err"); }
+}
+
+// ── Agent Builder (M8.10) ──────────────────────────────────────────────────────
+let agentVars = [];  // working variable set for the open agent editor
+function agentBase(){ return projBase()+"/"+currentProj+"/agents"; }
+async function loadAgents(searchTerm){
+  if(!currentProj){ show($("noProjForAgents"),true); show($("agentsPanel"),false);
+    show($("agentEditorCard"),false); $("agentCount").textContent=""; return; }
+  show($("noProjForAgents"),false); show($("agentsPanel"),true);
+  const list = searchTerm
+    ? await api("GET", agentBase()+"/search?q="+encodeURIComponent(searchTerm))
+    : await api("GET", agentBase());
+  if(!searchTerm) $("agentCount").textContent="("+list.length+")";
+  renderAgentList(list);
+  if(currentAgent && !list.some(a=>a.id===currentAgent)){ currentAgent=null; show($("agentEditorCard"),false); }
+}
+function renderAgentList(list){
+  if(!list.length){ $("agentListBody").innerHTML='<div class="empty">No agents yet.</div>'; return; }
+  let h='<table><tr><th>Agent</th><th>Status</th><th>Ver</th><th></th></tr>';
+  list.forEach(a=>{ h+=`<tr><td>${a.icon?a.icon+" ":""}${a.name}</td>
+    <td><span class="pill ${a.status==="published"?"active":"suspended"}">${a.status}</span></td>
+    <td class="muted">v${a.published_version||0}</td>
+    <td><button class="secondary" data-aopen="${a.id}">Open</button></td></tr>`; });
+  $("agentListBody").innerHTML=h+"</table>";
+  $("agentListBody").querySelectorAll("[data-aopen]").forEach(b=>b.onclick=()=>{currentAgent=b.dataset.aopen;openAgent();});
+}
+async function createAgent(){
+  $("agentStatus").textContent="…";
+  try{
+    const a=await api("POST", agentBase(), {name:$("newAgentName").value.trim(), category:$("newAgentCategory").value.trim()});
+    $("newAgentName").value=""; $("newAgentCategory").value="";
+    banner($("globalError"),"Agent created.","ok"); currentAgent=a.id; await loadAgents(); await openAgent();
+  }catch(e){ banner($("globalError"),"Create failed: "+e.message,"err"); }
+  finally{ $("agentStatus").textContent=""; }
+}
+async function openAgent(){
+  if(!currentAgent){ show($("agentEditorCard"),false); return; }
+  const a=await api("GET", agentBase()+"/"+currentAgent);
+  show($("agentEditorCard"),true);
+  $("agentCurrentName").textContent=a.name;
+  $("agentStatePill").innerHTML=`<span class="pill ${a.status==="published"?"active":"suspended"}">${a.status} v${a.published_version||0}</span>`;
+  $("agName").value=a.name; $("agDesc").value=a.description||""; $("agIcon").value=a.icon||"";
+  $("agCategory").value=a.category||""; $("agLanguage").value=a.language||"en";
+  $("agTags").value=(a.tags||[]).join(", "); $("agGreeting").value=a.greeting||"";
+  const pr=a.config.prompt||{}, mo=a.config.model||{}, vo=a.config.voice||{};
+  $("agSystemPrompt").value=pr.system_prompt||""; $("agPersona").value=pr.persona||"";
+  $("agInstructions").value=pr.instructions||""; $("agStyle").value=pr.conversation_style||"";
+  $("agProvider").value=mo.provider||""; $("agModel").value=mo.model||""; $("agModelVersion").value=mo.model_version||"";
+  $("agTemp").value=mo.temperature??0.7; $("agTopP").value=mo.top_p??1.0; $("agMaxTokens").value=mo.max_tokens??1024;
+  $("agStreaming").checked=mo.streaming_enabled!==false; $("agStructured").checked=!!mo.structured_output_enabled;
+  $("agReasoning").value=mo.reasoning_mode||"none";
+  $("agVoiceEnabled").checked=!!vo.enabled; $("agVoiceProvider").value=vo.provider||"";
+  $("agVoiceName").value=vo.voice_name||""; $("agVoiceRate").value=vo.speaking_rate??1.0;
+  agentVars=(a.config.variables||[]).map(v=>({name:v.name,type:v.type,value:v.value||"",is_secret:v.is_secret,has_value:v.has_value}));
+  renderVars(); updatePromptCount();
+  const archived=a.status==="archived";
+  show($("btnArchiveAgent"), !archived); show($("btnRestoreAgent"), archived);
+  show($("btnUnpublishAgent"), a.status==="published");
+  await Promise.all([loadAgentVersions(), loadAgentActivity(), loadAgentTools(), loadSessions()]);
+  await loadPlayground();  // M8.13
+}
+function renderVars(){
+  if(!agentVars.length){ $("agVarBody").innerHTML='<div class="empty">No variables.</div>'; return; }
+  let h='<table><tr><th>Name</th><th>Type</th><th>Value</th><th></th></tr>';
+  agentVars.forEach((v,i)=>{ const disp=v.is_secret?(v.has_value?"••••••":"(unset)"):v.value;
+    h+=`<tr><td>${v.name}</td><td>${v.type}</td><td class="muted">${disp}</td>
+      <td><button class="danger" data-var="${i}">×</button></td></tr>`; });
+  $("agVarBody").innerHTML=h+"</table>";
+  $("agVarBody").querySelectorAll("[data-var]").forEach(b=>b.onclick=()=>{agentVars.splice(+b.dataset.var,1);renderVars();});
+}
+function addVar(){
+  const name=$("agVarName").value.trim(); if(!name) return;
+  agentVars.push({name, type:$("agVarType").value, value:$("agVarValue").value, is_secret:$("agVarType").value==="secret", has_value:!!$("agVarValue").value});
+  $("agVarName").value=""; $("agVarValue").value=""; renderVars();
+}
+function updatePromptCount(){
+  const n=$("agSystemPrompt").value.length; $("agPromptCount").textContent="("+n+" chars)";
+  $("agPromptPreview").textContent=$("agSystemPrompt").value.slice(0,240);
+}
+function buildConfig(){
+  // Only send variables whose value changed (avoid overwriting an unchanged secret with "").
+  const vars=agentVars.map(v=>({name:v.name,type:v.type,value:v.value,description:""}));
+  return {
+    prompt:{system_prompt:$("agSystemPrompt").value, persona:$("agPersona").value,
+      instructions:$("agInstructions").value, conversation_style:$("agStyle").value},
+    model:{provider:$("agProvider").value, model:$("agModel").value, model_version:$("agModelVersion").value,
+      temperature:parseFloat($("agTemp").value), top_p:parseFloat($("agTopP").value),
+      max_tokens:parseInt($("agMaxTokens").value)||0, streaming_enabled:$("agStreaming").checked,
+      structured_output_enabled:$("agStructured").checked, reasoning_mode:$("agReasoning").value},
+    voice:{enabled:$("agVoiceEnabled").checked, provider:$("agVoiceProvider").value,
+      voice_name:$("agVoiceName").value, speaking_rate:parseFloat($("agVoiceRate").value)},
+    variables:vars};
+}
+async function saveAgent(){
+  $("agentEditStatus").textContent="…";
+  try{
+    await api("PATCH", agentBase()+"/"+currentAgent, {name:$("agName").value.trim(),
+      description:$("agDesc").value, icon:$("agIcon").value, category:$("agCategory").value,
+      language:$("agLanguage").value, greeting:$("agGreeting").value,
+      tags:$("agTags").value.split(",").map(t=>t.trim()).filter(Boolean),
+      config_patch:buildConfig()});
+    banner($("globalError"),"Agent saved.","ok"); await loadAgents(); await openAgent();
+  }catch(e){ banner($("globalError"),"Save failed: "+e.message,"err"); }
+  finally{ $("agentEditStatus").textContent=""; }
+}
+async function agentAction(suffix,body,label){
+  $("agentEditStatus").textContent="…";
+  try{ await api("POST", agentBase()+"/"+currentAgent+suffix, body||undefined);
+    banner($("globalError"),label+".","ok"); await loadAgents();
+    if(suffix==="/delete") { currentAgent=null; show($("agentEditorCard"),false); } else await openAgent();
+  }catch(e){ banner($("globalError"),"Action failed: "+e.message,"err"); }
+  finally{ $("agentEditStatus").textContent=""; }
+}
+async function deleteAgent(){
+  $("agentEditStatus").textContent="…";
+  try{ await api("DELETE", agentBase()+"/"+currentAgent); banner($("globalError"),"Agent deleted.","ok");
+    currentAgent=null; show($("agentEditorCard"),false); await loadAgents();
+  }catch(e){ banner($("globalError"),"Delete failed: "+e.message,"err"); }
+  finally{ $("agentEditStatus").textContent=""; }
+}
+async function loadAgentVersions(){
+  const vs=await api("GET", agentBase()+"/"+currentAgent+"/versions");
+  $("agVersionCount").textContent="("+vs.length+")";
+  if(!vs.length){ $("agVersionsBody").innerHTML='<div class="empty">No versions — publish to create one.</div>'; return; }
+  let h='<table><tr><th>Ver</th><th>Description</th><th>Status</th><th></th></tr>';
+  vs.forEach(v=>{ h+=`<tr><td>v${v.number}</td><td>${v.description||""}</td>
+    <td><span class="pill ${v.status==="published"?"active":"suspended"}">${v.status}</span></td>
+    <td><button class="secondary" data-rollback="${v.number}">Roll back</button></td></tr>`; });
+  $("agVersionsBody").innerHTML=h+"</table>";
+  $("agVersionsBody").querySelectorAll("[data-rollback]").forEach(b=>b.onclick=()=>
+    agentAction("/rollback",{target_number:+b.dataset.rollback},"Rolled back to v"+b.dataset.rollback));
+}
+function loadAgentActivity(){ mountActivity("agActivityBody", ()=>agentBase()+"/"+currentAgent+"/activity"); }
+
+// ── Tool Framework (M8.11) ─────────────────────────────────────────────────────
+function toolBase(){ return projBase()+"/"+currentProj+"/tools"; }
+async function loadTools(searchTerm){
+  if(!currentProj){ show($("noProjForTools"),true); show($("toolsPanel"),false);
+    show($("toolDetailCard"),false); $("toolCount").textContent=""; return; }
+  show($("noProjForTools"),false); show($("toolsPanel"),true);
+  const list = searchTerm
+    ? await api("GET", toolBase()+"/search?q="+encodeURIComponent(searchTerm))
+    : await api("GET", toolBase());
+  if(!searchTerm) $("toolCount").textContent="("+list.length+")";
+  renderToolList(list);
+  if(currentTool && !list.some(t=>t.id===currentTool)){ currentTool=null; show($("toolDetailCard"),false); }
+}
+function renderToolList(list){
+  if(!list.length){ $("toolListBody").innerHTML='<div class="empty">No tools yet.</div>'; return; }
+  let h='<table><tr><th>Tool</th><th>Category</th><th>Status</th><th></th></tr>';
+  list.forEach(t=>{ h+=`<tr><td>${t.icon?t.icon+" ":""}${t.name} <span class="muted">v${t.version}</span></td>
+    <td class="muted">${t.category}</td>
+    <td><span class="pill ${t.enabled&&t.status!=="archived"?"active":"suspended"}">${t.status}${t.enabled?"":" · off"}</span></td>
+    <td><button class="secondary" data-topen="${t.id}">Open</button></td></tr>`; });
+  $("toolListBody").innerHTML=h+"</table>";
+  $("toolListBody").querySelectorAll("[data-topen]").forEach(b=>b.onclick=()=>{currentTool=b.dataset.topen;openTool();});
+}
+async function createTool(){
+  $("toolStatus").textContent="…";
+  try{
+    const t=await api("POST", toolBase(), {name:$("newToolName").value.trim(), category:$("newToolCategory").value});
+    $("newToolName").value=""; banner($("globalError"),"Tool created.","ok");
+    currentTool=t.id; await loadTools(); await openTool();
+  }catch(e){ banner($("globalError"),"Create failed: "+e.message,"err"); }
+  finally{ $("toolStatus").textContent=""; }
+}
+async function openTool(){
+  if(!currentTool){ show($("toolDetailCard"),false); return; }
+  const t=await api("GET", toolBase()+"/"+currentTool);
+  show($("toolDetailCard"),true); banner($("toolValidation"),"","");
+  $("toolCurrentName").textContent=t.name;
+  $("toolStatePill").innerHTML=`<span class="pill ${t.enabled?"active":"suspended"}">v${t.version} · ${t.enabled?"enabled":"disabled"}</span>`;
+  $("tlName").value=t.name; $("tlDesc").value=t.description||""; $("tlCategory").value=t.category;
+  $("tlVisibility").value=t.visibility; $("tlIcon").value=t.icon||"";
+  $("tlTimeout").value=t.config.timeout_ms??30000; $("tlRetries").value=(t.config.retry||{}).max_retries??0;
+  $("tlSettings").value=JSON.stringify(t.config.settings||{}, null, 2);
+  const archived=t.status==="archived";
+  show($("btnArchiveTool"), !archived); show($("btnRestoreTool"), archived);
+  $("btnToggleTool").textContent=t.enabled?"Disable":"Enable";
+  $("btnToggleTool").dataset.enabled=t.enabled?"1":"0";
+  loadToolActivity();
+}
+async function saveTool(){
+  $("toolDetailStatus").textContent="…"; banner($("toolValidation"),"","");
+  let settings={};
+  try{ settings=JSON.parse($("tlSettings").value||"{}"); }
+  catch(e){ banner($("toolValidation"),"Settings must be valid JSON.","err"); $("toolDetailStatus").textContent=""; return; }
+  try{
+    await api("PATCH", toolBase()+"/"+currentTool, {name:$("tlName").value.trim(),
+      description:$("tlDesc").value, category:$("tlCategory").value, visibility:$("tlVisibility").value,
+      icon:$("tlIcon").value, config_patch:{settings, timeout_ms:parseInt($("tlTimeout").value)||0,
+        retry:{max_retries:parseInt($("tlRetries").value)||0}}});
+    banner($("globalError"),"Tool saved.","ok"); await loadTools(); await openTool();
+  }catch(e){ banner($("toolValidation"),"Save failed: "+e.message,"err"); }
+  finally{ $("toolDetailStatus").textContent=""; }
+}
+async function toolAction(suffix,label){
+  $("toolDetailStatus").textContent="…";
+  try{ await api("POST", toolBase()+"/"+currentTool+suffix); banner($("globalError"),label+".","ok");
+    await loadTools(); await openTool();
+  }catch(e){ banner($("globalError"),"Action failed: "+e.message,"err"); }
+  finally{ $("toolDetailStatus").textContent=""; }
+}
+async function toggleTool(){ await toolAction($("btnToggleTool").dataset.enabled==="1"?"/disable":"/enable","Toggled"); }
+async function deleteTool(){
+  try{ await api("DELETE", toolBase()+"/"+currentTool); banner($("globalError"),"Tool deleted.","ok");
+    currentTool=null; show($("toolDetailCard"),false); await loadTools();
+  }catch(e){ banner($("globalError"),"Delete failed: "+e.message,"err"); }
+}
+function loadToolActivity(){ mountActivity("toolActivityBody", ()=>toolBase()+"/"+currentTool+"/activity"); }
+
+// agent↔tool assignment (inside the agent editor)
+function agentToolBase(){ return agentBase()+"/"+currentAgent+"/tools"; }
+async function loadAgentTools(){
+  const attached = await api("GET", agentToolBase());
+  const catalog = await api("GET", toolBase());
+  const byId = Object.fromEntries(catalog.map(t=>[t.id,t]));
+  $("agToolCount").textContent="("+attached.length+")";
+  renderAgentTools(attached, byId);
+  const attachedIds = new Set(attached.map(a=>a.tool_id));
+  const options = catalog.filter(t=>!attachedIds.has(t.id) && t.status!=="archived");
+  $("agAttachTool").innerHTML = options.length
+    ? options.map(t=>`<option value="${t.id}">${t.name} (${t.category})</option>`).join("")
+    : '<option value="">— no more tools —</option>';
+}
+function renderAgentTools(list, byId){
+  if(!list.length){ $("agToolsBody").innerHTML='<div class="empty">No tools attached.</div>'; return; }
+  let h='<table><tr><th>#</th><th>Tool</th><th>State</th><th>Order</th><th></th></tr>';
+  list.forEach((a,i)=>{ const t=byId[a.tool_id]||{name:a.tool_id,category:"?"};
+    h+=`<tr><td class="muted">${a.position}</td><td>${t.name} <span class="muted">${t.category}</span></td>
+      <td><span class="pill ${a.enabled?"active":"suspended"}">${a.enabled?"enabled":"disabled"}</span></td>
+      <td><button class="secondary" data-up="${a.tool_id}" ${i===0?"disabled":""}>▲</button>
+          <button class="secondary" data-down="${a.tool_id}" ${i===list.length-1?"disabled":""}>▼</button></td>
+      <td><button class="secondary" data-attog="${a.tool_id}" data-en="${a.enabled?1:0}">${a.enabled?"Disable":"Enable"}</button>
+          <button class="danger" data-detach="${a.tool_id}">Detach</button></td></tr>`; });
+  $("agToolsBody").innerHTML=h+"</table>";
+  const ids=list.map(a=>a.tool_id);
+  $("agToolsBody").querySelectorAll("[data-detach]").forEach(b=>b.onclick=()=>agentToolCall("DELETE","/"+b.dataset.detach,null,"Detached"));
+  $("agToolsBody").querySelectorAll("[data-attog]").forEach(b=>b.onclick=()=>
+    agentToolCall("POST","/"+b.dataset.attog+(b.dataset.en==="1"?"/disable":"/enable"),null,"Toggled"));
+  $("agToolsBody").querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>reorderAgentTool(ids, b.dataset.up, -1));
+  $("agToolsBody").querySelectorAll("[data-down]").forEach(b=>b.onclick=()=>reorderAgentTool(ids, b.dataset.down, +1));
+}
+async function reorderAgentTool(ids, toolId, delta){
+  const i=ids.indexOf(toolId), j=i+delta; if(j<0||j>=ids.length) return;
+  const next=ids.slice(); [next[i],next[j]]=[next[j],next[i]];
+  await agentToolCall("POST","/reorder",{ordered_tool_ids:next},"Reordered");
+}
+async function attachTool(){
+  const tid=$("agAttachTool").value; if(!tid) return;
+  await agentToolCall("POST","",{tool_id:tid},"Attached");
+}
+async function agentToolCall(method,suffix,body,label){
+  $("agToolStatus").textContent="…"; banner($("agToolValidation"),"","");
+  try{ await api(method, agentToolBase()+suffix, body||undefined);
+    banner($("globalError"),label+".","ok"); await loadAgentTools();
+  }catch(e){ banner($("agToolValidation"),label+" failed: "+e.message,"err"); }
+  finally{ $("agToolStatus").textContent=""; }
+}
+
+// ── Conversation Runtime Inspector (M8.12) ─────────────────────────────────────
+function sessionBase(){ return agentBase()+"/"+currentAgent+"/sessions"; }
+async function loadSessions(){
+  if(!currentAgent){ show($("noAgentForRuntime"),true); show($("runtimePanel"),false); $("sessionCount").textContent=""; return; }
+  show($("noAgentForRuntime"),false); show($("runtimePanel"),true);
+  const list = await api("GET", sessionBase());
+  $("sessionCount").textContent="("+list.length+")";
+  renderSessionList(list);
+  if(currentSession && !list.some(s=>s.id===currentSession)){ currentSession=null; show($("sessionDetail"),false); }
+}
+function renderSessionList(list){
+  if(!list.length){ $("sessionListBody").innerHTML='<div class="empty">No sessions. Create one to inspect the resolved plan.</div>'; return; }
+  let h='<table><tr><th>Session</th><th>Ver</th><th>Status</th><th></th></tr>';
+  list.forEach(s=>{ h+=`<tr><td class="muted">${s.id}</td><td>v${s.agent_version}</td>
+    <td><span class="pill ${s.status==="active"?"active":"suspended"}">${s.status}</span></td>
+    <td><button class="secondary" data-sopen="${s.id}">Inspect</button></td></tr>`; });
+  $("sessionListBody").innerHTML=h+"</table>";
+  $("sessionListBody").querySelectorAll("[data-sopen]").forEach(b=>b.onclick=()=>{currentSession=b.dataset.sopen;openSession();});
+}
+async function createSession(){
+  $("sessionStatus").textContent="…"; banner($("runtimeErr"),"","");
+  let vars={};
+  const raw=$("newSessionVars").value.trim();
+  if(raw){ try{ vars=JSON.parse(raw); }catch(e){ banner($("runtimeErr"),"Runtime variables must be valid JSON.","err"); $("sessionStatus").textContent=""; return; } }
+  try{
+    const s=await api("POST", sessionBase(), {runtime_variables:vars});
+    banner($("globalError"),"Session created (plan resolved).","ok");
+    currentSession=s.id; await loadSessions(); await openSession();
+  }catch(e){ banner($("runtimeErr"),"Create failed: "+e.message,"err"); }
+  finally{ $("sessionStatus").textContent=""; }
+}
+async function openSession(){
+  if(!currentSession){ show($("sessionDetail"),false); return; }
+  const s=await api("GET", sessionBase()+"/"+currentSession);
+  const plan=await api("GET", sessionBase()+"/"+currentSession+"/plan");
+  show($("sessionDetail"),true);
+  $("sessionCurrent").innerHTML=`${s.id} <span class="pill ${s.status==="active"?"active":"suspended"}">${s.status}</span>`;
+  show($("btnResumeSession"), s.status==="active"); show($("btnCloseSession"), s.status==="active");
+  $("rtPrompt").textContent=plan.resolved_prompt.text||"(empty prompt)";
+  // variable inspector
+  let vh='<table><tr><th>Variable</th><th>Value</th><th>Source</th></tr>';
+  plan.resolved_variables.forEach(v=>{ vh+=`<tr><td>${v.name}</td>
+    <td class="muted">${v.is_secret?"••••••":v.value}</td>
+    <td><span class="pill">${v.source}</span></td></tr>`; });
+  $("rtVariables").innerHTML=vh+"</table>";
+  // tool plan
+  const steps=plan.tool_plan.steps||[];
+  if(!steps.length){ $("rtToolPlan").innerHTML='<div class="empty">No tools resolved.</div>'; }
+  else{ let th='<table><tr><th>#</th><th>Tool</th><th>Category</th><th>State</th></tr>';
+    steps.forEach(x=>{ th+=`<tr><td>${x.position}</td><td>${x.name}</td><td class="muted">${x.category}</td>
+      <td><span class="pill ${x.enabled?"active":"suspended"}">${x.enabled?"enabled":"disabled"}</span></td></tr>`; });
+    $("rtToolPlan").innerHTML=th+"</table>"; }
+  const ad=plan.tool_plan.required_adapters||{};
+  $("rtAdapters").textContent="Required adapters (interfaces only): "+Object.keys(ad).filter(k=>ad[k]).join(", ")||"none";
+  // diagnostics
+  const diags=plan.diagnostics||[];
+  $("rtDiagnostics").innerHTML = diags.length
+    ? '<table><tr><th>Severity</th><th>Message</th></tr>'+diags.map(d=>`<tr><td><span class="pill">${d.severity}</span></td><td>${d.message}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No diagnostics.</div>';
+}
+async function sessionAction(suffix,label){
+  banner($("runtimeErr"),"","");
+  try{ await api("POST", sessionBase()+"/"+currentSession+suffix); banner($("globalError"),label+".","ok");
+    await loadSessions(); await openSession();
+  }catch(e){ banner($("runtimeErr"),label+" failed: "+e.message,"err"); }
+}
+
+// ── Conversation Playground (M8.13) ────────────────────────────────────────────
+function pgBase(){ return agentBase()+"/"+currentAgent+"/playground/conversations"; }
+async function loadPlayground(){
+  if(!currentAgent){ show($("noAgentForPg"),true); show($("pgPanel"),false); $("pgCount").textContent=""; return; }
+  show($("noAgentForPg"),false); show($("pgPanel"),true);
+  // Session Browser reuses the runtime session list for this agent.
+  const list = await api("GET", sessionBase());
+  $("pgCount").textContent="("+list.length+")";
+  if(!list.length){ $("pgSessionBrowser").innerHTML='<div class="empty">No conversations yet.</div>'; }
+  else{ let h='<table><tr><th>Conversation</th><th>Status</th><th></th></tr>';
+    list.forEach(s=>{ h+=`<tr><td class="muted">${s.id}</td>
+      <td><span class="pill ${s.status==="active"?"active":"suspended"}">${s.status}</span></td>
+      <td><button class="secondary" data-copen="${s.id}">Open</button></td></tr>`; });
+    $("pgSessionBrowser").innerHTML=h+"</table>";
+    $("pgSessionBrowser").querySelectorAll("[data-copen]").forEach(b=>b.onclick=()=>{currentConversation=b.dataset.copen;openConversation();}); }
+  if(currentConversation && !list.some(s=>s.id===currentConversation)){ currentConversation=null; show($("pgDetail"),false); }
+}
+async function startConversation(){
+  $("pgStatus").textContent="…"; banner($("pgErr"),"","");
+  let vars={}; const raw=$("pgStartVars").value.trim();
+  if(raw){ try{ vars=JSON.parse(raw); }catch(e){ banner($("pgErr"),"Runtime variables must be valid JSON.","err"); $("pgStatus").textContent=""; return; } }
+  try{ const s=await api("POST", pgBase(), {runtime_variables:vars});
+    banner($("globalError"),"Conversation started.","ok"); currentConversation=s.id; await loadPlayground(); await openConversation();
+  }catch(e){ banner($("pgErr"),"Start failed: "+e.message,"err"); }
+  finally{ $("pgStatus").textContent=""; }
+}
+async function openConversation(){
+  if(!currentConversation){ show($("pgDetail"),false); return; }
+  const conv=await api("GET", pgBase()+"/"+currentConversation);
+  const plan=await api("GET", pgBase()+"/"+currentConversation+"/plan");
+  const adapters=await api("GET", pgBase()+"/"+currentConversation+"/adapters");
+  show($("pgDetail"),true);
+  $("pgCurrent").innerHTML=`${conv.session_id} <span class="pill ${conv.status==="active"?"active":"suspended"}">${conv.status}</span>`;
+  // chat window
+  $("pgChat").innerHTML = conv.messages.length
+    ? conv.messages.map(m=>`<div style="margin:4px 0"><b>${m.role==="user"?"🧑":"🤖"} ${m.role}:</b> ${m.content}</div>`).join("")
+    : '<div class="empty">No messages yet. Send a turn.</div>';
+  $("pgChat").scrollTop = $("pgChat").scrollHeight;
+  const active = conv.status==="active";
+  show($("btnSendTurn"), active); show($("btnResetConversation"), active); show($("btnCloseConversation"), active);
+  // prompt inspector
+  $("pgPrompt").textContent=plan.resolved_prompt.text||"(empty)";
+  // variable inspector
+  $("pgVariables").innerHTML='<table><tr><th>Variable</th><th>Value</th><th>Source</th></tr>'+
+    plan.resolved_variables.map(v=>`<tr><td>${v.name}</td><td class="muted">${v.is_secret?"••••••":v.value}</td><td><span class="pill">${v.source}</span></td></tr>`).join("")+"</table>";
+  // execution timeline
+  $("pgTimeline").innerHTML = conv.turns.length
+    ? '<table><tr><th>Turn</th><th>Input</th><th>Tokens</th><th>LLM ms</th><th>Tools</th></tr>'+
+      conv.turns.map(t=>`<tr><td>${t.index}</td><td class="muted">${t.user_input}</td><td>${t.token_estimate}</td><td>${(t.timing||{}).llm_ms||0}</td><td>${(t.tool_invocations||[]).length}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No turns.</div>';
+  // tool invocation + diagnostics from latest turn
+  const last = adapters.latest_turn;
+  const tis = last ? (last.tool_invocations||[]) : [];
+  $("pgToolInvocations").innerHTML = tis.length
+    ? '<table><tr><th>Tool</th><th>Status</th><th>Output</th></tr>'+tis.map(x=>`<tr><td>${x.tool_id}</td><td><span class="pill">${x.status}</span></td><td class="muted">${x.output}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No tool invocations.</div>';
+  $("pgAdapters").textContent=JSON.stringify(adapters, null, 2);
+  const diags = last ? (last.diagnostics||[]) : [];
+  $("pgDiagnostics").innerHTML = diags.length
+    ? '<table><tr><th>Severity</th><th>Message</th></tr>'+diags.map(d=>`<tr><td><span class="pill">${d.severity}</span></td><td>${d.message}</td></tr>`).join("")+"</table>"
+    : '<div class="empty">No diagnostics.</div>';
+  await loadProviderInspector();  // M8.14
+}
+async function sendTurn(){
+  const text=$("pgInput").value.trim(); if(!text) return;
+  banner($("pgErr"),"","");
+  try{ await api("POST", pgBase()+"/"+currentConversation+"/turns", {user_input:text});
+    $("pgInput").value=""; await openConversation();
+  }catch(e){ banner($("pgErr"),"Turn failed: "+e.message,"err"); }
+}
+async function conversationAction(suffix,label){
+  banner($("pgErr"),"","");
+  try{ await api("POST", pgBase()+"/"+currentConversation+suffix); banner($("globalError"),label+".","ok");
+    await loadPlayground(); await openConversation();
+  }catch(e){ banner($("pgErr"),label+" failed: "+e.message,"err"); }
+}
+
+// ── Real Provider Execution (M8.14) ────────────────────────────────────────────
+function convBase(){ return pgBase()+"/"+currentConversation; }
+function renderExecResult(r){
+  $("execProvider").innerHTML='<table><tr><th>Field</th><th>Value</th></tr>'+
+    Object.entries(r.provider_metadata||{}).map(([k,v])=>`<tr><td>${k}</td><td class="muted">${typeof v==='object'?JSON.stringify(v):v}</td></tr>`).join("")+"</table>";
+  const tu=r.token_usage||{};
+  $("execUsage").innerHTML=`<table><tr><th>Input</th><th>Output</th><th>Total</th><th>Latency</th></tr>
+    <tr><td>${tu.input_tokens||0}</td><td>${tu.output_tokens||0}</td><td>${tu.total_tokens||0}</td><td>${r.latency_ms||0} ms</td></tr></table>`;
+  $("execDiagnostics").textContent=JSON.stringify({errors:r.errors||[], diagnostics:r.diagnostics||[], execution:r.execution_metadata||{}}, null, 2);
+}
+async function executeReal(stream){
+  const text=$("execInput").value.trim(); if(!text) return;
+  $("execStatus").textContent="…"; banner($("execErr"),"","");
+  try{
+    if(stream){
+      const res=await fetch(API+convBase()+"/stream", {method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+token}, body:JSON.stringify({user_input:text})});
+      const raw=await res.text();
+      const events=raw.trim().split("\n").filter(Boolean).map(l=>JSON.parse(l));
+      let tokens=""; events.forEach(e=>{ if(e.type==="token") tokens+=e.data.text||""; });
+      $("execStream").textContent=tokens+"\n\n["+events.map(e=>e.type).join(", ")+"]";
+    } else {
+      const r=await api("POST", convBase()+"/execute", {user_input:text});
+      $("execStream").textContent=r.assistant_response;
+      renderExecResult(r);
+    }
+    $("execInput").value="";
+    await loadProviderInspector(); await openConversation();
+  }catch(e){ banner($("execErr"),"Execution failed: "+e.message,"err"); }
+  finally{ $("execStatus").textContent=""; }
+}
+async function loadProviderInspector(){
+  try{
+    const diag=await api("GET", convBase()+"/provider");
+    const msgs=await api("GET", convBase()+"/messages");
+    $("execTimeline").innerHTML = msgs.length
+      ? '<table><tr><th>#</th><th>Role</th><th>Content</th></tr>'+msgs.map(m=>`<tr><td>${m.seq}</td><td><span class="pill">${m.role}</span></td><td class="muted">${(m.content||'').slice(0,60)}</td></tr>`).join("")+"</table>"
+      : '<div class="empty">No executed turns yet.</div>';
+    if(!$("execProvider").innerHTML) $("execProvider").innerHTML='<div class="muted">llm: '+JSON.stringify(diag.llm)+' · breaker_open: '+diag.circuit_breaker_open+'</div>';
+    $("execDiagnostics").textContent = $("execDiagnostics").textContent || JSON.stringify(diag, null, 2);
+  }catch(e){ /* conversation may be new */ }
+}
+
+function signout(){ token=null; me=null; orgs=[]; currentOrg=null; currentWs=null; nav=null; currentProj=null; currentAgent=null; currentTool=null; currentSession=null; currentConversation=null; currentKb=null; currentDep=null;
+  show($("app"),false); show($("signout"),false); show($("signinCard"),true); $("whoami").textContent=""; }
+
+$("btnRegister").onclick=register;
+$("btnToken").onclick=()=>getToken($("existingUser").value.trim()).catch(e=>banner($("globalError"),e.message,"err"));
+$("btnCreateOrg").onclick=createOrg;
+$("btnSaveSettings").onclick=saveSettings;
+$("btnDeleteOrg").onclick=deleteOrg;
+$("btnInvite").onclick=invite;
+// M8.7 — workspace controls
+$("btnCreateWs").onclick=createWorkspace;
+$("btnWsSearch").onclick=()=>loadWorkspaces($("wsSearch").value.trim());
+$("btnWsSearchClear").onclick=()=>{ $("wsSearch").value=""; loadWorkspaces(); };
+$("btnSaveWs").onclick=saveWs;
+$("btnArchiveWs").onclick=archiveWs;
+$("btnRestoreWs").onclick=restoreWs;
+$("btnFavWs").onclick=favWs;
+$("btnDefaultWs").onclick=defaultWs;
+$("btnAddWsMember").onclick=addWsMember;
+// M8.8 — project controls
+$("btnCreateProj").onclick=createProject;
+$("btnProjSearch").onclick=()=>loadProjects($("projSearch").value.trim());
+$("btnProjSearchClear").onclick=()=>{ $("projSearch").value=""; loadProjects(); };
+$("btnSaveProj").onclick=saveProj;
+$("btnArchiveProj").onclick=()=>projAction("/archive","Archived");
+$("btnRestoreProj").onclick=()=>projAction("/restore","Restored");
+$("btnAddProjMember").onclick=addProjMember;
+$("projEnvSelect").onchange=switchProjEnv;
+// M8.10 — agent builder controls
+$("btnCreateAgent").onclick=createAgent;
+$("btnAgentSearch").onclick=()=>loadAgents($("agentSearch").value.trim());
+$("btnAgentSearchClear").onclick=()=>{ $("agentSearch").value=""; loadAgents(); };
+$("btnSaveAgent").onclick=saveAgent;
+$("btnPublishAgent").onclick=()=>agentAction("/publish",{description:"published from Studio"},"Published");
+$("btnUnpublishAgent").onclick=()=>agentAction("/unpublish",null,"Unpublished");
+$("btnDuplicateAgent").onclick=()=>agentAction("/duplicate",{},"Duplicated");
+$("btnArchiveAgent").onclick=()=>agentAction("/archive",null,"Archived");
+$("btnRestoreAgent").onclick=()=>agentAction("/restore",null,"Restored");
+$("btnDeleteAgent").onclick=deleteAgent;
+$("btnAddVar").onclick=addVar;
+$("agSystemPrompt").oninput=updatePromptCount;
+// M8.11 — tool framework controls
+$("btnCreateTool").onclick=createTool;
+$("btnToolSearch").onclick=()=>loadTools($("toolSearch").value.trim());
+$("btnToolSearchClear").onclick=()=>{ $("toolSearch").value=""; loadTools(); };
+$("btnSaveTool").onclick=saveTool;
+$("btnToggleTool").onclick=toggleTool;
+$("btnArchiveTool").onclick=()=>toolAction("/archive","Archived");
+$("btnRestoreTool").onclick=()=>toolAction("/restore","Restored");
+$("btnDeleteTool").onclick=deleteTool;
+$("btnAttachTool").onclick=attachTool;
+// M8.15 — knowledge controls
+$("btnCreateKb").onclick=createKb;
+$("btnKbUpload").onclick=uploadKbDoc;
+$("btnKbEmbed").onclick=()=>kbAction("/embeddings");
+$("btnKbIndex").onclick=()=>kbAction("/index");
+$("btnKbArchive").onclick=()=>kbAction("/archive");
+$("btnKbSearch").onclick=searchKb;
+// M8.16 — deployment actuator controls
+$("btnDepPlan").onclick=planDep;
+$("btnDepSubmit").onclick=submitDep;
+$("btnDepApprove").onclick=()=>depAction("/approve",true);
+$("btnDepReject").onclick=()=>depAction("/reject",true);
+$("btnDepCancel").onclick=()=>depAction("/cancel",false);
+$("btnDepRetry").onclick=()=>depAction("/retry",false);
+$("btnDepRollback").onclick=()=>depAction("/rollback",true);
+// M8.17 — observability controls
+$("btnObRefresh").onclick=loadObservability;
+$("btnObLogs").onclick=loadObLogs;
+$("btnObAlertCreate").onclick=createObAlert;
+// M8.12 — runtime inspector controls
+$("btnCreateSession").onclick=createSession;
+$("btnResumeSession").onclick=()=>sessionAction("/resume","Resumed");
+$("btnCloseSession").onclick=()=>sessionAction("/close","Closed");
+// M8.13 — conversation playground controls
+$("btnStartConversation").onclick=startConversation;
+$("btnSendTurn").onclick=sendTurn;
+$("btnResetConversation").onclick=()=>conversationAction("/reset","Reset");
+$("btnCloseConversation").onclick=()=>conversationAction("/close","Closed");
+// M8.14 — real provider execution controls
+$("btnExecuteReal").onclick=()=>executeReal(false);
+$("btnStreamReal").onclick=()=>executeReal(true);
+$("signout").onclick=signout;
+</script>
+</body>
+</html>

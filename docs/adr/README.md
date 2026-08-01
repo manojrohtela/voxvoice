@@ -50,6 +50,8 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0018](ADR-0018-product-runtime-declarative-composition-layer.md) | Product Runtime is a declarative composition layer above the frozen Execution Platform, in a new `platform/product/` package | Epic 7 Product Platform (new) | Accepted 2026-07-26 |
 | [ADR-0019](ADR-0019-binding-resolution-against-registry-snapshot.md) | Binding resolution resolves against an injected immutable RegistrySnapshot, never live Execution Platform runtimes | Epic 7 Product Platform (refines ADR-0018) | Accepted 2026-07-26 — **terminology superseded by ADR-0020**: the type ADR-0019 calls `RegistrySnapshot`/`RegistryEntry` is implemented as `BindingSnapshot`/`BindingSnapshotEntry` (`product.compiler`); ADR-0019's substance is unchanged |
 | [ADR-0020](ADR-0020-registry-nouns-reserved-for-product-registry.md) | "Registry" nouns are reserved for the Product Registry of packages; the compiler's binding catalog is a `BindingSnapshot` | Epic 7 Product Platform (refines ADR-0019 terminology) | Accepted 2026-07-27 |
+| [ADR-0021](ADR-0021-studio-consumer-and-management-surface.md) | VoxVoice Studio is a Consumer + Management Surface; it owns no runtime state (`Studio → Platform`, one-way) | Epic 8 Customer Platform (new) | Accepted 2026-07-27 |
+| [ADR-0022](ADR-0022-deployment-actuator-runtime-actuation.md) | The Deployment Actuator is the sole owner of deployment execution; Product Runtime stays declarative (`actuator → product`, read-only, one-way) | Epic 8 Customer Platform (new) | Accepted 2026-07-27 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -65,3 +67,13 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > [`docs/releases/epic7-product-runtime-v1.0.md`](../releases/epic7-product-runtime-v1.0.md)).
 > They are binding until superseded; changing an Epic 7 architectural invariant they
 > encode requires a new superseding ADR.
+
+> **Epic 8 architecture freeze (M8.20).** ADR-0021 and ADR-0022 are ratified and
+> implemented under **Customer Platform v1.0** (🔒 architecture frozen — see
+> [`docs/releases/epic8-customer-platform-v1.0.md`](../releases/epic8-customer-platform-v1.0.md)).
+> They are binding until superseded; changing an Epic 8 architectural invariant they
+> encode (Studio-owns-no-runtime-state; Deployment Actuator = sole owner of deployment
+> execution) requires a new superseding ADR + major version + new baseline. This is a
+> governance freeze of the architecture only — the Epic 8 implementation remains
+> uncommitted in the working tree (recorded in the freeze manifest §22); no commit,
+> tag, or release is claimed.
