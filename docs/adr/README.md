@@ -56,6 +56,9 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0023](ADR-0023-billing-sole-owner-of-revenue.md) | The Billing Platform is the sole owner of revenue; it owns nothing else and meters the authoritative `metric.*` stream (`Billing → Platform`, read-only, one-way) | Epic 9 Billing & Subscription Platform (new) | Accepted 2026-08-01 |
 | ADR-0025…ADR-0030 | Recommended Epic 9 architecture batch — entitlement mechanics · money/ledger discipline · payment & tax rented edges · critical-path prohibition · commerce/licensing reuse · billing-account hierarchy | Epic 9 Billing & Subscription Platform | **Reserved — recommended, not yet ratified** ([Blueprint](../architecture/epic9/billing-platform-blueprint.md) §26) |
 | [ADR-0031](ADR-0031-billing-plane-repository-placement.md) | The Billing Platform lives permanently in `platform/billing/`, a self-contained top-level plane importing `core` only; surfaced additively through the Epic 8 layers; never wired into the runtime composition root | Epic 9 repository topology (structural placement) | Accepted 2026-08-01 |
+| [ADR-0032](ADR-0032-event-durability-and-delivery-semantics.md) | Event durability and delivery semantics: **at-least-once**, append-only, one event identity and one sequence authority, transactional outbox, bounded retry ladder, distinct DLQ and quarantine, explicit retention — all behind the **unchanged** `core.events.EventBus` contract with no producer change (DL-0017's deferred work) | Epic 10 Durable Event & Telemetry Spine (new) | Accepted 2026-08-18 |
+| [ADR-0033](ADR-0033-metric-stream-seam.md) | The metric-stream seam is **pull-shaped**: a platform-owned buffer subscribes to the `EventBus` and Billing pulls through the frozen `MetricStreamPort`, never subscribing itself; `metric.*` is extended additively under AR-32; runtime `metric.*` is owned by `platform/observability/` while **`metric.billing.*` stays reserved to Billing** | Epic 10 (implements against ADR-0023 + ADR-0031; amends neither) | Accepted 2026-08-18 |
+| [ADR-0034](ADR-0034-durable-storage-seam-core-only-packages.md) | Durable storage seam for `core`-only edge packages: a scoped `platform/events/persistence/**` sub-package may import `sqlmodel`/`sqlalchemy` and owns its own `Database` (the ADR-0031 IR1a precedent generalized), enforced by per-layer boundary assertions; migrations continue the single global chain at **0034** with the **`evt_*`** prefix | Epic 10 structural/dependency-inversion seam | Accepted 2026-08-18 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -102,3 +105,18 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > reserved for Coach and **ADR-0025–ADR-0030** stay reserved for the recommended Epic 9
 > architecture batch. After it, Epic 9 repository placement is frozen: no future placement
 > ADR is needed and no package movement is expected.
+
+> **Epic 10 opening (M10.1).** ADR-0032, ADR-0033 and ADR-0034 are ratified **before** any Epic 10
+> implementation (DOCUMENTATION_RULES §3.7). Together they fix the **Durable Event & Telemetry
+> Spine** beneath the already-built runtime: ADR-0032 the delivery *semantics*, ADR-0034 the storage
+> *structure*, ADR-0033 the `metric.*` producer side and namespace partition. They discharge the
+> durability work **DL-0017** deferred at M4.1 — *"durable outbox + retry/DLQ + async/non-blocking
+> delivery … implement the same `EventBus` contract — no producer change"* — and they take **only**
+> that: a distributed broker, external transports and WS/SSE gateway expansion remain deferred with
+> DL-0017; real providers (Epic 11) and the SDK / read API / mid-call control (Epic 12) are out of
+> scope. Numbering continues at **0032** because **ADR-0011** (MCP/A2A), **ADR-0024** (Coach) and
+> **ADR-0025–ADR-0030** (the recommended Epic 9 batch) all remain **Reserved — not yet ratified**.
+> **ADR-0023 and ADR-0031 are referenced, not amended**: Epic 10 implements against the frozen
+> Billing contract and modifies no file under `platform/billing/**`. Epics 5–9 remain frozen; the
+> `v4.0.0` baseline, both Epic 9 digests, migration head `0033`, the 27 controls, advisories NS-5
+> and ST-3, and all nine declared limitations are preserved as historical state.

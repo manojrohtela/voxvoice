@@ -128,3 +128,21 @@ Durable **outbox** + retry/DLQ (persist before dispatch) · WS/SSE event gateway
 (subscribe → serialize → stream) · mid-call control API · distributed broker
 (implement `EventBus`) · metrics/analytics subscribers · the SDK event surface. All
 consume the same envelope + contract — no producer or engine changes.
+
+## Revision note — Epic 10 (M10.1, 2026-08-18)
+
+The **durable outbox + retry/DLQ** named above is ratified by
+[ADR-0032](../adr/ADR-0032-event-durability-and-delivery-semantics.md) (delivery *semantics*:
+at-least-once, append-only, one event identity and one sequence authority, transactional outbox,
+bounded retry ladder, distinct DLQ and quarantine, explicit retention) and
+[ADR-0034](../adr/ADR-0034-durable-storage-seam-core-only-packages.md) (storage *structure*: a
+scoped `events/persistence/**` sub-package, its own `Database`, migrations from `0034`, `evt_*`
+tables). The `metric.*` producer side and namespace partition are
+[ADR-0033](../adr/ADR-0033-metric-stream-seam.md).
+
+**Nothing on this page changes.** DL-0017's constraint is carried forward verbatim — the durable
+implementation sits **behind the same `core.events.EventBus` contract with no producer change** —
+so the envelope, the delivery model, the ordering and reentrancy guarantees, and every statement
+above remain accurate. Of the extension points listed, Epic 10 takes **only** the durable outbox +
+retry/DLQ; the **WS/SSE event gateway, mid-call control API, distributed broker and SDK event
+surface stay deferred** (Epic 11/Epic 12 and DL-0017).
