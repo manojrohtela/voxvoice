@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Investigations</title>
+<!--
+  Financial Investigation &amp; Audit Evidence Studio (M9.21).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no investigation rule, and knows
+  nothing the API does not tell it &mdash; every screen renders a response from
+  /v1/billing/investigations/*, and every action dispatches to it.
+
+  It reconciles nothing (M9.19) and correlates nothing (M9.20). Which findings share a cause is
+  decided on the server from immutable anchors; this screen shows the incident it was told about.
+
+  It calculates no financial impact. There is no monetary total anywhere on this page &mdash; not
+  per investigation, not per incident, not across evidence. The one place a figure appears is
+  inside a captured evidence body, which is rendered verbatim as the JSON the owning domain wrote.
+  Nothing here parses, sums, converts or compares it: a client that computed "A says X and B says
+  Y, so the impact is Z" would be a second opinion about a figure the Ledger owns.
+
+  It never decides that a hypothesis is a fact. `kind` arrives on the observation and is rendered
+  as it came; there is no branch in this file that promotes one to the other.
+
+  It never decides closability. `/closure` returns `may_close` and a list of reasons, and the close
+  button is disabled by the server's answer. There is no client-side checklist.
+
+  It never marks unavailable evidence as verified. `availability` and `supports_conclusion` arrive
+  on each capture; an unavailable source is rendered as a gap, in red, with its reason. Hiding it
+  would be exactly the substitution this milestone exists to prevent.
+
+  It resolves no incident, requests no repair, runs no reconciliation, and mutates no financial
+  domain. There is no such endpoint on this surface to call.
+
+  It rewrites no history. Redaction is a POST that appends; the superseded capture stays in the
+  chain of custody and this page shows every link, oldest first.
+
+  It reaches no provider and holds no card number, token or credential &mdash; no response it reads
+  contains one.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  textarea { min-height:3.4rem; resize:vertical; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.act[disabled] { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.available, .pill.answered, .pill.confirmed, .pill.complete, .pill.supported,
+  .pill.concluded, .pill.evidence_snapshot { color:var(--ok); border-color:var(--ok); }
+  .pill.triaged, .pill.investigating, .pill.proposed, .pill.normal,
+  .pill.redacted, .pill.superseded { color:var(--warn); border-color:var(--warn); }
+  .pill.unavailable, .pill.awaiting_evidence, .pill.urgent, .pill.rejected,
+  .pill.contradicts_incident_classification, .pill.critical { color:var(--bad); border-color:var(--bad); }
+  .pill.incomplete, .pill.unanswerable, .pill.inconclusive, .pill.high { color:var(--warn); }
+  .pill.open, .pill.hypothesis { color:var(--accent); border-color:var(--accent); }
+  .pill.closed, .pill.not_applicable, .pill.low, .pill.live_reference,
+  .pill.observed_fact, .pill.info { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+  .gap { border-left:3px solid var(--bad); padding-left:.7rem; margin:.5rem 0; font-size:13px; }
+  .chain { border-left:2px dashed var(--line); margin-left:.4rem; padding-left:.9rem; }
+  pre.body { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.6rem;
+             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+             max-height:16rem; overflow:auto; margin:.3rem 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Investigations</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="investigation" placeholder="investigation id" style="width:170px" />
+  <input id="incident" placeholder="incident id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:130px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/investigations";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, "");
+    else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "posture", data: {}, error: "", notice: "", offset: 0 };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["posture", "Posture"], ["list", "Investigations"], ["case", "Case"],
+  ["evidence", "Evidence"], ["custody", "Chain of custody"], ["chain", "Evidence chain"],
+  ["questions", "Questions"], ["observations", "Observations"], ["conclusions", "Conclusions"],
+  ["timeline", "Audit trail"], ["closure", "Closure"], ["package", "Audit package"],
+];
+
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "—"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function vid() { return val("investigation"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "posture") state.data.posture = await api("/posture");
+    if (t === "list") state.data.page = await api("" + q({ limit: 25, offset: state.offset }));
+    if (t === "case" && vid()) state.data.investigation = await api(`/${vid()}`);
+    if (t === "evidence" && vid()) state.data.evidence = await api(`/${vid()}/evidence` + q({ limit: 100 }));
+    if (t === "custody" && vid()) state.data.custody = await api(`/${vid()}/custody`);
+    if (t === "chain" && vid()) state.data.chain = await api(`/${vid()}/chain`);
+    if (t === "questions" && vid()) state.data.questions = await api(`/${vid()}/questions`);
+    if (t === "observations" && vid()) state.data.observations = await api(`/${vid()}/observations`);
+    if (t === "conclusions" && vid()) state.data.conclusions = await api(`/${vid()}/conclusions`);
+    if (t === "timeline" && vid()) state.data.timeline = await api(`/${vid()}/timeline` + q({ limit: 200 }));
+    if (t === "closure" && vid()) {
+      state.data.closure = await api(`/${vid()}/closure`);
+      state.data.investigation = await api(`/${vid()}`);
+    }
+    if (t === "package" && vid()) {
+      // A 404 here means "nothing exported yet", which is a legitimate answer rather than an
+      // error. Anything else is reported as it came.
+      try { state.data.package = await api(`/${vid()}/audit-package`); }
+      catch (e) { state.data.package = null; if (!/^404/.test(e.message)) throw e; }
+    }
+    const p = state.data.posture;
+    document.getElementById("count-pill").textContent =
+      p ? `${p.total} case(s) · ${p.blocked} blocked` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // A complete package and an incomplete one are different news. Reporting both as "exported"
+    // would let an operator believe a package with missing evidence was a full record.
+    if (r && r.completeness !== undefined) {
+      state.notice = r.completeness === "complete"
+        ? `audit package exported — complete, digest ${short(r.manifest_digest)}`
+        : `audit package exported — INCOMPLETE, ${r.gaps.length} gap(s) named`;
+    } else if (r && r.availability !== undefined) {
+      state.notice = r.availability === "available"
+        ? `${r.mode} captured — ${r.locator}`
+        : `${r.locator} recorded as ${r.availability.toUpperCase()} — it stays visible as missing`;
+    } else if (r && r.classification !== undefined) {
+      state.notice = `conclusion recorded: ${r.classification}`;
+    } else if (r && r.hypothesis_status !== undefined && r.kind === "hypothesis") {
+      state.notice = `hypothesis ${r.hypothesis_status}`;
+    } else if (r && r.status !== undefined && r.id) {
+      state.notice = `investigation is now ${r.status}`;
+      document.getElementById("investigation").value = r.id;
+    } else if (Array.isArray(r)) {
+      const missing = r.filter(c => c.availability !== "available").length;
+      state.notice = `${r.length} source(s) captured` + (missing ? `, ${missing} unavailable` : "");
+    } else {
+      state.notice = "done";
+    }
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h =>
+      el("th", { class: /^#|count$/i.test(h) ? "num" : "" }, h)))),
+    el("tbody", {}, rows)));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) =>
+    [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+// ── screens ───────────────────────────────────────────────────────────────────
+
+function screenPosture() {
+  const p = state.data.posture;
+  if (!p) return el("p", { class: "muted" }, "no posture loaded");
+  const counts = Object.entries(p.by_status).sort();
+  const prio = Object.entries(p.by_priority).sort();
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Investigations"),
+      el("div", { class: "row" },
+        el("div", {}, el("div", { class: "big" }, p.total), el("div", { class: "muted" }, "total")),
+        el("div", {}, el("div", { class: "big" }, p.blocked), el("div", { class: "muted" }, "awaiting evidence")),
+        el("div", {}, el("div", { class: "big" }, p.concluded_awaiting_closure), el("div", { class: "muted" }, "concluded, not closed")),
+        el("div", {}, el("div", { class: "big" }, p.unavailable_evidence), el("div", { class: "muted" }, "unavailable evidence")),
+      ),
+      el("p", { class: "muted", style: "margin-top:.8rem;font-size:12px" },
+        "Counts only. There is no monetary figure on this screen — every one of those lives "
+        + "on the domain that decided it."),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "By status"),
+      table(["status", "count"], counts.map(([s, n]) =>
+        el("tr", {}, el("td", {}, pill(s)), el("td", { class: "num" }, n)))),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "By priority"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Priority is operational urgency. It is not severity — that belongs to the incident."),
+      table(["priority", "count"], prio.map(([s, n]) =>
+        el("tr", {}, el("td", {}, pill(s)), el("td", { class: "num" }, n)))),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "Audit packages"),
+      el("div", { class: "row" },
+        el("div", {}, el("div", { class: "big" }, p.packages_exported), el("div", { class: "muted" }, "exported")),
+        el("div", {}, el("div", { class: "big" }, p.incomplete_packages), el("div", { class: "muted" }, "incomplete")),
+      ),
+    ),
+  ];
+}
+
+function screenList() {
+  const page = state.data.page;
+  const open = el("div", { class: "card" },
+    el("h2", {}, "Open an investigation"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "An investigation always investigates an incident M9.20 already declared. The server "
+      + "refuses without one."),
+    el("label", {}, "incident id"),
+    el("input", { id: "open-incident", value: val("incident") }),
+    el("label", {}, "summary"),
+    el("input", { id: "open-summary", placeholder: "what is being investigated" }),
+    el("label", {}, "priority"),
+    el("select", { id: "open-priority" },
+      ["low", "normal", "high", "urgent"].map(p => el("option", { value: p }, p))),
+    el("p", {}, el("button", {
+      class: "act", style: "margin-top:.7rem",
+      onclick: () => act(() => api("", {
+        method: "POST",
+        body: JSON.stringify({
+          incident_id: val("open-incident"),
+          summary: val("open-summary"),
+          priority: val("open-priority") || "normal",
+        }),
+      })),
+    }, "Open investigation")),
+  );
+  if (!page) return [open];
+  const rows = page.investigations.map(i => el("tr", {},
+    el("td", { class: "mono" }, el("button", {
+      class: "ghost",
+      onclick: () => { document.getElementById("investigation").value = i.id; state.tab = "case"; load(); },
+    }, short(i.id))),
+    el("td", { class: "mono" }, short(i.incident_id)),
+    el("td", {}, pill(i.status)),
+    el("td", {}, pill(i.priority)),
+    el("td", {}, pill(i.incident_severity)),
+    el("td", { class: "num" }, i.evidence_count),
+    el("td", { class: "num" }, i.open_question_count),
+    el("td", { class: "num" }, i.unavailable_evidence_count),
+    el("td", {}, when(i.opened_at)),
+  ));
+  return [
+    open,
+    el("div", { class: "card" },
+      el("h2", {}, `Investigations (${page.total})`),
+      table(["id", "incident", "status", "priority", "severity", "evidence #",
+             "open questions #", "unavailable #", "opened"], rows),
+      el("p", { style: "margin-top:.7rem" },
+        el("button", {
+          class: "ghost", onclick: () => { state.offset = Math.max(0, state.offset - 25); load(); },
+        }, "← previous"), " ",
+        el("button", {
+          class: "ghost", onclick: () => { if (page.has_more) { state.offset += 25; load(); } },
+        }, "next →"), " ",
+        el("span", { class: "muted" }, `offset ${page.offset} of ${page.total}`)),
+    ),
+  ];
+}
+
+function screenCase() {
+  const i = state.data.investigation;
+  if (!i) return el("p", { class: "muted" }, "enter an investigation id above");
+  const allowed = i.allowed_triggers || [];
+  const btn = (trigger, label, path, bodyFn) => el("button", {
+    class: "act", style: "margin:.2rem .3rem 0 0",
+    disabled: !allowed.includes(trigger),
+    onclick: () => act(() => api(`/${i.id}/${path}`, {
+      method: "POST", body: JSON.stringify(bodyFn ? bodyFn() : { note: val("case-note") }),
+    })),
+  }, label);
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Investigation"),
+      kv([
+        ["id", el("span", { class: "mono" }, i.id)],
+        ["incident", el("span", { class: "mono" }, i.incident_id)],
+        ["status", pill(i.status)],
+        ["priority", pill(i.priority)],
+        ["incident severity (M9.20 owns this)", pill(i.incident_severity)],
+        ["summary", i.summary || "—"],
+        ["opened", `${when(i.opened_at)} by ${i.opened_by || "—"}`],
+        ["last activity", when(i.last_activity_at)],
+        ["evidence captured", i.evidence_count],
+        ["open questions", i.open_question_count],
+        ["unavailable evidence", i.unavailable_evidence_count],
+        ["conclusion", i.conclusion_id ? el("span", { class: "mono" }, i.conclusion_id) : "—"],
+        ["closed", i.closed_at ? `${when(i.closed_at)} by ${i.closed_by} — ${i.closed_reason}` : "—"],
+        ["version", i.version],
+      ]),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "Actions"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Every button is enabled by the server's own allowed_triggers. A closed investigation "
+        + "shows none, because the lifecycle has no edge out of it — this page does not "
+        + "decide what is legal."),
+      el("label", {}, "note / reason"),
+      el("input", { id: "case-note", placeholder: "recorded on the timeline" }),
+      el("div", { style: "margin-top:.5rem" },
+        btn("triage", "Triage", "triage", () => ({ priority: "normal", note: val("case-note") })),
+        btn("start", "Start", "start"),
+        btn("await_evidence", "Await evidence", "await-evidence", () => ({ reason: val("case-note") })),
+        btn("resume", "Resume", "resume"),
+        btn("close", "Close", "close", () => ({ reason: val("case-note") })),
+      ),
+      allowed.length ? null : el("p", { class: "muted", style: "margin-top:.6rem;font-size:12px" },
+        "No transition is available — this investigation is closed and its record is final."),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "Capture the incident chain"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Captures the incident, every correlated finding and every repair reference in one pass. "
+        + "Idempotent: an unchanged source recaptured lands on the same content-addressed row. A "
+        + "source that cannot be read is recorded as UNAVAILABLE, not skipped."),
+      el("button", {
+        class: "act",
+        onclick: () => act(() => api(`/${i.id}/capture-incident`, {
+          method: "POST", body: JSON.stringify({ include_findings: true, include_repairs: true }),
+        })),
+      }, "Capture incident evidence"),
+    ),
+  ];
+}
+
+function screenEvidence() {
+  const page = state.data.evidence;
+  const form = el("div", { class: "card" },
+    el("h2", {}, "Capture one source"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "A SNAPSHOT asserts what a source said and can back a confirmed conclusion. A LIVE "
+      + "REFERENCE points at it and cannot — it attests to no content. You do not supply the "
+      + "representation: the server reads the owning domain itself."),
+    el("div", { class: "row" },
+      el("div", {}, el("label", {}, "domain"),
+        el("select", { id: "cap-domain" }, ["integrity", "reconciliation", "ledger", "invoice",
+          "tax", "payment", "collections", "revenue"].map(d => el("option", { value: d }, d)))),
+      el("div", {}, el("label", {}, "source type"),
+        el("select", { id: "cap-type" }, ["integrity_incident", "reconciliation_finding",
+          "repair_request", "ledger_entry", "invoice_document", "payment_intent",
+          "revenue_schedule"].map(t => el("option", { value: t }, t)))),
+      el("div", {}, el("label", {}, "source id"), el("input", { id: "cap-id" })),
+      el("div", {}, el("label", {}, "mode"),
+        el("select", { id: "cap-mode" }, ["evidence_snapshot", "live_reference"]
+          .map(m => el("option", { value: m }, m)))),
+    ),
+    el("p", {}, el("button", {
+      class: "act", style: "margin-top:.6rem",
+      onclick: () => act(() => api(`/${vid()}/capture-evidence`, {
+        method: "POST", body: JSON.stringify({
+          domain: val("cap-domain"), source_type: val("cap-type"),
+          source_id: val("cap-id"), mode: val("cap-mode"),
+        }),
+      })),
+    }, "Capture"), " ",
+      el("button", {
+        class: "ghost",
+        onclick: () => act(() => api(`/${vid()}/evidence-unavailable`, {
+          method: "POST", body: JSON.stringify({
+            domain: val("cap-domain"), source_type: val("cap-type"),
+            source_id: val("cap-id"), reason: "could not be retrieved",
+          }),
+        })),
+      }, "Record as unavailable")),
+  );
+  if (!page) return [form];
+  const rows = page.evidence.map(e => el("tr", {},
+    el("td", { class: "num" }, e.sequence),
+    el("td", { class: "mono" }, e.locator),
+    el("td", {}, pill(e.mode)),
+    el("td", {}, pill(e.availability)),
+    el("td", {}, e.supports_conclusion
+      ? el("span", { class: "pill available" }, "yes")
+      : el("span", { class: "pill unavailable" }, "no")),
+    el("td", { class: "digest" }, e.content_digest ? short(e.content_digest) : "—"),
+    el("td", {}, when(e.captured_at)),
+    el("td", { class: "mono" }, e.previous_evidence_id ? short(e.previous_evidence_id) : "—"),
+    el("td", {}, e.unavailable_reason || e.redaction_reason || "—"),
+  ));
+  const bodies = page.evidence.filter(e => e.body).map(e => el("div", { class: "card" },
+    el("h2", {}, e.locator),
+    el("p", { class: "digest" }, `digest ${e.content_digest}`),
+    // Rendered verbatim, as the JSON the owning domain wrote. Nothing here parses, sums or
+    // compares it — a figure inside is evidence of what that domain said, not a value this
+    // page has any business interpreting.
+    el("pre", { class: "body" }, JSON.stringify(e.body, null, 2)),
+  ));
+  return [
+    form,
+    el("div", { class: "card" },
+      el("h2", {}, `Evidence (${page.total})`),
+      table(["#", "locator", "mode", "availability", "supports conclusion", "digest",
+             "captured", "follows", "reason"], rows),
+    ),
+    ...bodies,
+  ];
+}
+
+function screenCustody() {
+  const chains = state.data.custody;
+  if (!chains) return el("p", { class: "muted" }, "enter an investigation id above");
+  if (!chains.length) return el("p", { class: "muted" }, "nothing captured yet");
+  return chains.map(c => el("div", { class: "card" },
+    el("h2", {}, c.locator),
+    c.changed
+      ? el("p", { class: "err" }, "This source changed between captures. Both representations are "
+          + "below — the earlier one was not overwritten.")
+      : el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+          "Every capture of this source held an identical representation."),
+    el("div", { class: "chain" }, c.links.map(l => el("div", { class: "st" },
+      el("div", {}, pill(l.mode), " ", pill(l.availability), " ",
+        el("span", { class: "digest" }, l.content_digest ? short(l.content_digest) : "no content")),
+      el("div", { class: "muted", style: "font-size:12px" },
+        `${when(l.captured_at)} by ${l.captured_by || "—"}`
+        + (l.previous_evidence_id ? ` · follows ${short(l.previous_evidence_id)}` : "")),
+      l.reason ? el("div", { class: "muted", style: "font-size:12px" }, l.reason) : null,
+    ))),
+  ));
+}
+
+function screenChain() {
+  const c = state.data.chain;
+  if (!c) return el("p", { class: "muted" }, "enter an investigation id above");
+  const rows = c.nodes.map(n => el("tr", {},
+    el("td", {}, pill(n.kind)),
+    el("td", { class: "mono" }, short(n.identity)),
+    el("td", {}, n.label),
+    el("td", {}, n.available
+      ? el("span", { class: "pill available" }, "readable")
+      : el("span", { class: "pill unavailable" }, "unavailable")),
+  ));
+  const edges = c.edges.map(e => el("tr", {},
+    el("td", { class: "mono" }, short(e.source)),
+    el("td", { class: "mono" }, short(e.target)),
+    el("td", {}, e.relation),
+  ));
+  return [
+    c.unavailable.length ? el("div", { class: "alert" },
+      `${c.unavailable.length} node(s) could not be read. They are shown below rather than `
+      + "dropped — a chain that hid what it could not fetch would read as complete.") : null,
+    el("div", { class: "card" },
+      el("h2", {}, "Evidence chain"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Assembled from references. Every node names a fact another milestone owns; this page "
+        + "creates none of them."),
+      table(["kind", "identity", "what it says", "readable"], rows),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "How they connect"),
+      table(["from", "to", "relation"], edges),
+    ),
+  ];
+}
+
+function screenQuestions() {
+  const qs = state.data.questions;
+  const form = el("div", { class: "card" },
+    el("h2", {}, "Record a question"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "A question is a record, not an executable query. Nothing interprets the text."),
+    el("div", { class: "row" },
+      el("div", {}, el("label", {}, "kind"),
+        el("select", { id: "q-kind" }, ["why_diverged", "which_facts_affected", "first_observed_by",
+          "transient_or_persistent", "repair_requested", "repair_evidence", "known_at_time", "other"]
+          .map(k => el("option", { value: k }, k)))),
+      el("div", {}, el("label", {}, "required"),
+        el("select", { id: "q-required" }, ["true", "false"].map(v => el("option", { value: v }, v)))),
+    ),
+    el("label", {}, "text"),
+    el("input", { id: "q-text" }),
+    el("p", {}, el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${vid()}/question`, {
+        method: "POST", body: JSON.stringify({
+          kind: val("q-kind"), text: val("q-text"), required: val("q-required") === "true",
+        }),
+      })),
+    }, "Record question")),
+  );
+  if (!qs) return [form];
+  const rows = qs.map(x => el("tr", {},
+    el("td", {}, pill(x.kind)),
+    el("td", {}, x.text),
+    el("td", {}, pill(x.status)),
+    el("td", {}, x.required ? "yes" : "no"),
+    el("td", {}, x.answer || "—"),
+    el("td", {}, x.status === "open" ? el("span", {},
+      el("button", {
+        class: "ghost",
+        onclick: () => act(() => api(`/${vid()}/answer`, {
+          method: "POST", body: JSON.stringify({
+            question_id: x.id, answer: prompt("answer") || "", evidence_ids: [],
+          }),
+        })),
+      }, "answer"), " ",
+      el("button", {
+        class: "ghost",
+        onclick: () => act(() => api(`/${vid()}/answer`, {
+          method: "POST", body: JSON.stringify({
+            question_id: x.id, unanswerable: true,
+            answer: prompt("why can the evidence not settle this?") || "",
+          }),
+        })),
+      }, "unanswerable")) : "—"),
+  ));
+  return [
+    form,
+    el("div", { class: "card" },
+      el("h2", {}, "Questions"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "UNANSWERABLE is a real outcome. A required question the evidence cannot settle must be "
+        + "closable without anybody inventing an answer."),
+      table(["kind", "question", "status", "required", "answer", ""], rows),
+    ),
+  ];
+}
+
+function screenObservations() {
+  const obs = state.data.observations;
+  const form = el("div", { class: "card" },
+    el("h2", {}, "Record an observation"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "An OBSERVED FACT must cite an available snapshot — the server refuses otherwise. A "
+      + "HYPOTHESIS is held to no such bar, and the two get different identities, so one can "
+      + "never be re-submitted as the other."),
+    el("div", { class: "row" },
+      el("div", {}, el("label", {}, "kind"),
+        el("select", { id: "o-kind" }, ["observed_fact", "hypothesis"]
+          .map(k => el("option", { value: k }, k)))),
+      el("div", {}, el("label", {}, "evidence ids (comma separated)"),
+        el("input", { id: "o-evidence" })),
+    ),
+    el("label", {}, "statement"),
+    el("textarea", { id: "o-statement" }),
+    el("p", {}, el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${vid()}/observation`, {
+        method: "POST", body: JSON.stringify({
+          kind: val("o-kind"), statement: val("o-statement"),
+          evidence_ids: val("o-evidence").split(",").map(s => s.trim()).filter(Boolean),
+        }),
+      })),
+    }, "Record observation")),
+  );
+  if (!obs) return [form];
+  const rows = obs.map(o => el("tr", {},
+    el("td", { class: "num" }, o.sequence),
+    el("td", {}, pill(o.kind)),
+    el("td", {}, o.statement),
+    el("td", {}, o.kind === "hypothesis" ? pill(o.hypothesis_status) : "—"),
+    el("td", { class: "mono" }, (o.evidence_ids || []).map(short).join(" ") || "—"),
+    el("td", {}, o.settled_reason || "—"),
+    el("td", {}, o.kind === "hypothesis" && o.hypothesis_status === "proposed"
+      ? el("span", {},
+        el("button", {
+          class: "ghost",
+          onclick: () => act(() => api(`/${vid()}/settle-hypothesis`, {
+            method: "POST", body: JSON.stringify({
+              observation_id: o.id, supported: true,
+              reason: prompt("what evidence supports it?") || "",
+            }),
+          })),
+        }, "support"), " ",
+        el("button", {
+          class: "ghost",
+          onclick: () => act(() => api(`/${vid()}/settle-hypothesis`, {
+            method: "POST", body: JSON.stringify({
+              observation_id: o.id, supported: false,
+              reason: prompt("what evidence rejects it?") || "",
+            }),
+          })),
+        }, "reject")) : "—"),
+  ));
+  return [
+    form,
+    el("div", { class: "card" },
+      el("h2", {}, "Observations"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "A rejected hypothesis stays on the record. “What did we believe, and what changed "
+        + "our mind” is what an examiner asks."),
+      table(["#", "kind", "statement", "hypothesis", "evidence", "verdict reason", ""], rows),
+    ),
+  ];
+}
+
+function screenConclusions() {
+  const cs = state.data.conclusions;
+  const form = el("div", { class: "card" },
+    el("h2", {}, "Record a conclusion"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "CONFIRMED needs an available snapshot behind it. INCONCLUSIVE needs none and is always "
+      + "available — nobody is ever forced to name a root cause to close a case. A "
+      + "contradiction records a discrepancy for the owning M9.20 workflow; it does not "
+      + "reclassify the incident, and this page cannot."),
+    el("div", { class: "row" },
+      el("div", {}, el("label", {}, "classification"),
+        el("select", { id: "c-class" }, ["confirmed", "inconclusive",
+          "contradicts_incident_classification"].map(k => el("option", { value: k }, k)))),
+      el("div", {}, el("label", {}, "evidenced root cause (contradiction only)"),
+        el("input", { id: "c-cause", placeholder: "e.g. source_fact_missing" })),
+    ),
+    el("label", {}, "evidence ids (comma separated)"),
+    el("input", { id: "c-evidence" }),
+    el("label", {}, "statement"),
+    el("textarea", { id: "c-statement" }),
+    el("p", {}, el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${vid()}/conclusion`, {
+        method: "POST", body: JSON.stringify({
+          classification: val("c-class"), statement: val("c-statement"),
+          evidence_ids: val("c-evidence").split(",").map(s => s.trim()).filter(Boolean),
+          evidenced_root_cause: val("c-cause") || null,
+        }),
+      })),
+    }, "Record conclusion")),
+  );
+  if (!cs) return [form];
+  const rows = cs.map(c => el("tr", {},
+    el("td", { class: "num" }, c.version),
+    el("td", {}, pill(c.classification)),
+    el("td", {}, c.statement),
+    el("td", {}, pill(c.incident_root_cause)),
+    el("td", {}, c.evidenced_root_cause ? pill(c.evidenced_root_cause) : "—"),
+    el("td", { class: "mono" }, (c.evidence_ids || []).map(short).join(" ") || "—"),
+    el("td", { class: "mono" }, c.supersedes ? short(c.supersedes) : "—"),
+    el("td", {}, when(c.recorded_at)),
+  ));
+  return [
+    form,
+    el("div", { class: "card" },
+      el("h2", {}, "Conclusions"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Superseded conclusions are shown deliberately: an examiner needs to see that the first "
+        + "answer was wrong and when it was corrected."),
+      table(["v", "classification", "statement", "incident said", "evidence indicates",
+             "evidence", "supersedes", "recorded"], rows),
+    ),
+  ];
+}
+
+function screenTimeline() {
+  const t = state.data.timeline;
+  if (!t) return el("p", { class: "muted" }, "enter an investigation id above");
+  return el("div", { class: "card" },
+    el("h2", {}, `Audit trail (${t.total})`),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Append-only and totally ordered. This is the record of the investigation, not a log of "
+      + "it — an examiner reconstructs who looked and when from these rows."),
+    el("div", { class: "steps" }, t.entries.map(e => el("div", { class: "st" },
+      el("div", { class: "stage" }, `${e.sequence} · ${e.kind} · ${when(e.at)}`),
+      el("div", {}, e.summary || "—"),
+      el("div", { class: "muted", style: "font-size:12px" },
+        (e.actor_id ? `by ${e.actor_id}` : "system")
+        + (e.subject ? ` · ${short(e.subject)}` : "")),
+    ))),
+  );
+}
+
+function screenClosure() {
+  const c = state.data.closure;
+  const i = state.data.investigation;
+  if (!c) return el("p", { class: "muted" }, "enter an investigation id above");
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Closure"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Closing the investigation is not resolving the incident — M9.20 owns that, and a "
+        + "case may legitimately close INCONCLUSIVE while its incident is still open."),
+      kv([
+        ["may close", c.may_close
+          ? el("span", { class: "pill complete" }, "yes")
+          : el("span", { class: "pill incomplete" }, "no")],
+        ["conclusion", c.conclusion_classification ? pill(c.conclusion_classification) : "—"],
+        ["unresolved required questions", (c.unresolved_required_questions || []).join(", ") || "—"],
+        ["unsettled hypotheses", (c.open_hypotheses || []).length],
+      ]),
+      c.reasons.length ? el("div", {}, el("h2", { style: "margin-top:1rem" }, "Outstanding"),
+        c.reasons.map(r => el("div", { class: "gap" }, r))) : null,
+      c.blocking_gaps.length ? el("div", {}, el("h2", { style: "margin-top:1rem" }, "Blocking evidence gaps"),
+        c.blocking_gaps.map(g => el("div", { class: "gap" },
+          el("div", { class: "mono" }, g.locator),
+          el("div", {}, pill(g.availability), " ", g.reason),
+          el("div", { class: "muted", style: "font-size:12px" },
+            g.last_known_available_at
+              ? `last held ${when(g.last_known_available_at)}`
+              : "never successfully captured")))) : null,
+      el("p", { style: "margin-top:1rem" }, el("button", {
+        class: "act",
+        disabled: !c.may_close || !(i && (i.allowed_triggers || []).includes("close")),
+        onclick: () => act(() => api(`/${vid()}/close`, {
+          method: "POST", body: JSON.stringify({ reason: val("close-reason") }),
+        })),
+      }, "Close investigation")),
+      el("label", {}, "reason"),
+      el("input", { id: "close-reason" }),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The button is disabled by the server's answer, not by a check in this page."),
+    ),
+  ];
+}
+
+function screenPackage() {
+  const p = state.data.package;
+  const btn = el("div", { class: "card" },
+    el("h2", {}, "Export an audit package"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Content-addressed and immutable. Exporting unchanged state twice returns the same "
+      + "package and writes nothing; any change produces a new one beside it. Completeness is "
+      + "decided on evidence availability, never on optimism."),
+    el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${vid()}/export`, { method: "POST" })),
+    }, "Export"),
+  );
+  if (!p) return [btn, el("p", { class: "muted" }, "nothing exported yet")];
+  return [
+    btn,
+    p.completeness === "incomplete" ? el("div", { class: "alert" },
+      `This package is INCOMPLETE. ${p.gaps.length} source(s) could not be retrieved, and they `
+      + "are named below rather than omitted.") : null,
+    el("div", { class: "card" },
+      el("h2", {}, "Audit package"),
+      kv([
+        ["id", el("span", { class: "mono" }, p.id)],
+        ["manifest digest", el("span", { class: "digest" }, p.manifest_digest)],
+        ["completeness", pill(p.completeness)],
+        ["incident", el("span", { class: "mono" }, p.incident_id)],
+        ["evidence", p.evidence_count],
+        ["observations", p.observation_count],
+        ["questions", p.question_count],
+        ["conclusions", p.conclusion_count],
+        ["timeline entries", p.timeline_length],
+        ["created", `${when(p.created_at)} by ${p.created_by || "—"}`],
+      ]),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The digest is recomputable from the manifest below, which is what makes this export "
+        + "auditable rather than merely downloadable."),
+    ),
+    p.gaps.length ? el("div", { class: "card" },
+      el("h2", {}, "Gaps"),
+      p.gaps.map(g => el("div", { class: "gap" },
+        el("div", { class: "mono" }, g.locator),
+        el("div", {}, pill(g.availability), " ", g.reason,
+          g.blocks_conclusion ? el("span", { class: "pill unavailable" }, "blocks conclusion") : null),
+      ))) : null,
+    el("div", { class: "card" },
+      el("h2", {}, "Manifest"),
+      el("pre", { class: "body", style: "max-height:32rem" }, JSON.stringify(p.manifest, null, 2)),
+    ),
+  ];
+}
+
+const SCREENS = {
+  posture: screenPosture, list: screenList, case: screenCase, evidence: screenEvidence,
+  custody: screenCustody, chain: screenChain, questions: screenQuestions,
+  observations: screenObservations, conclusions: screenConclusions, timeline: screenTimeline,
+  closure: screenClosure, package: screenPackage,
+};
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) => el("button", {
+    class: state.tab === id ? "active" : "",
+    onclick: () => { state.tab = id; state.offset = 0; load(); },
+  }, label.replace("&amp;", "&"))));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("p", { class: "ok" }, state.notice));
+  const screen = SCREENS[state.tab];
+  const out = screen ? screen() : null;
+  if (Array.isArray(out)) parts.push(...out.filter(Boolean));
+  else if (out) parts.push(out);
+  view.replaceChildren(...parts);
+}
+
+for (const id of ["investigation", "incident", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

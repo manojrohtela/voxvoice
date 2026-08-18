@@ -52,6 +52,10 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0020](ADR-0020-registry-nouns-reserved-for-product-registry.md) | "Registry" nouns are reserved for the Product Registry of packages; the compiler's binding catalog is a `BindingSnapshot` | Epic 7 Product Platform (refines ADR-0019 terminology) | Accepted 2026-07-27 |
 | [ADR-0021](ADR-0021-studio-consumer-and-management-surface.md) | VoxVoice Studio is a Consumer + Management Surface; it owns no runtime state (`Studio → Platform`, one-way) | Epic 8 Customer Platform (new) | Accepted 2026-07-27 |
 | [ADR-0022](ADR-0022-deployment-actuator-runtime-actuation.md) | The Deployment Actuator is the sole owner of deployment execution; Product Runtime stays declarative (`actuator → product`, read-only, one-way) | Epic 8 Customer Platform (new) | Accepted 2026-07-27 |
+| ADR-0024 | Coach (AI Product Manager) autonomy runs through the same request/approval/audit path, never a privileged one | Epic 8 Customer Platform | **Reserved — not yet ratified** (recommended by ADR-0021; Coach autonomy not yet designed) |
+| [ADR-0023](ADR-0023-billing-sole-owner-of-revenue.md) | The Billing Platform is the sole owner of revenue; it owns nothing else and meters the authoritative `metric.*` stream (`Billing → Platform`, read-only, one-way) | Epic 9 Billing & Subscription Platform (new) | Accepted 2026-08-01 |
+| ADR-0025…ADR-0030 | Recommended Epic 9 architecture batch — entitlement mechanics · money/ledger discipline · payment & tax rented edges · critical-path prohibition · commerce/licensing reuse · billing-account hierarchy | Epic 9 Billing & Subscription Platform | **Reserved — recommended, not yet ratified** ([Blueprint](../architecture/epic9/billing-platform-blueprint.md) §26) |
+| [ADR-0031](ADR-0031-billing-plane-repository-placement.md) | The Billing Platform lives permanently in `platform/billing/`, a self-contained top-level plane importing `core` only; surfaced additively through the Epic 8 layers; never wired into the runtime composition root | Epic 9 repository topology (structural placement) | Accepted 2026-08-01 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -77,3 +81,24 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > governance freeze of the architecture only — the Epic 8 implementation remains
 > uncommitted in the working tree (recorded in the freeze manifest §22); no commit,
 > tag, or release is claimed.
+
+> **Epic 9 opening (M9.0B).** ADR-0023 ratifies the Billing Platform's ownership boundary
+> **before** any Epic 9 implementation: **Billing owns revenue and nothing else** — it
+> consumes `metric.*` read-only (it never measures), never blocks Runtime or Deployment,
+> never performs a permission check, and publishes immutable entitlement snapshots the
+> owning platform enforces locally. `Billing → Platform` is one-way; no frozen Epic may
+> depend on Billing. **ADR-0024 stays reserved for the Coach-autonomy decision** recommended
+> by ADR-0021; the remaining Epic 9 decisions are recommended as **ADR-0025–ADR-0030**
+> ([Epic 9 Blueprint](../architecture/epic9/billing-platform-blueprint.md) §26) and are
+> ratified separately. Epics 5/6/7/8 remain frozen and byte-for-byte unchanged.
+
+> **Epic 9 repository topology (M9.1A).** ADR-0031 is the **structural placement** record
+> CODING_STANDARDS §2 requires for a new top-level directory (the ADR-0018 / ADR-0022
+> precedent). It fixes *where* the plane ADR-0023 ratified physically lives —
+> `platform/billing/`, importing `platform/core/` + stdlib only, with exactly one capped
+> read-only exception (`billing/refs.py` → `product`, mirroring `actuator/planning.py`) —
+> plus its dependency direction, composition root, import rules, public surface, and
+> extension points. It took **ADR-0031** rather than a reserved number: **ADR-0024** stays
+> reserved for Coach and **ADR-0025–ADR-0030** stay reserved for the recommended Epic 9
+> architecture batch. After it, Epic 9 repository placement is frozen: no future placement
+> ADR is needed and no package movement is expected.

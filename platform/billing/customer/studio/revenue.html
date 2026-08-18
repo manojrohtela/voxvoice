@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Revenue</title>
+<!--
+  Revenue Recognition Studio (M9.18).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no recognition rule, and knows
+  nothing the API does not tell it &mdash; every screen renders a response from
+  /v1/billing/revenue/*, and every action dispatches to it.
+
+  It allocates nothing. The per-period figures on screen were split by the server using one
+  largest-remainder allocator. A client that divided a total by twelve would disagree with the
+  ledger in the last month of every schedule, and the ledger is the one that is right.
+
+  It derives no deferred figure. `deferred` arrives on the position response, already computed by
+  the server as total minus recognized minus adjusted. There is no subtraction in this file.
+
+  It computes no tax and no invoice total. The basis figure was copied from the issued snapshot.
+
+  It respects the server&apos;s allowed transitions. Buttons come from `allowed_triggers`; the
+  client decides nothing about what is legal, which is why a fully recognized schedule shows no
+  cancel button and a posted period shows no recognize button.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.recognized, .pill.posted, .pill.fully_recognized, .pill.in_period,
+  .pill.paid, .pill.succeeded, .pill.applied, .pill.matched, .pill.refunded, .pill.resolved,
+  .pill.completed { color:var(--ok); border-color:var(--ok); }
+  .pill.scheduled, .pill.partially_recognized, .pill.next_open_period, .pill.deferred,
+  .pill.pending, .pill.requires_action, .pill.authorized, .pill.sending,
+  .pill.stale, .pill.duplicate, .pill.acknowledged { color:var(--warn); border-color:var(--warn); }
+  .pill.unposted, .pill.reversed, .pill.rejected_no_open_period,
+  .pill.failed, .pill.cancelled, .pill.expired, .pill.ambiguous, .pill.conflicting,
+  .pill.unverified, .pill.uncorrelated, .pill.open { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.abandoned, .pill.unsupported, .pill.skipped, .pill.superseded,
+  .pill.not_applicable { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .warn { color:var(--warn); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Revenue</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:140px" />
+  <input id="schedule" placeholder="schedule id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:140px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/revenue";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "schedules", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  \u2022 ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} \u2014 ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["schedules", "Schedules"], ["schedule", "Schedule"], ["periods", "Periods"],
+  ["position", "Recognized vs deferred"], ["adjustments", "Corrections"],
+  ["explain", "Why?"], ["due", "Due now"], ["unposted", "Repair queue"],
+  ["policies", "Policies"], ["activity", "Audit trail"],
+];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+function money(m) {
+  if (!m) return "\u2014";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "\u2014"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function sid() { return val("schedule"); }
+function short(d) { return d ? d.slice(0, 16) : "\u2014"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "\u2014"; }
+function day(t) { return t ? new Date(t * 1000).toISOString().slice(0, 10) : "\u2014"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "schedules") state.data.schedules = await api("/schedules" + q({ account_id: acct() }));
+    if (t === "schedule" && sid()) {
+      state.data.schedule = await api(`/schedules/${sid()}`);
+      state.data.inspection = await api(`/schedules/${sid()}/inspect`);
+    }
+    if (t === "periods" && sid()) state.data.periods = await api(`/schedules/${sid()}/entries`);
+    if (t === "position") {
+      if (sid()) state.data.position = await api(`/schedules/${sid()}/position`);
+      state.data.deferred = await api("/deferred" + q({ account_id: acct() }));
+    }
+    if (t === "adjustments" && sid()) state.data.adjustments = await api(`/schedules/${sid()}/adjustments`);
+    if (t === "explain" && sid()) state.data.explanation = await api(`/schedules/${sid()}/explain`);
+    if (t === "due") state.data.due = await api("/entries/due");
+    if (t === "unposted") state.data.unposted = await api("/entries/unposted");
+    if (t === "policies") state.data.policies = await api("/policies" + q({ include_inactive: true }));
+    if (t === "activity" && sid()) state.data.activity = await api(`/schedules/${sid()}/timeline`);
+    const all = state.data.schedules || [];
+    document.getElementById("count-pill").textContent = all.length ? `${all.length} schedule(s)` : "\u2014";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // `recognized` and `posted` are separate answers. Reporting both as success would show clean
+    // books while the repair queue grew.
+    if (r && r.recognized !== undefined) {
+      state.notice = r.posted
+        ? `recognized and posted (${r.ledger_disposition || "in_period"})`
+        : `recognized but NOT posted \u2014 ${r.note || r.ledger_outcome}`;
+    } else {
+      state.notice = "done";
+    }
+    if (r && r.schedule && r.schedule.id) document.getElementById("schedule").value = r.schedule.id;
+    else if (r && r.id && r.basis) document.getElementById("schedule").value = r.id;
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, h)))),
+    el("tbody", {}, rows.length
+      ? rows.map(r => el("tr", {}, r.map(c => el("td", {}, c))))
+      : [el("tr", {}, el("td", { colspan: String(headers.length), class: "muted" }, "nothing yet"))])
+  ));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+// Every button is gated by the server&apos;s `allowed_triggers`.
+function scheduleButtons(s) {
+  const allowed = new Set(s.allowed_triggers || []);
+  const out = [];
+  if (allowed.has("schedule")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/schedules/${s.id}/activate`, { method: "POST" })) }, "activate"));
+  if (allowed.has("supersede")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/schedules/${s.id}/supersede`, { method: "POST", body: JSON.stringify({ reason: "document revised" }) })) },
+    "supersede"));
+  if (allowed.has("cancel")) out.push(el("button", { class: "ghost danger", onclick: () =>
+    act(() => api(`/schedules/${s.id}/cancel`, { method: "POST", body: JSON.stringify({ reason: "document cancelled" }) })) },
+    "cancel"));
+  return el("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap" }, out);
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) =>
+    el("button", { class: state.tab === id ? "active" : "", onclick: () => { state.tab = id; load(); } }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("div", { class: "ok" }, state.notice));
+  parts.push(SCREENS[state.tab]());
+  view.replaceChildren(...parts.filter(Boolean));
+}
+
+const SCREENS = {
+  schedules: () => el("div", { class: "card" },
+    el("h2", {}, "Revenue schedules"),
+    el("p", { class: "muted" },
+      "One schedule per basis. Change the document, the window, the method or the policy version " +
+      "and it is a different schedule \u2014 never a mutated one."),
+    table(["schedule", "document", "state", "method", "basis", "periods", "recognized", ""],
+      (state.data.schedules || []).map(s => [
+        el("span", { class: "mono" }, short(s.id)),
+        el("span", { class: "mono" }, `${short(s.basis.document_id)}@r${s.basis.revision}`),
+        pill(s.state), pill(s.basis.method), money(s.basis.amount),
+        String(s.entries_planned), String(s.entries_recognized), scheduleButtons(s),
+      ]))),
+
+  schedule: () => {
+    const s = state.data.schedule, i = state.data.inspection;
+    if (!s) return el("div", { class: "card muted" }, "enter a schedule id above");
+    return el("div", {},
+      el("div", { class: "card" }, el("h2", {}, "Schedule"), kv([
+        ["state", pill(s.state)],
+        ["source document", el("span", { class: "mono" }, `${s.basis.document_id} rev ${s.basis.revision}`)],
+        ["snapshot digest", el("span", { class: "digest" }, s.basis.snapshot_digest)],
+        ["basis digest", el("span", { class: "digest" }, s.basis.basis_digest)],
+        ["policy", `${s.basis.policy_code} v${s.basis.policy_version}`],
+        ["method", pill(s.basis.method)],
+        ["calendar step", pill(s.basis.granularity)],
+        ["remainder rule", pill(s.basis.remainder)],
+        ["service period", `${day(s.basis.service_start)} \u2192 ${day(s.basis.service_end)}`],
+        ["basis amount", money(s.basis.amount)],
+        ["periods", `${s.entries_recognized} of ${s.entries_planned} recognized`],
+        ["superseded by", el("span", { class: "mono" }, short(s.superseded_by))],
+        ["concurrency version", String(s.version)],
+      ]), scheduleButtons(s)),
+      i ? el("div", { class: "card" }, el("h2", {}, "Position"), kv([
+        ["total", el("span", { class: "big" }, money(i.position.total))],
+        ["recognized", money(i.position.recognized)],
+        ["adjusted", money(i.position.adjusted)],
+        ["deferred", el("span", { class: "big" }, money(i.position.deferred))],
+        ["posted periods", String(i.position.posted_entries)],
+        ["unposted periods", i.position.has_unposted
+          ? el("span", { class: "warn" }, String(i.position.unposted_entries)) : "0"],
+        ["due now", String(i.due_now)],
+        ["next period on", day(i.next_recognize_on)],
+      ])) : null);
+  },
+
+  periods: () => el("div", { class: "card" },
+    el("h2", {}, "Periods"),
+    el("p", { class: "muted" },
+      "Every figure below was split by the server. Recognizing a period that has not matured is " +
+      "refused, and recognizing one twice is refused by the database."),
+    table(["#", "period", "amount", "recognize on", "state", "posture", "ledger", "disposition", ""],
+      (state.data.periods || []).map(e => [
+        String(e.sequence), `${day(e.period_start)} \u2192 ${day(e.period_end)}`,
+        money(e.amount), day(e.recognize_on), pill(e.state), pill(e.recognition),
+        el("span", { class: "mono" }, short(e.ledger_entry_id)), pill(e.ledger_disposition),
+        el("div", { style: "display:flex;gap:.4rem" },
+          e.state === "pending" ? el("button", { class: "ghost", onclick: () =>
+            act(() => api(`/entries/${e.id}/recognize`, { method: "POST", body: JSON.stringify({}) })) }, "recognize") : null,
+          e.state === "unposted" ? el("button", { class: "ghost", onclick: () =>
+            act(() => api(`/entries/${e.id}/post`, { method: "POST" })) }, "post") : null,
+          (e.state === "posted" || e.state === "recognized" || e.state === "unposted")
+            ? el("button", { class: "ghost danger", onclick: () =>
+                act(() => api(`/entries/${e.id}/reverse`, { method: "POST", body: JSON.stringify({ kind: "reversal", reason: "correction" }) })) }, "reverse")
+            : null),
+      ]))),
+
+  position: () => {
+    const p = state.data.position, d = state.data.deferred;
+    return el("div", {},
+      p ? el("div", { class: "card" }, el("h2", {}, "This schedule"),
+        el("p", { class: "muted" },
+          "Every figure here was computed by the server from the periods that actually happened. " +
+          "There is no stored deferred column, deliberately."),
+        kv([
+          ["total", money(p.total)], ["recognized", money(p.recognized)],
+          ["adjusted", money(p.adjusted)], ["deferred", el("span", { class: "big" }, money(p.deferred))],
+          ["fully recognized", p.is_fully_recognized ? "yes" : "no"],
+        ])) : null,
+      d ? el("div", { class: "card" }, el("h2", {}, "Account"),
+        kv([
+          ["schedules", String(d.schedules)], ["total", money(d.total)],
+          ["recognized", money(d.recognized)],
+          ["deferred", el("span", { class: "big" }, money(d.deferred))],
+          ["unposted periods", d.unposted_entries
+            ? el("span", { class: "warn" }, String(d.unposted_entries)) : "0"],
+        ])) : null);
+  },
+
+  adjustments: () => el("div", { class: "card" },
+    el("h2", {}, "Corrections"),
+    el("p", { class: "muted" },
+      "A recognized amount is never edited. Each row is a new fact carrying provenance to the " +
+      "recognition it corrects."),
+    table(["correction", "period", "kind", "amount", "document", "policy", "effective", "ledger", "reason"],
+      (state.data.adjustments || []).map(a => [
+        el("span", { class: "mono" }, short(a.id)), el("span", { class: "mono" }, short(a.entry_id)),
+        pill(a.kind), money(a.amount),
+        el("span", { class: "mono" }, `${short(a.document_id)}@r${a.revision}`),
+        `${a.policy_code} v${a.policy_version}`, when(a.effective_at),
+        el("span", { class: "mono" }, short(a.ledger_entry_id)),
+        el("span", { class: "muted" }, a.reason),
+      ]))),
+
+  explain: () => {
+    const e = state.data.explanation;
+    if (!e) return el("div", { class: "card muted" }, "enter a schedule id above");
+    return el("div", { class: "card" },
+      el("h2", {}, "Why was this recognized?"),
+      el("p", {}, e.reason),
+      el("p", { class: "muted" },
+        "Assembled from the basis and the periods alone \u2014 no price book, no tax rate, no " +
+        "subscription, no payment. That is what makes it answerable in five years."),
+      kv([
+        ["document", el("span", { class: "mono" }, `${e.document_id} rev ${e.revision}`)],
+        ["snapshot digest", el("span", { class: "digest" }, e.snapshot_digest)],
+        ["basis digest", el("span", { class: "digest" }, e.basis_digest)],
+        ["policy", `${e.policy_code} v${e.policy_version}`],
+        ["method", pill(e.method)], ["calendar step", pill(e.granularity)],
+        ["remainder rule", pill(e.remainder)],
+        ["service period", `${day(e.service_start)} \u2192 ${day(e.service_end)}`],
+      ]),
+      el("div", { class: "steps" }, (e.path || []).map(p => el("div", { class: "st" }, p))));
+  },
+
+  due: () => el("div", { class: "card" },
+    el("h2", {}, "Periods due now"),
+    el("p", { class: "muted" },
+      "A read. Billing runs no scheduler \u2014 whoever polls this lives outside the plane."),
+    table(["period", "schedule", "amount", "recognize on", ""],
+      (state.data.due || []).map(e => [
+        el("span", { class: "mono" }, short(e.id)),
+        el("span", { class: "mono" }, short(e.schedule_id)),
+        money(e.amount), day(e.recognize_on),
+        el("button", { class: "ghost", onclick: () =>
+          act(() => api(`/entries/${e.id}/recognize`, { method: "POST", body: JSON.stringify({}) })) }, "recognize"),
+      ]))),
+
+  unposted: () => el("div", { class: "card" },
+    el("h2", {}, "Repair queue"),
+    el("p", { class: "warn" },
+      "Revenue was recognized and the Ledger has not accepted it \u2014 normally because no " +
+      "accounting period is open. The decision is a fact; the financial record is missing."),
+    table(["period", "schedule", "amount", "recognized at", ""],
+      (state.data.unposted || []).map(e => [
+        el("span", { class: "mono" }, short(e.id)),
+        el("span", { class: "mono" }, short(e.schedule_id)),
+        money(e.amount), when(e.recognized_at),
+        el("button", { class: "act", onclick: () =>
+          act(() => api(`/entries/${e.id}/post`, { method: "POST" })) }, "post to ledger"),
+      ]))),
+
+  policies: () => el("div", { class: "card" },
+    el("h2", {}, "Recognition policies"),
+    el("p", { class: "muted" },
+      "Immutable versions. There is no edit \u2014 a change publishes the next version, and " +
+      "schedules built under the old one keep naming it inside their basis digest."),
+    table(["policy", "code", "version", "method", "calendar step", "remainder", "active"],
+      (state.data.policies || []).map(p => [
+        el("span", { class: "mono" }, short(p.id)), p.code, String(p.version),
+        pill(p.method), pill(p.granularity), pill(p.remainder), p.is_active ? "yes" : "withdrawn",
+      ]))),
+
+  activity: () => el("div", { class: "card" },
+    el("h2", {}, "Audit trail"),
+    table(["when", "what", "summary", "actor", "period"],
+      (state.data.activity || []).map(a => [
+        when(a.at), pill(a.kind), a.summary || "\u2014", a.actor_id || "system",
+        el("span", { class: "mono" }, short(a.entry_id)),
+      ]))),
+};
+
+for (const id of ["account", "schedule", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

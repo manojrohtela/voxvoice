@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Billing Accounts</title>
+<!--
+  Billing Accounts Studio (M9.8).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen renders a response from
+  /v1/billing/billing-accounts/*, and every action dispatches to it. The Hierarchy Viewer draws
+  the tree the server resolved; it does not walk a parent graph of its own.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.active, .pill.good_standing { color:var(--ok); border-color:var(--ok); }
+  .pill.draft { color:var(--draft); }
+  .pill.suspended, .pill.watch, .pill.credit_hold { color:var(--warn); border-color:var(--warn); }
+  .pill.closed, .pill.archived, .pill.deleted, .pill.delinquent, .pill.write_off {
+          color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .tree { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.8; }
+  .tree .node { padding-left:calc(var(--d) * 1.4rem); }
+  .kv { display:grid; grid-template-columns:190px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Billing Accounts</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="selected" placeholder="account id or number" style="width:200px" />
+  <input id="token" placeholder="Bearer token" style="width:260px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/billing-accounts";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "list", data: {}, error: "", notice: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["list", "Account List"], ["details", "Account Details"], ["hierarchy", "Hierarchy Viewer"],
+  ["profile", "Commercial Profile"], ["contacts", "Contacts"], ["addresses", "Addresses"],
+  ["preferences", "Preferences"], ["history", "History"], ["search", "Search"],
+];
+
+const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"];
+const STATES = ["draft", "active", "suspended", "closed", "archived", "deleted"];
+const STATUSES = ["good_standing", "watch", "credit_hold", "delinquent", "write_off"];
+const KINDS = ["direct", "partner", "child"];
+const CONTACT_ROLES = ["billing", "shipping", "technical", "legal", "procurement"];
+const ADDRESS_KINDS = ["billing", "shipping", "legal", "remit_to"];
+const RISK = ["unrated", "low", "medium", "high"];
+const DELIVERY = ["email", "portal", "post", "edi"];
+
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function num(id) { const v = val(id); return v === "" ? null : Number(v); }
+function selected() { return document.getElementById("selected").value.trim(); }
+
+// Display only. The server sends integer minor units and a currency; this formats, never computes.
+function money(m) {
+  if (!m) return "—";
+  return `${Math.floor(Math.abs(m.minor) / 100)}.${String(Math.abs(m.minor) % 100).padStart(2, "0")} ${m.currency}`;
+}
+
+async function load() {
+  state.error = "";
+  try {
+    if (["list", "search"].includes(state.tab)) {
+      const found = await api("/?limit=500");
+      state.data.accounts = found.accounts;
+      document.getElementById("count-pill").textContent = `${found.total} account(s)`;
+    }
+    const id = selected();
+    if (id && ["details", "contacts", "addresses", "preferences"].includes(state.tab))
+      state.data.account = await api(`/${encodeURIComponent(id)}`);
+    if (id && state.tab === "hierarchy") state.data.tree = await api(`/${encodeURIComponent(id)}/hierarchy`);
+    if (id && state.tab === "profile") state.data.profile = await api(`/${encodeURIComponent(id)}/profile`);
+    if (id && state.tab === "history") state.data.history = await api(`/${encodeURIComponent(id)}/history`);
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsSelection() {
+  return el("div", { class: "card muted" },
+    "Enter an account id or number in the header to load this screen.");
+}
+
+// ── 1. Account List ────────────────────────────────────────────────────────────
+function listView() {
+  const accounts = state.data.accounts || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Create a billing account"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "a-name", placeholder: "Acme Group" })),
+        el("div", {}, el("label", {}, "Currency (fixed at creation)"),
+          el("select", { id: "a-currency" }, ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "a-kind" }, ...KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Legal name"), el("input", { id: "a-legal" })),
+        el("div", {}, el("label", {}, "Tax identifier (GSTIN / VAT)"), el("input", { id: "a-tax" })),
+        el("div", {}, el("label", {}, "Billing email"), el("input", { id: "a-email" })),
+        el("div", {}, el("label", {}, "Address line 1"), el("input", { id: "a-line1" })),
+        el("div", {}, el("label", {}, "City"), el("input", { id: "a-city" })),
+        el("div", {}, el("label", {}, "Country (ISO-2)"), el("input", { id: "a-country", placeholder: "IN" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Every account starts as a draft. Draft is the only state it can ever be deleted from — " +
+        "past that, revenue outlives the customer record."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("", {
+          method: "POST",
+          body: JSON.stringify({
+            display_name: val("a-name"), currency: val("a-currency"), kind: val("a-kind"),
+            legal_entity: { legal_name: val("a-legal"), tax_identifier: val("a-tax") },
+            contacts: val("a-email") ? [{ role: "billing", email: val("a-email") }] : [],
+            addresses: val("a-line1") ? [{ kind: "billing", line1: val("a-line1"),
+              city: val("a-city"), country: val("a-country") }] : [],
+          }),
+        }), "account created") }, "Create draft")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Accounts (${accounts.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Number", "Name", "State", "Status", "Currency", "Parent", "Payer", "Billable", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...accounts.map(a => el("tr", {},
+          el("td", {}, el("code", {}, a.account_number)),
+          el("td", {}, a.display_name),
+          el("td", {}, pill(a.state)),
+          el("td", {}, pill(a.commercial_status)),
+          el("td", {}, a.currency),
+          el("td", { class: "muted" }, a.parent_account_id || "—"),
+          el("td", { class: "muted" }, a.payer_account_id || "self"),
+          el("td", {}, a.is_billable ? "yes" : "no"),
+          el("td", {},
+            el("button", { class: "ghost", onclick: () => {
+              document.getElementById("selected").value = a.id;
+              state.tab = "details"; load();
+            } }, "open"),
+            ...a.allowed_triggers.filter(t => t !== "delete").map(t => el("button", {
+              class: "ghost",
+              onclick: () => act(() => api(`/${a.id}/${t === "resume" ? "activate" : t}`, {
+                method: "POST",
+                body: JSON.stringify(t === "suspend" || t === "close" ? { reason: "" } : {}),
+              }), `${a.account_number} ${t}d`),
+            }, t)),
+          ),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Buttons come from the server's allowed_triggers — the UI cannot offer a move that would 409."),
+    ),
+  ];
+}
+
+// ── 2. Account Details ─────────────────────────────────────────────────────────
+function detailsView() {
+  const a = state.data.account;
+  if (!a) return [needsSelection()];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, `${a.account_number} · ${a.display_name} `, pill(a.state), " ", pill(a.commercial_status)),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Account id"), el("dd", {}, el("code", {}, a.id)),
+        el("dt", {}, "Legal entity"), el("dd", {}, a.legal_entity.legal_name || "—",
+          a.legal_entity.tax_identifier ? el("span", { class: "muted" }, ` · ${a.legal_entity.tax_identifier}`) : null),
+        el("dt", {}, "Currency"), el("dd", {}, a.currency),
+        el("dt", {}, "Kind"), el("dd", {}, a.kind),
+        el("dt", {}, "Parent account"), el("dd", {}, a.parent_account_id || "— (root)"),
+        el("dt", {}, "Payer"), el("dd", {}, a.payer_account_id || "— (pays for itself)"),
+        el("dt", {}, "Billable here"), el("dd", {}, a.is_billable ? "yes" : "no — billed at parent or payer"),
+        el("dt", {}, "Tax profile reference"), el("dd", {}, a.tax_profile_id || "—"),
+        el("dt", {}, "Credit limit"), el("dd", {}, money(a.credit.credit_limit),
+          a.credit.credit_hold ? el("span", { class: "pill credit_hold", style: "margin-left:.5rem" }, "hold") : null),
+        el("dt", {}, "Risk rating"), el("dd", {}, a.credit.risk_rating),
+        el("dt", {}, "Retained only"), el("dd", {}, a.is_retained_only ? "yes — record is read-only" : "no"),
+      ),
+    ),
+    el("div", { class: "card" }, el("h2", {}, "Relationships"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Parent account id (blank detaches to root)"),
+          el("input", { id: "r-parent", value: a.parent_account_id })),
+        el("div", {}, el("label", {}, "Payer account id (blank = pays for itself)"),
+          el("input", { id: "r-payer", value: a.payer_account_id })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A billing relationship only — organization, workspace, and project hierarchy are untouched. " +
+        "Parent and payer are separate graphs: who consolidates the invoices and who actually pays " +
+        "are different questions."),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/parent`, {
+          method: "POST", body: JSON.stringify({ parent_account_id: val("r-parent") }) }), "parent assigned") }, "Set parent"),
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/payer`, {
+          method: "POST", body: JSON.stringify({ payer_account_id: val("r-payer") }) }), "payer assigned") }, "Set payer"),
+      ),
+    ),
+    el("div", { class: "card" }, el("h2", {}, "Credit profile"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, `Credit limit (minor units, ${a.currency})`),
+          el("input", { id: "c-limit", type: "number", value: a.credit.credit_limit ? a.credit.credit_limit.minor : "" })),
+        el("div", {}, el("label", {}, "Credit hold"),
+          el("select", { id: "c-hold" }, el("option", {}, String(a.credit.credit_hold)), el("option", {}, String(!a.credit.credit_hold)))),
+        el("div", {}, el("label", {}, "Risk rating"),
+          el("select", { id: "c-risk" }, ...RISK.map(r => el("option", { selected: r === a.credit.risk_rating ? "" : null }, r)))),
+        el("div", {}, el("label", {}, "Commercial status"),
+          el("select", { id: "c-status" }, ...STATUSES.map(s => el("option", { selected: s === a.commercial_status ? "" : null }, s)))),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A credit limit is a policy figure, not a balance — this screen records what we are willing " +
+        "to be owed and computes nothing about what currently is."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/credit`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            credit: {
+              credit_limit: num("c-limit") === null ? null : { minor: num("c-limit"), currency: a.currency },
+              credit_hold: val("c-hold") === "true", risk_rating: val("c-risk"),
+            },
+            commercial_status: val("c-status"),
+          }),
+        }), "credit profile updated") }, "Save credit profile")),
+    ),
+    el("div", { class: "card" }, el("h2", {}, `Notes (${a.notes.length})`),
+      el("div", { class: "row" },
+        el("div", { style: "grid-column:1/-1" }, el("label", {}, "New note"), el("input", { id: "n-body" }))),
+      el("div", { style: "margin-top:.6rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/notes`, {
+          method: "POST", body: JSON.stringify({ body: val("n-body"), pinned: false }) }), "note appended") }, "Append note")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "There is no edit and no delete: what we told a customer, and when, is evidence."),
+      el("table", { style: "margin-top:.6rem" },
+        el("thead", {}, el("tr", {}, ...["When", "Author", "Note"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...a.notes.map(n => el("tr", {},
+          el("td", { class: "num" }, n.at), el("td", {}, n.author_id || "—"), el("td", {}, n.body))))),
+    ),
+  ];
+}
+
+// ── 3. Hierarchy Viewer ────────────────────────────────────────────────────────
+function hierarchyView() {
+  const tree = state.data.tree;
+  if (!tree) return [needsSelection()];
+  const lines = [];
+  (function walk(node) {
+    lines.push(el("div", { class: "node", style: `--d:${node.depth}` },
+      el("code", {}, node.account_number), " ", node.display_name, " ", pill(node.state),
+      node.payer_account_id ? el("span", { class: "muted" }, "  ← paid by " + node.payer_account_id) : null,
+    ));
+    node.children.forEach(walk);
+  })(tree.root);
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Billing hierarchy"),
+      el("div", { class: "tree" }, ...lines),
+      el("dl", { class: "kv", style: "margin-top:1rem" },
+        el("dt", {}, "Invoiced account"), el("dd", {}, el("code", {}, tree.invoiced_account_id)),
+        el("dt", {}, "Accounts in tree"), el("dd", {}, String(tree.size)),
+        el("dt", {}, "Depth"), el("dd", {}, String(tree.depth)),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "This is the billing hierarchy, and only that. Organization, workspace, and project " +
+        "hierarchy are separate graphs and are untouched by anything on this screen — which is " +
+        "what lets a reseller structure be configured rather than architected. " +
+        "Attribution flows down; invoicing rolls up."),
+    ),
+  ];
+}
+
+// ── 4. Commercial Profile ──────────────────────────────────────────────────────
+function profileView() {
+  const p = state.data.profile;
+  if (!p) return [needsSelection()];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, `Commercial profile · ${p.account.account_number}`),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Legal entity"), el("dd", {}, p.account.legal_entity.legal_name || "—"),
+        el("dt", {}, "Registration"), el("dd", {}, p.account.legal_entity.registration_number || "—"),
+        el("dt", {}, "Tax identifier"), el("dd", {}, p.account.legal_entity.tax_identifier || "—"),
+        el("dt", {}, "State / status"), el("dd", {}, pill(p.account.state), " ", pill(p.account.commercial_status)),
+        el("dt", {}, "Parent"), el("dd", {}, p.parent_display_name || "— (root)"),
+        el("dt", {}, "Payer"), el("dd", {}, p.payer_display_name || "— (pays for itself)"),
+        el("dt", {}, "Payer chain"), el("dd", {}, el("code", {}, p.payer_chain.join(" → "))),
+        el("dt", {}, "Invoiced account"), el("dd", {}, el("code", {}, p.invoiced_account_id)),
+        el("dt", {}, "Children / descendants"), el("dd", {}, `${p.child_count} / ${p.descendant_count}`),
+        el("dt", {}, "Hierarchy depth"), el("dd", {}, String(p.hierarchy_depth)),
+        el("dt", {}, "Credit limit"), el("dd", {}, money(p.account.credit.credit_limit)),
+        el("dt", {}, "Payment terms"), el("dd", {}, `${p.account.credit.payment_terms_days} days`),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "A derived read model: everything here is computed from the account and its neighbours, " +
+        "so there is no second copy of a commercial fact that can fall out of date."),
+    ),
+  ];
+}
+
+// ── 5. Contacts ────────────────────────────────────────────────────────────────
+function contactsView() {
+  const a = state.data.account;
+  if (!a) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Add a contact"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Role"),
+          el("select", { id: "ct-role" }, ...CONTACT_ROLES.map(r => el("option", {}, r)))),
+        el("div", {}, el("label", {}, "Name"), el("input", { id: "ct-name" })),
+        el("div", {}, el("label", {}, "Email"), el("input", { id: "ct-email" })),
+        el("div", {}, el("label", {}, "Phone"), el("input", { id: "ct-phone" })),
+        el("div", {}, el("label", {}, "Title"), el("input", { id: "ct-title" })),
+        el("div", {}, el("label", {}, "Primary"),
+          el("select", { id: "ct-primary" }, el("option", {}, "true"), el("option", {}, "false"))),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "At most one primary per role — 'primary' is how a document picks one recipient."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/contacts`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            contacts: [...a.contacts.map(c => ({ role: c.role, name: c.name, email: c.email,
+              phone: c.phone, title: c.title, is_primary: c.is_primary })),
+              { role: val("ct-role"), name: val("ct-name"), email: val("ct-email"),
+                phone: val("ct-phone"), title: val("ct-title"), is_primary: val("ct-primary") === "true" }],
+          }),
+        }), "contacts updated") }, "Add contact")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Contacts (${a.contacts.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Role", "Name", "Email", "Phone", "Title", "Primary"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...a.contacts.map(c => el("tr", {},
+          el("td", {}, c.role), el("td", {}, c.name || "—"), el("td", {}, c.email || "—"),
+          el("td", {}, c.phone || "—"), el("td", {}, c.title || "—"),
+          el("td", {}, c.is_primary ? "yes" : "no"))))),
+    ),
+  ];
+}
+
+// ── 6. Addresses ───────────────────────────────────────────────────────────────
+function addressesView() {
+  const a = state.data.account;
+  if (!a) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Add an address"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "ad-kind" }, ...ADDRESS_KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Line 1"), el("input", { id: "ad-line1" })),
+        el("div", {}, el("label", {}, "Line 2"), el("input", { id: "ad-line2" })),
+        el("div", {}, el("label", {}, "City"), el("input", { id: "ad-city" })),
+        el("div", {}, el("label", {}, "Region"), el("input", { id: "ad-region" })),
+        el("div", {}, el("label", {}, "Postal code"), el("input", { id: "ad-postal" })),
+        el("div", {}, el("label", {}, "Country (ISO-2)"), el("input", { id: "ad-country" })),
+        el("div", {}, el("label", {}, "Primary"),
+          el("select", { id: "ad-primary" }, el("option", {}, "true"), el("option", {}, "false"))),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "The billing address is what a tax determination and an invoice are made against, so an " +
+        "active account must have one. Country is ISO-3166 alpha-2 because tax keys on it."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/addresses`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            addresses: [...a.addresses.map(x => ({ kind: x.kind, line1: x.line1, line2: x.line2,
+              city: x.city, region: x.region, postal_code: x.postal_code, country: x.country,
+              label: x.label, is_primary: x.is_primary })),
+              { kind: val("ad-kind"), line1: val("ad-line1"), line2: val("ad-line2"),
+                city: val("ad-city"), region: val("ad-region"), postal_code: val("ad-postal"),
+                country: val("ad-country"), is_primary: val("ad-primary") === "true" }],
+          }),
+        }), "addresses updated") }, "Add address")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Address book (${a.addresses.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Kind", "Line 1", "City", "Region", "Postal", "Country", "Primary", "Complete"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...a.addresses.map(x => el("tr", {},
+          el("td", {}, x.kind), el("td", {}, x.line1 || "—"), el("td", {}, x.city || "—"),
+          el("td", {}, x.region || "—"), el("td", {}, x.postal_code || "—"),
+          el("td", {}, x.country || "—"), el("td", {}, x.is_primary ? "yes" : "no"),
+          el("td", {}, x.is_complete ? "yes" : "no"))))),
+    ),
+  ];
+}
+
+// ── 7. Preferences ─────────────────────────────────────────────────────────────
+function preferencesView() {
+  const a = state.data.account;
+  if (!a) return [needsSelection()];
+  const p = a.preferences;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Billing and invoice preferences"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Invoice delivery"),
+          el("select", { id: "p-delivery" }, ...DELIVERY.map(d => el("option", { selected: d === p.invoice_delivery ? "" : null }, d)))),
+        el("div", {}, el("label", {}, "Language"), el("input", { id: "p-lang", value: p.invoice_language })),
+        el("div", {}, el("label", {}, "Invoice prefix"), el("input", { id: "p-prefix", value: p.invoice_prefix })),
+        el("div", {}, el("label", {}, "Billing day (1–28)"),
+          el("input", { id: "p-day", type: "number", min: "1", max: "28", value: String(p.billing_day) })),
+        el("div", {}, el("label", {}, "Payment terms (days)"),
+          el("input", { id: "p-terms", type: "number", min: "0", value: String(p.payment_terms_days) })),
+        el("div", {}, el("label", {}, "PO required"),
+          el("select", { id: "p-po" }, el("option", {}, String(p.purchase_order_required)), el("option", {}, String(!p.purchase_order_required)))),
+        el("div", {}, el("label", {}, "PO number"), el("input", { id: "p-ponum", value: p.purchase_order_number })),
+        el("div", {}, el("label", {}, "Consolidated invoicing"),
+          el("select", { id: "p-consol" }, el("option", {}, String(p.consolidated_invoicing)), el("option", {}, String(!p.consolidated_invoicing)))),
+        el("div", {}, el("label", {}, "Timezone"), el("input", { id: "p-tz", value: p.timezone })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Preferences, never rules: nothing here decides what is owed, only how the document " +
+        "that says so is produced and delivered. 28 is the last day every month has."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${a.id}/preferences`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            invoice_delivery: val("p-delivery"), invoice_language: val("p-lang"),
+            invoice_prefix: val("p-prefix"), billing_day: num("p-day") || 1,
+            payment_terms_days: num("p-terms") || 0,
+            purchase_order_required: val("p-po") === "true", purchase_order_number: val("p-ponum"),
+            consolidated_invoicing: val("p-consol") === "true", timezone: val("p-tz"),
+          }),
+        }), "preferences updated") }, "Save preferences")),
+    ),
+  ];
+}
+
+// ── 8. History ─────────────────────────────────────────────────────────────────
+function historyView() {
+  const history = state.data.history;
+  if (!history) return [needsSelection()];
+  return [
+    el("div", { class: "card scroll" }, el("h2", {}, `Account history (${history.length}, append-only)`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["When", "Action", "Actor", "From", "To", "Detail"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...history.map(h => el("tr", {},
+          el("td", { class: "num" }, h.at),
+          el("td", {}, el("code", {}, h.action)),
+          el("td", {}, h.actor_id || "system"),
+          el("td", {}, h.from_state || "—"),
+          el("td", {}, h.to_state || "—"),
+          el("td", { class: "muted" }, h.detail || "—"))))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Written inside the same transaction as the change it describes — the history and the " +
+        "account commit or vanish together."),
+    ),
+  ];
+}
+
+// ── 9. Search ──────────────────────────────────────────────────────────────────
+function searchView() {
+  const accounts = state.data.searched || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Search accounts"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Text (number, name, legal name, identifiers)"),
+          el("input", { id: "s-text" })),
+        el("div", {}, el("label", {}, "State"),
+          el("select", { id: "s-state" }, el("option", { value: "" }, ""), ...STATES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Commercial status"),
+          el("select", { id: "s-status" }, el("option", { value: "" }, ""), ...STATUSES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Currency"),
+          el("select", { id: "s-currency" }, el("option", { value: "" }, ""), ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Roots only"),
+          el("select", { id: "s-roots" }, el("option", {}, "false"), el("option", {}, "true"))),
+        el("div", {}, el("label", {}, "On hold only"),
+          el("select", { id: "s-hold" }, el("option", {}, "false"), el("option", {}, "true"))),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: async () => {
+          state.error = "";
+          const q = new URLSearchParams();
+          if (val("s-text")) q.set("text", val("s-text"));
+          if (val("s-state")) q.set("states", val("s-state"));
+          if (val("s-status")) q.set("statuses", val("s-status"));
+          if (val("s-currency")) q.set("currencies", val("s-currency"));
+          if (val("s-roots") === "true") q.set("roots_only", "true");
+          if (val("s-hold") === "true") q.set("on_hold_only", "true");
+          try {
+            const found = await api("/?" + q.toString());
+            state.data.searched = found.accounts;
+            state.notice = `${found.total} match(es)`;
+          } catch (e) { state.error = e.message; }
+          render();
+        } }, "Search")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Deterministic filtering: the same accounts and the same query always return the same " +
+        "rows in the same order. No relevance ranking."),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Results (${accounts.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Number", "Name", "Legal name", "State", "Status", "Currency"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...accounts.map(a => el("tr", {},
+          el("td", {}, el("code", {}, a.account_number)), el("td", {}, a.display_name),
+          el("td", {}, a.legal_entity.legal_name || "—"),
+          el("td", {}, pill(a.state)), el("td", {}, pill(a.commercial_status)),
+          el("td", {}, a.currency))))),
+    ),
+  ];
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([key, label]) =>
+    el("button", { class: state.tab === key ? "active" : "",
+      onclick: () => { state.tab = key; state.notice = ""; load(); } }, label)));
+  const views = { list: listView, details: detailsView, hierarchy: hierarchyView,
+    profile: profileView, contacts: contactsView, addresses: addressesView,
+    preferences: preferencesView, history: historyView, search: searchView };
+  const view = document.getElementById("view");
+  view.replaceChildren(
+    ...(views[state.tab]() || []).filter(Boolean),
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice && !state.error ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+document.getElementById("token").addEventListener("change", load);
+document.getElementById("selected").addEventListener("change", load);
+render();
+load();
+</script>
+</body>
+</html>

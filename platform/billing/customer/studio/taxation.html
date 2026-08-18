@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Taxation</title>
+<!--
+  Tax Determination Studio (M9.15).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no tax rule, and knows nothing the
+  API does not tell it — every screen renders a response from /v1/billing/taxation/*, and every
+  action dispatches to it.
+
+  It contains no rate. Not a percentage, not a default, not a fallback. Every figure on the
+  Assessment screen is the server's determination and every rate shown came from a declared
+  evidence row the operator entered. A test greps this file for a hard-coded percentage, because a
+  rate in a client is a rate that will still be there when the jurisdiction changes it — and the
+  customer will have been charged it.
+
+  It computes no tax either. There is no arithmetic on any monetary value anywhere in this file:
+  the taxable base, each component, and the total are the server's, and a client that multiplied a
+  base by a rate would eventually disagree with a filed return.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.final, .pill.standard, .pill.registration { color:var(--ok); border-color:var(--ok); }
+  .pill.provisional, .pill.reverse_charge, .pill.economic { color:var(--warn); border-color:var(--warn); }
+  .pill.superseded, .pill.discarded, .pill.out_of_scope { color:var(--bad); border-color:var(--bad); }
+  .pill.exempt, .pill.zero_rated { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Taxation</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="entity" placeholder="entity code" value="VOX" style="width:110px" />
+  <input id="account" placeholder="account id" style="width:140px" />
+  <input id="document" placeholder="document id" style="width:150px" />
+  <input id="assessment" placeholder="assessment id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:140px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/taxation";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "assessments", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["assessments", "Assessments"], ["assess", "Assess"], ["assessment", "Determination"],
+  ["explain", "Why?"], ["rates", "Rate evidence"], ["jurisdictions", "Jurisdictions"],
+  ["classifications", "Classifications"], ["nexus", "Nexus"], ["exemptions", "Exemptions"],
+  ["place", "Place of supply"], ["activity", "Audit trail"],
+];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+function amount(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+// A rate the server determined, shown as the server expressed it. Basis points are printed with a
+// separator rather than converted — dividing here would be this client doing tax arithmetic.
+function rate(bp) { return bp === 0 || bp ? `${bp} bp` : "—"; }
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "—"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function docId() { return val("document"); }
+function aid() { return val("assessment"); }
+function entity() { return val("entity"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "assessments") state.data.assessments = await api("/assessments" + q({ account_id: acct() }));
+    if (t === "assessment" && aid()) {
+      state.data.assessment = await api(`/assessments/${aid()}`);
+      state.data.inspection = await api(`/assessments/${aid()}/inspect`);
+      state.data.reconciliation = await api(`/assessments/${aid()}/reconciliation`);
+    }
+    if (t === "explain" && aid()) state.data.explanation = await api(`/assessments/${aid()}/explain`);
+    if (t === "rates") state.data.rates = await api("/rates");
+    if (t === "jurisdictions") state.data.jurisdictions = await api("/jurisdictions" + q({ include_retired: true }));
+    if (t === "classifications") state.data.classifications = await api("/classifications");
+    if (t === "nexus") state.data.nexus = await api("/nexus" + q({ entity_code: entity() }));
+    if (t === "exemptions") state.data.exemptions = await api("/exemptions" + q({ account_id: acct() }));
+    if (t === "activity") state.data.activity = await api("/assessments/activity" + q({ account_id: acct() }));
+    const all = state.data.assessments || [];
+    document.getElementById("count-pill").textContent = all.length ? `${all.length} determination(s)` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try { const r = await fn(); state.notice = "done";
+        if (r && r.id && r.subject_id !== undefined) document.getElementById("assessment").value = r.id; }
+  catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...headers.map(h =>
+      el("th", { class: String(h).startsWith("#") ? "num" : "" }, String(h).replace(/^#/, ""))))),
+    el("tbody", {}, rows.length ? rows
+      : el("tr", {}, el("td", { colspan: headers.length, class: "muted" }, "nothing yet")))));
+}
+function field(id, label, value, placeholder) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("input", { id, value: value || "", placeholder: placeholder || "" }));
+}
+function select(id, label, options, value) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("select", { id }, ...options.map(o =>
+      el("option", { value: o, ...(o === value ? { selected: "selected" } : {}) }, o || "(any)"))));
+}
+
+// ── 1. Assessments ─────────────────────────────────────────────────────────────
+function assessmentsScreen() {
+  const rows = (state.data.assessments || []).map(a =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(a.id))),
+      el("td", {}, el("code", {}, short(a.subject_id))),
+      el("td", {}, pill(a.state)),
+      el("td", {}, pill(a.treatment)),
+      el("td", {}, a.place_of_supply.resolved_code || "—"),
+      el("td", { class: "num" }, amount(a.taxable_base)),
+      el("td", { class: "num" }, amount(a.tax_total)),
+      el("td", {}, a.is_sourced ? "yes" : el("strong", {}, "NO")),
+      el("td", { class: "num" }, a.version),
+      el("td", {}, ...(a.allowed_triggers || []).map(t =>
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/assessments/${a.id}/${t === "supersede" ? "discard" : t}`,
+              { method: "POST", body: "{}" })) }, t))),
+      el("td", {}, el("button", { class: "ghost", onclick: () => {
+        document.getElementById("assessment").value = a.id; state.tab = "assessment"; load(); } }, "open"))));
+  return [el("div", { class: "card" },
+    el("h2", {}, "Determinations"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "The lifecycle buttons are the server's allowed_triggers — the Studio never decides what may " +
+      "happen next. A finalized determination has none: it is never edited, only superseded by a " +
+      "new one, and both stay readable."),
+    table(["Id", "Subject", "State", "Treatment", "Jurisdiction", "#Base", "#Tax", "Sourced", "#v", "Lifecycle", ""], rows))];
+}
+
+// ── 2. Assess ──────────────────────────────────────────────────────────────────
+function assessScreen() {
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Determine the tax on a document"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Tax reads the document's already-determined amounts and never goes back to the ledger, " +
+        "rating, or pricing. Determining the same facts twice is one assessment."),
+      el("div", { class: "row" },
+        field("as-origin-c", "Origin country", "IN"),
+        field("as-origin-r", "Origin region", ""),
+        field("as-supreg", "Supplier registration", ""),
+        field("as-class", "Default classification", "")),
+      el("div", { class: "row" },
+        select("as-regime", "Regime", ["none", "india_gst", "eu_vat", "uk_vat", "us_sales_tax", "other"]),
+        select("as-payer", "Taxpayer kind", ["business", "consumer"]),
+        select("as-round", "Rounding", ["half_up", "half_even", "floor", "ceiling"]),
+        select("as-scope", "Rounding scope", ["per_line", "per_component", "per_document"])),
+      el("div", { class: "row" }, select("as-incl", "Prices include tax", ["false", "true"])),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/documents/${docId()}/assess`, {
+          method: "POST", body: JSON.stringify({
+            entity_code: entity(), origin_country: val("as-origin-c"), origin_region: val("as-origin-r"),
+            supplier_registration: val("as-supreg"), default_classification_code: val("as-class"),
+            regime: val("as-regime"), taxpayer_kind: val("as-payer"),
+            rounding_mode: val("as-round"), rounding_scope: val("as-scope"),
+            prices_include_tax: val("as-incl") === "true" }) })) }, "Determine"),
+        " ",
+        el("button", { class: "ghost", onclick: async () => {
+          state.error = "";
+          try { state.data.preview = await api(`/documents/${docId()}/preview` + q({
+            entity_code: entity(), origin_country: val("as-origin-c"), origin_region: val("as-origin-r"),
+            default_classification_code: val("as-class"), regime: val("as-regime") })); }
+          catch (e) { state.error = e.message; }
+          render();
+        } }, "preview (persists nothing)"))),
+    state.data.preview ? el("div", { class: "card" },
+      el("h2", {}, "Preview"), assessmentBody(state.data.preview)) : null,
+  ];
+}
+
+// ── 3. Determination ───────────────────────────────────────────────────────────
+function assessmentBody(a) {
+  const compRows = (a.lines || []).flatMap(line => (line.components || []).map(c =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(line.subject_line_id))),
+      el("td", {}, c.name),
+      el("td", {}, c.tax_type),
+      el("td", {}, c.jurisdiction_code),
+      el("td", { class: "num" }, rate(c.rate_basis_points)),
+      el("td", { class: "num" }, amount(c.taxable_base)),
+      el("td", { class: "num" }, amount(c.amount)),
+      el("td", {}, c.basis),
+      el("td", {}, c.provenance.is_sourced ? pill(c.provenance.source) : el("strong", {}, "UNSOURCED")),
+      el("td", { class: "muted" }, c.provenance.reference || c.provenance.source_code || "—"))));
+  return [
+    el("dl", { class: "kv" },
+      el("dt", {}, "Treatment"), el("dd", {}, pill(a.treatment)),
+      el("dt", {}, "Place of supply"), el("dd", {}, a.place_of_supply.resolved_code,
+        el("span", { class: "muted" }, " · " + a.place_of_supply.rule)),
+      el("dt", {}, "Direction"), el("dd", {}, a.place_of_supply.direction,
+        a.place_of_supply.gst_split !== "not_applicable" ? " · " + a.place_of_supply.gst_split : ""),
+      el("dt", {}, "Nexus"), el("dd", {}, pill(a.nexus_kind),
+        a.registration_used ? el("span", { class: "mono" }, " " + a.registration_used) : ""),
+      el("dt", {}, "Exemption"), el("dd", {}, a.exemption_reason || "—"),
+      el("dt", {}, "Rounding"), el("dd", {}, a.rounding_mode + " at " + a.rounding_scope),
+      el("dt", {}, "Taxable base"), el("dd", { class: "mono big" }, amount(a.taxable_base)),
+      el("dt", {}, "Tax"), el("dd", { class: "mono big" }, amount(a.tax_total)),
+      el("dt", {}, "Withholding"), el("dd", { class: "mono" }, a.withholding_minor || 0),
+      el("dt", {}, "Evidence digest"), el("dd", { class: "digest" }, a.digest)),
+    el("h2", { style: "margin-top:1rem" }, "Components and their authority"),
+    table(["Line", "Name", "Type", "Jurisdiction", "#Rate", "#Base", "#Amount", "Basis", "Source", "Reference"], compRows),
+  ];
+}
+
+function assessmentScreen() {
+  const a = state.data.assessment, i = state.data.inspection, r = state.data.reconciliation;
+  if (!a) return [el("div", { class: "card" }, el("p", { class: "muted" }, "Enter an assessment id."))];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Determination " + short(a.id) + " · v" + a.version + " " + a.state),
+      ...assessmentBody(a),
+      a.override ? el("p", { class: "muted", style: "margin-top:.8rem" },
+        `overridden to ${a.override.treatment} from ${a.override.supersedes_treatment} by ` +
+        `${a.override.actor_id}: ${a.override.reason}`) : null),
+    i ? el("div", { class: "card" }, el("h2", {}, "Inspection"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Sound"), el("dd", {}, i.is_sound ? "yes" : "no"),
+        el("dt", {}, "Every rate names a source"), el("dd", {}, i.is_sourced ? "yes" : "no"),
+        el("dt", {}, "Rates within their window"), el("dd", {}, i.rates_in_window ? "yes" : "no"),
+        el("dt", {}, "Explains itself"), el("dd", {}, i.is_explainable ? "yes" : "no"),
+        el("dt", {}, "Supplier obligation"), el("dd", {}, i.has_nexus ? "yes" : "no")),
+      (i.notes || []).length ? el("p", { class: "muted", style: "font-size:12px" }, i.notes.join(" · ")) : null) : null,
+    r ? el("div", { class: "card" }, el("h2", {}, "Reconciliation"),
+      el("p", { class: "big" }, r.is_clean ? "clean" : `${r.discrepancies.length} discrepancy(ies)`),
+      table(["Kind", "Line", "#Expected", "#Actual", "Detail"],
+        r.discrepancies.map(d => el("tr", {}, el("td", {}, pill(d.kind)),
+          el("td", {}, el("code", {}, short(d.line_id))),
+          el("td", { class: "num" }, d.expected_minor), el("td", { class: "num" }, d.actual_minor),
+          el("td", { class: "muted" }, d.detail || "—"))))) : null,
+    el("div", { class: "card" }, el("h2", {}, "Override the treatment"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Not an edit: the override travels into a new determination which supersedes this one, and " +
+        "the original conclusion is kept beside it. Always attributed, always reasoned."),
+      el("div", { class: "row" },
+        select("ov-treat", "Treatment", ["standard", "zero_rated", "exempt", "reverse_charge", "out_of_scope"]),
+        field("ov-reason", "Reason (recorded forever)", ""),
+        field("ov-ref", "Reference", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/assessments/${aid()}/override`, {
+          method: "POST", body: JSON.stringify({ treatment: val("ov-treat"),
+            reason: val("ov-reason"), reference: val("ov-ref") }) })) }, "Override"))),
+  ];
+}
+
+// ── 4. Why? ────────────────────────────────────────────────────────────────────
+function explainScreen() {
+  const e = state.data.explanation;
+  if (!e) return [el("div", { class: "card" }, el("p", { class: "muted" }, "Enter an assessment id."))];
+  return [el("div", { class: "card" },
+    el("h2", {}, "Why was this tax applied?"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Assembled from the stored determination alone — the server called no rate provider to " +
+      "answer this (answered_without_provider: " + e.answered_without_provider + "). That is what " +
+      "makes it still answerable in five years, when a provider's answer would be different and " +
+      "the invoice's would not."),
+    el("div", { class: "steps" }, ...(e.steps || []).map(s =>
+      el("div", { class: "st" },
+        el("div", { class: "stage" }, s.stage.replace(/_/g, " ")),
+        el("div", {}, s.conclusion),
+        s.evidence ? el("div", { class: "muted", style: "font-size:12px" }, s.evidence) : null,
+        s.reference ? el("div", { class: "digest" }, s.reference) : null))))];
+}
+
+// ── 5. Rate evidence ───────────────────────────────────────────────────────────
+function ratesScreen() {
+  const rows = (state.data.rates || []).map(r =>
+    el("tr", {},
+      el("td", {}, r.jurisdiction_code),
+      el("td", {}, r.name),
+      el("td", {}, r.tax_type),
+      el("td", { class: "num" }, rate(r.rate_basis_points)),
+      el("td", {}, r.classification_code || "(all)"),
+      el("td", {}, when(r.effective_from) + " → " + (r.effective_until ? when(r.effective_until) : "open")),
+      el("td", { class: "muted" }, r.reference || el("strong", {}, "NO REFERENCE")),
+      el("td", {}, r.source_version || "—"),
+      el("td", {}, r.retired_at ? pill("superseded") : pill("final")),
+      el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+        api(`/rates/${r.id}/retire`, { method: "POST", body: JSON.stringify({ reason: "" }) })) }, "retire"))));
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Declare a rate as evidence"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "VoxVoice ships no rate table. An operator declares a rate with the notification that set " +
+        "it and the window it applies in, and that declaration is itself evidence a challenge can " +
+        "examine. Rates are append-only: superseding one writes a new row beside it, because an " +
+        "issued invoice must stay explainable against the rate in force when it was issued."),
+      el("div", { class: "row" },
+        field("rt-jur", "Jurisdiction code", "", "IN:KA"),
+        field("rt-type", "Tax type", "", "gst"),
+        field("rt-name", "Name", "", "CGST"),
+        field("rt-bp", "Rate (basis points)", "", "900")),
+      el("div", { class: "row" },
+        field("rt-class", "Classification (blank = all)", ""),
+        field("rt-from", "Effective from (epoch)", ""),
+        field("rt-ref", "Reference (notification / statute)", ""),
+        field("rt-ver", "Source version", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/rates", {
+          method: "POST", body: JSON.stringify({
+            jurisdiction_code: val("rt-jur"), tax_type: val("rt-type"), name: val("rt-name"),
+            rate_basis_points: Number(val("rt-bp") || 0), classification_code: val("rt-class"),
+            effective_from: val("rt-from") ? Number(val("rt-from")) : null,
+            reference: val("rt-ref"), source_version: val("rt-ver") }) })) }, "Declare rate"))),
+    el("div", { class: "card" }, el("h2", {}, "Declared rate evidence"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Retired rows are shown too — an audit asks what was in force on a date, not what is in force now."),
+      table(["Jurisdiction", "Name", "Type", "#Rate", "Class", "Window", "Reference", "Version", "State", ""], rows)),
+  ];
+}
+
+// ── 6. Jurisdictions ───────────────────────────────────────────────────────────
+function jurisdictionsScreen() {
+  const rows = (state.data.jurisdictions || []).map(j =>
+    el("tr", {}, el("td", {}, el("code", {}, j.code)), el("td", {}, j.display_name),
+      el("td", {}, j.level), el("td", {}, j.regime), el("td", {}, j.parent_code || "—"),
+      el("td", {}, j.is_active ? pill("final") : pill("superseded")),
+      el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+        api(`/jurisdictions/${j.id}/retire`, { method: "POST", body: JSON.stringify({ reason: "" }) })) }, "retire"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Declare a jurisdiction"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "A place with taxing authority — never a rate. The canonical code is derived from country " +
+        "and region, so IN:KA and in:ka cannot both exist: a duplicate jurisdiction is a duplicate nexus."),
+      el("div", { class: "row" },
+        field("j-country", "Country (ISO-3166 alpha-2)", ""),
+        field("j-region", "Region", ""),
+        field("j-name", "Display name", ""),
+        select("j-level", "Level", ["country", "state", "county", "city", "special"])),
+      el("div", { class: "row" },
+        select("j-regime", "Regime", ["none", "india_gst", "eu_vat", "uk_vat", "us_sales_tax", "other"]),
+        field("j-parent", "Parent code", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/jurisdictions", {
+          method: "POST", body: JSON.stringify({ country: val("j-country"), region: val("j-region"),
+            display_name: val("j-name"), level: val("j-level"), regime: val("j-regime"),
+            parent_code: val("j-parent") }) })) }, "Declare"))),
+    el("div", { class: "card" }, el("h2", {}, "Jurisdictions"),
+      table(["Code", "Name", "Level", "Regime", "Parent", "State", ""], rows)),
+  ];
+}
+
+// ── 7. Classifications ─────────────────────────────────────────────────────────
+function classificationsScreen() {
+  const rows = (state.data.classifications || []).map(c =>
+    el("tr", {}, el("td", {}, el("code", {}, c.code)), el("td", {}, c.display_name),
+      el("td", {}, pill(c.default_treatment)), el("td", {}, c.is_digital_service ? "yes" : "no"),
+      el("td", { class: "mono" }, (c.codes || []).map(x => x[0] + "=" + x[1]).join(", ") || "—")));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Declare a classification"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "A rate is looked up for a classification, never for a product — the same product is taxed " +
+        "differently in two jurisdictions, and what varies is the classification, not the catalog."),
+      el("div", { class: "row" },
+        field("c-code", "Code", ""), field("c-name", "Display name", ""),
+        select("c-treat", "Default treatment", ["standard", "zero_rated", "exempt", "reverse_charge", "out_of_scope"]),
+        select("c-digital", "Digital service", ["false", "true"])),
+      el("div", { class: "row" }, field("c-scheme", "Code scheme", "", "hsn_sac"), field("c-value", "Code value", "", "998314")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/classifications", {
+          method: "POST", body: JSON.stringify({ code: val("c-code"), display_name: val("c-name"),
+            default_treatment: val("c-treat"), is_digital_service: val("c-digital") === "true",
+            codes: val("c-scheme") ? [[val("c-scheme"), val("c-value")]] : [] }) })) }, "Declare"))),
+    el("div", { class: "card" }, el("h2", {}, "Classifications"),
+      table(["Code", "Name", "Default treatment", "Digital", "Authority codes"], rows)),
+  ];
+}
+
+// ── 8. Nexus ───────────────────────────────────────────────────────────────────
+function nexusScreen() {
+  const rows = (state.data.nexus || []).map(n =>
+    el("tr", {}, el("td", {}, n.entity_code), el("td", {}, el("code", {}, n.jurisdiction_code)),
+      el("td", {}, pill(n.kind)), el("td", { class: "mono" }, n.registration_number || "—"),
+      el("td", {}, when(n.effective_from) + " → " + (n.effective_until ? when(n.effective_until) : "open")),
+      el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+        api(`/nexus/${n.id}/end`, { method: "POST", body: JSON.stringify({ reason: "" }) })) }, "end"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Register a supplier obligation"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Charging tax without a registration is money collected on behalf of an authority that has " +
+        "no record of the collector. A nexus is ended by timestamp, never removed."),
+      el("div", { class: "row" },
+        field("n-jur", "Jurisdiction code", ""),
+        select("n-kind", "Kind", ["registration", "physical", "economic", "voluntary", "none"]),
+        field("n-reg", "Registration number", ""),
+        select("n-regime", "Registration regime", ["none", "india_gst", "eu_vat", "uk_vat", "us_sales_tax", "other"])),
+      el("div", { class: "row" }, field("n-from", "Effective from (epoch)", "0")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/nexus", {
+          method: "POST", body: JSON.stringify({ entity_code: entity(), jurisdiction_code: val("n-jur"),
+            kind: val("n-kind"), registration_number: val("n-reg"),
+            registration_regime: val("n-regime"),
+            effective_from: val("n-from") ? Number(val("n-from")) : null }) })) }, "Register"))),
+    el("div", { class: "card" }, el("h2", {}, "Nexus"),
+      table(["Entity", "Jurisdiction", "Kind", "Registration", "Window", ""], rows)),
+  ];
+}
+
+// ── 9. Exemptions ──────────────────────────────────────────────────────────────
+function exemptionsScreen() {
+  const rows = (state.data.exemptions || []).map(e =>
+    el("tr", {}, el("td", {}, el("code", {}, short(e.account_id))), el("td", {}, e.jurisdiction_code),
+      el("td", {}, pill(e.kind)), el("td", { class: "mono" }, e.certificate_ref || "—"),
+      el("td", {}, when(e.effective_from) + " → " + (e.effective_until ? when(e.effective_until) : "open")),
+      el("td", {}, e.revoked_at ? "revoked " + when(e.revoked_at) : "live"),
+      el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+        api(`/exemptions/${e.id}/revoke`, { method: "POST", body: JSON.stringify({ reason: "" }) })) }, "revoke"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Record a customer exemption"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Effective-dated and revocable, never deleted: an invoice issued while an exemption was " +
+        "valid stays explainable after the certificate expires."),
+      el("div", { class: "row" },
+        field("e-jur", "Jurisdiction code", ""),
+        select("e-kind", "Kind", ["certificate", "reverse_charge", "zero_rated_export", "treaty", "statutory"]),
+        field("e-cert", "Certificate reference", ""),
+        field("e-from", "Effective from (epoch)", "0")),
+      el("div", { class: "row" }, field("e-reason", "Reason", ""), field("e-evid", "Evidence reference", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/exemptions", {
+          method: "POST", body: JSON.stringify({ account_id: acct(), jurisdiction_code: val("e-jur"),
+            kind: val("e-kind"), certificate_ref: val("e-cert"), reason: val("e-reason"),
+            evidence_ref: val("e-evid"),
+            effective_from: val("e-from") ? Number(val("e-from")) : null }) })) }, "Record"))),
+    el("div", { class: "card" }, el("h2", {}, "Exemptions"),
+      table(["Account", "Jurisdiction", "Kind", "Certificate", "Window", "State", ""], rows)),
+  ];
+}
+
+// ── 10. Place of supply ────────────────────────────────────────────────────────
+function placeScreen() {
+  const p = state.data.place;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Where would a supply be taxed?"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Resolved from the shape of the supply — same region, same country, or across a border — " +
+        "plus declared configuration. There is no branch per country anywhere: adding a market is " +
+        "a jurisdiction row."),
+      el("div", { class: "row" },
+        field("p-oc", "Origin country", "IN"), field("p-or", "Origin region", "KA"),
+        field("p-dc", "Destination country", ""), field("p-dr", "Destination region", "")),
+      el("div", { class: "row" },
+        select("p-regime", "Regime", ["none", "india_gst", "eu_vat", "uk_vat", "us_sales_tax", "other"]),
+        select("p-payer", "Taxpayer kind", ["business", "consumer"]),
+        field("p-reg", "Customer registration", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: async () => {
+          state.error = "";
+          try { state.data.place = await api("/place-of-supply" + q({
+            origin_country: val("p-oc"), origin_region: val("p-or"),
+            destination_country: val("p-dc"), destination_region: val("p-dr"),
+            regime: val("p-regime"), taxpayer_kind: val("p-payer"),
+            customer_registration: val("p-reg") })); }
+          catch (e) { state.error = e.message; }
+          render();
+        } }, "Resolve"))),
+    p ? el("div", { class: "card" }, el("h2", {}, "Resolved"),
+      el("p", { class: "big" }, p.resolved_code || "unresolved"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Direction"), el("dd", {}, p.direction),
+        el("dt", {}, "Cross-border"), el("dd", {}, p.is_cross_border ? "yes" : "no"),
+        el("dt", {}, "GST split"), el("dd", {}, p.gst_split),
+        el("dt", {}, "Rule applied"), el("dd", {}, p.rule),
+        el("dt", {}, "Customer registered"), el("dd", {}, p.customer_registered ? "yes" : "no"))) : null,
+  ];
+}
+
+// ── 11. Audit trail ────────────────────────────────────────────────────────────
+function activityScreen() {
+  const rows = (state.data.activity || []).map(a =>
+    el("tr", {}, el("td", {}, when(a.at)), el("td", {}, el("code", {}, a.action)),
+      el("td", {}, el("code", {}, short(a.subject_id) || "—")),
+      el("td", {}, a.jurisdiction_code || "—"),
+      el("td", { class: "num" }, a.amount_minor || 0),
+      el("td", {}, a.actor_id || "—"), el("td", { class: "muted" }, a.reason || a.detail || "—")));
+  return [el("div", { class: "card" }, el("h2", {}, "Tax audit trail"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only — including the determinations that concluded nothing new. " +
+      "assessment.unchanged is the evidence determination is deterministic, and it is exactly what " +
+      "an auditor asks for when a rate has changed and a figure has not."),
+    table(["When", "Action", "Subject", "Jurisdiction", "#Amount", "Actor", "Detail"], rows))];
+}
+
+const SCREENS = {
+  assessments: assessmentsScreen, assess: assessScreen, assessment: assessmentScreen,
+  explain: explainScreen, rates: ratesScreen, jurisdictions: jurisdictionsScreen,
+  classifications: classificationsScreen, nexus: nexusScreen, exemptions: exemptionsScreen,
+  place: placeScreen, activity: activityScreen,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; state.notice = ""; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const screen = SCREENS[state.tab]();
+  view.replaceChildren(
+    ...(Array.isArray(screen) ? screen.filter(Boolean) : [screen]),
+    state.error ? el("div", { class: "err" }, state.error) : null,
+    state.notice ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+for (const id of ["entity", "account", "document", "assessment"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

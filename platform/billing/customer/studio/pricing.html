@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Pricing Engine</title>
+<!--
+  Pricing Studio (M9.7).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen here renders a response from
+  /v1/billing/pricing/*, and every action dispatches to it. In particular the Resolver screen
+  computes nothing: it posts a request and displays the answer, including the resolution path
+  the Foundation returned.
+
+  Money is entered and displayed as integer minor units plus an explicit currency, and
+  percentages as integer basis points, because the discipline that keeps a rounding decision
+  reviewable does not stop at the browser.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.published { color:var(--ok); border-color:var(--ok); }
+  .pill.draft { color:var(--draft); }
+  .pill.archived, .pill.deleted { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .path { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--dim);
+          border-left:2px solid var(--line); padding-left:.7rem; margin-top:.6rem; white-space:pre-wrap; }
+  .big { font-size:1.6rem; font-weight:650; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .strike { text-decoration:line-through; color:var(--dim); font-size:1rem; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Pricing</h1>
+  <span class="pill" id="version-pill">no pricing version published</span>
+  <span class="grow"></span>
+  <input id="token" placeholder="Bearer token" style="width:280px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/pricing";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "books", data: {}, error: "", notice: "", selected: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["books", "Price Books"], ["editor", "Price Editor"], ["currencies", "Currency Matrix"],
+  ["regions", "Regional Pricing"], ["discounts", "Discount Builder"],
+  ["promotions", "Promotion Builder"], ["coupons", "Coupon Manager"],
+  ["versions", "Version History"], ["resolver", "Pricing Resolver"],
+];
+
+const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"];
+const REGIONS = ["global", "in", "us", "eu", "uk", "ae", "sg", "au", "ca"];
+const TIERS = ["standard", "smb", "enterprise", "strategic", "internal"];
+const CHANNELS = ["direct", "self_serve", "partner", "reseller", "oem", "marketplace"];
+const SHAPES = ["flat_recurring", "per_seat", "per_unit", "allowance_overage",
+                "tiered_graduated", "volume", "package", "credit", "committed", "one_off"];
+
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+
+// Display only. The server sends integer minor units and a currency; this never computes a
+// price, it formats one.
+function money(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const abs = Math.abs(m.minor);
+  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")} ${m.currency}`;
+}
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function num(id) { const v = val(id); return v === "" ? null : Number(v); }
+function moneyBody(minorId, currency) {
+  const minor = num(minorId);
+  return minor === null ? null : { minor: Math.round(minor), currency };
+}
+
+async function load() {
+  state.error = "";
+  try {
+    if (["books", "editor", "currencies", "regions"].includes(state.tab))
+      state.data.books = (await api("/books?limit=500")).books;
+    if (state.tab === "discounts") state.data.discounts = await api("/discounts");
+    if (state.tab === "promotions") state.data.promotions = await api("/promotions");
+    if (state.tab === "coupons") state.data.coupons = await api("/coupons");
+    if (state.tab === "versions") {
+      state.data.versions = await api("/versions?limit=100");
+      state.data.activity = await api("/activity?limit=100");
+    }
+    await refreshVersionPill();
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function refreshVersionPill() {
+  const pillEl = document.getElementById("version-pill");
+  try {
+    const latest = await api("/versions/latest");
+    pillEl.textContent = `pricing v${latest.version}` +
+      (latest.catalog_version ? ` · catalog v${latest.catalog_version}` : "") +
+      ` · ${latest.price_count} price(s)`;
+  } catch { pillEl.textContent = "no pricing version published"; }
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function scopeFields(prefix) {
+  return el("div", { class: "row" },
+    el("div", {}, el("label", {}, "Region"),
+      el("select", { id: prefix + "-region" }, ...REGIONS.map(r => el("option", {}, r)))),
+    el("div", {}, el("label", {}, "Channel (blank = every channel)"),
+      el("select", { id: prefix + "-channel" }, el("option", { value: "" }, ""),
+        ...CHANNELS.map(c => el("option", {}, c)))),
+    el("div", {}, el("label", {}, "Customer tier (blank = every tier)"),
+      el("select", { id: prefix + "-tier" }, el("option", { value: "" }, ""),
+        ...TIERS.map(t => el("option", {}, t)))),
+  );
+}
+function readScope(prefix) {
+  const channel = val(prefix + "-channel"), tier = val(prefix + "-tier");
+  return {
+    region: val(prefix + "-region") || "global",
+    channels: channel ? [channel] : [],
+    customer_tiers: tier ? [tier] : [],
+    audience: "public",
+  };
+}
+
+// ── 1. Price Books ─────────────────────────────────────────────────────────────
+function booksView() {
+  const books = state.data.books || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Create a price book"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "b-code", placeholder: "public_inr" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "b-name" })),
+        el("div", {}, el("label", {}, "Currency"),
+          el("select", { id: "b-currency" }, ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Catalog version (optional pin)"),
+          el("input", { id: "b-catalog", type: "number", min: "1" })),
+      ),
+      scopeFields("b"),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A book is single-currency by construction, and starts as a draft. Publishing freezes it."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/books", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("b-code"), display_name: val("b-name"), currency: val("b-currency"),
+            scope: readScope("b"), catalog_version: num("b-catalog"), effective_from: 0,
+          }),
+        }), "price book created") }, "Create draft")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Price books (${books.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Rev", "State", "Currency", "Region", "Prices", "Published v", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...books.map(b => el("tr", {},
+          el("td", {}, el("code", {}, b.code)),
+          el("td", {}, b.revision),
+          el("td", {}, pill(b.state)),
+          el("td", {}, b.currency),
+          el("td", {}, b.scope.region),
+          el("td", {}, String(b.prices.length)),
+          el("td", {}, b.published_version == null ? "—" : "v" + b.published_version),
+          el("td", {},
+            ...(b.allowed_triggers.includes("publish") ? [el("button", {
+              class: "ghost", onclick: () => act(() => api(`/books/${b.code}/publish`,
+                { method: "POST", body: JSON.stringify({ notes: "" }) }), `${b.code} published`)
+            }, "publish")] : []),
+            ...(b.allowed_triggers.includes("archive") ? [el("button", {
+              class: "ghost", onclick: () => act(() => api(`/books/${b.code}/archive`,
+                { method: "POST" }), `${b.code} archived`)
+            }, "archive")] : []),
+            ...(b.allowed_triggers.includes("restore") ? [el("button", {
+              class: "ghost", onclick: () => act(() => api(`/books/${b.code}/restore`,
+                { method: "POST" }), `${b.code} restored`)
+            }, "restore")] : []),
+            el("button", { class: "ghost", onclick: () => act(() => api(`/books/${b.code}/duplicate`,
+              { method: "POST", body: JSON.stringify({ code: "", display_name: "" }) }),
+              `${b.code} duplicated into a new revision`) }, "reprice"),
+          ),
+        ))),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Buttons come from the server's allowed_triggers — the UI cannot offer a move that would 409."),
+    ),
+  ];
+}
+
+// ── 2. Price Editor ────────────────────────────────────────────────────────────
+function editorView() {
+  const books = state.data.books || [];
+  const drafts = books.filter(b => b.is_editable);
+  const selected = books.find(b => b.code === state.selected) || drafts[0] || books[0];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Add a price to a draft book"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Book"),
+          el("select", { id: "p-book", onchange: e => { state.selected = e.target.value; render(); } },
+            ...drafts.map(b => el("option", { selected: selected && b.code === selected.code ? "" : null },
+              b.code)))),
+        el("div", {}, el("label", {}, "Price code"), el("input", { id: "p-code", placeholder: "pro_monthly" })),
+        el("div", {}, el("label", {}, "Shape"),
+          el("select", { id: "p-shape" }, ...SHAPES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Amount (minor units)"),
+          el("input", { id: "p-amount", type: "number", placeholder: "999900" })),
+        el("div", {}, el("label", {}, "Unit amount (minor units, metered shapes)"),
+          el("input", { id: "p-unit", type: "number" })),
+        el("div", {}, el("label", {}, "Meter code (metered shapes)"), el("input", { id: "p-meter" })),
+        el("div", {}, el("label", {}, "Interval"),
+          el("select", { id: "p-interval" }, el("option", { value: "" }, ""),
+            ...["monthly", "yearly"].map(i => el("option", {}, i)))),
+        el("div", {}, el("label", {}, "Included units"), el("input", { id: "p-included", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Effective from (epoch s)"), el("input", { id: "p-from", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Effective until (blank = open)"), el("input", { id: "p-until", type: "number" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A price inherits the book's currency. Only a draft book accepts a price change — a published one is a historical fact."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => {
+          const book = val("p-book");
+          const currency = (books.find(b => b.code === book) || {}).currency || "INR";
+          return act(() => api(`/books/${book}/prices`, {
+            method: "POST",
+            body: JSON.stringify({
+              code: val("p-code"), shape: val("p-shape"),
+              amount: moneyBody("p-amount", currency), unit_amount: moneyBody("p-unit", currency),
+              interval: val("p-interval") || null, meter_code: val("p-meter"),
+              included_units: num("p-included") || 0,
+              effective_from: num("p-from") || 0, effective_until: num("p-until"),
+            }),
+          }), "price added");
+        } }, "Add price")),
+    ),
+    selected ? el("div", { class: "card scroll" },
+      el("h2", {}, `Prices in ${selected.code} r${selected.revision} `, pill(selected.state)),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Shape", "v", "Amount", "Unit", "Meter", "From", "Until"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...selected.prices.map(p => el("tr", {},
+          el("td", {}, el("code", {}, p.code)),
+          el("td", {}, p.shape),
+          el("td", {}, p.version),
+          el("td", { class: "num" }, money(p.amount)),
+          el("td", { class: "num" }, money(p.unit_amount)),
+          el("td", {}, p.meter_code || "—"),
+          el("td", { class: "num" }, p.effective.effective_from),
+          el("td", { class: "num" }, p.effective.effective_until ?? "open"),
+        )))),
+    ) : null,
+  ];
+}
+
+// ── 3. Currency Matrix ─────────────────────────────────────────────────────────
+function currenciesView() {
+  const books = state.data.books || [];
+  const codes = [...new Set(books.flatMap(b => b.prices.map(p => p.code)))].sort();
+  const currencies = [...new Set(books.map(b => b.currency))].sort();
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Currency coverage"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Which prices exist in which currency. A blank cell is a gap: a plan with no price in a currency cannot be quoted there."),
+      el("div", { class: "scroll" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Price code"), ...currencies.map(c => el("th", { class: "num" }, c)))),
+        el("tbody", {}, ...codes.map(code => el("tr", {},
+          el("td", {}, el("code", {}, code)),
+          ...currencies.map(c => {
+            const hit = books.find(b => b.currency === c && b.prices.some(p => p.code === code));
+            const price = hit && hit.prices.find(p => p.code === code);
+            return el("td", { class: "num" }, price ? money(price.amount || price.unit_amount) : "—");
+          }),
+        )))),
+      ),
+    ),
+  ];
+}
+
+// ── 4. Regional Pricing ────────────────────────────────────────────────────────
+function regionsView() {
+  const books = state.data.books || [];
+  return [
+    el("div", { class: "card scroll" }, el("h2", {}, "Books by region and segment"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The most specific scope wins a tie — region beats channel beats tier. Specificity is computed by the server."),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Region", "Channels", "Tiers", "Audience", "Specificity", "Book", "Currency", "State"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...[...books]
+          .sort((a, b) => b.scope.specificity - a.scope.specificity || a.code.localeCompare(b.code))
+          .map(b => el("tr", {},
+            el("td", {}, b.scope.region),
+            el("td", {}, b.scope.channels.join(", ") || "any"),
+            el("td", {}, b.scope.customer_tiers.join(", ") || "any"),
+            el("td", {}, b.scope.audience),
+            el("td", { class: "num" }, b.scope.specificity),
+            el("td", {}, el("code", {}, b.code)),
+            el("td", {}, b.currency),
+            el("td", {}, pill(b.state)),
+          )))),
+    ),
+  ];
+}
+
+// ── 5. Discount Builder ────────────────────────────────────────────────────────
+function discountsView() {
+  const discounts = state.data.discounts || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Build a discount"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "d-code", placeholder: "annual_10" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "d-name" })),
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "d-kind" }, ...["percentage", "fixed_amount", "bundle", "volume", "commitment"]
+            .map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Basis points (2500 = 25%)"),
+          el("input", { id: "d-bp", type: "number", min: "0", max: "10000", value: "0" })),
+        el("div", {}, el("label", {}, "Fixed amount (minor units)"), el("input", { id: "d-amount", type: "number" })),
+        el("div", {}, el("label", {}, "Currency (fixed amounts)"),
+          el("select", { id: "d-currency" }, ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Priority (lower applies first)"),
+          el("input", { id: "d-priority", type: "number", value: "100" })),
+        el("div", {}, el("label", {}, "Stackable"),
+          el("select", { id: "d-stack" }, el("option", {}, "true"), el("option", {}, "false"))),
+        el("div", {}, el("label", {}, "Min quantity (eligibility gate)"),
+          el("input", { id: "d-minqty", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Price codes (comma separated; blank = all)"),
+          el("input", { id: "d-prices" })),
+      ),
+      scopeFields("d"),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Percentages are integer basis points, never floats. A non-stackable discount ends the chain."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/discounts", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("d-code"), display_name: val("d-name"), kind: val("d-kind"),
+            percentage_bp: num("d-bp") || 0, amount: moneyBody("d-amount", val("d-currency")),
+            priority: num("d-priority") || 100, stackable: val("d-stack") === "true",
+            min_quantity: num("d-minqty") || 0,
+            price_codes: val("d-prices") ? val("d-prices").split(",").map(s => s.trim()) : [],
+            scope: readScope("d"), effective_from: 0,
+          }),
+        }), "discount created") }, "Create discount")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Discounts (${discounts.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Kind", "Reduction", "Priority", "Stacks", "Applies to", "Min qty", "Scope"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...discounts.map(d => el("tr", {},
+          el("td", {}, el("code", {}, d.code)),
+          el("td", {}, d.kind),
+          el("td", { class: "num" }, d.percentage_bp ? (d.percentage_bp / 100) + "%" : money(d.amount)),
+          el("td", { class: "num" }, d.priority),
+          el("td", {}, d.stackable ? "yes" : "no"),
+          el("td", {}, d.price_codes.join(", ") || "every price"),
+          el("td", { class: "num" }, d.min_quantity || "—"),
+          el("td", {}, d.scope.region),
+        )))),
+    ),
+  ];
+}
+
+// ── 6. Promotion Builder ───────────────────────────────────────────────────────
+function promotionsView() {
+  const promotions = state.data.promotions || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Build a promotion"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "m-code", placeholder: "diwali_2026" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "m-name" })),
+        el("div", {}, el("label", {}, "Campaign"), el("input", { id: "m-campaign" })),
+        el("div", {}, el("label", {}, "Basis points"),
+          el("input", { id: "m-bp", type: "number", min: "0", max: "10000", value: "0" })),
+        el("div", {}, el("label", {}, "Priority"), el("input", { id: "m-priority", type: "number", value: "50" })),
+        el("div", {}, el("label", {}, "Exclusive (this offer is the offer)"),
+          el("select", { id: "m-exclusive" }, el("option", {}, "false"), el("option", {}, "true"))),
+        el("div", {}, el("label", {}, "Live from (epoch s)"), el("input", { id: "m-from", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Live until (blank = open)"), el("input", { id: "m-until", type: "number" })),
+      ),
+      scopeFields("m"),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/promotions", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("m-code"), display_name: val("m-name"), campaign: val("m-campaign"),
+            percentage_bp: num("m-bp") || 0, priority: num("m-priority") || 50,
+            exclusive: val("m-exclusive") === "true", scope: readScope("m"),
+            effective_from: num("m-from") || 0, effective_until: num("m-until"),
+          }),
+        }), "promotion created") }, "Create promotion")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Promotions (${promotions.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Campaign", "Exclusive", "Reduction", "From", "Until", "Region"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...promotions.map(p => el("tr", {},
+          el("td", {}, el("code", {}, p.code)),
+          el("td", {}, p.campaign || "—"),
+          el("td", {}, p.exclusive ? "yes" : "no"),
+          el("td", { class: "num" }, p.discount.percentage_bp ? (p.discount.percentage_bp / 100) + "%" : money(p.discount.amount)),
+          el("td", { class: "num" }, p.effective.effective_from),
+          el("td", { class: "num" }, p.effective.effective_until ?? "open"),
+          el("td", {}, p.scope.region),
+        )))),
+    ),
+  ];
+}
+
+// ── 7. Coupon Manager ──────────────────────────────────────────────────────────
+function couponsView() {
+  const coupons = state.data.coupons || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Issue a coupon"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "c-code", placeholder: "WELCOME20" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "c-name" })),
+        el("div", {}, el("label", {}, "Basis points"),
+          el("input", { id: "c-bp", type: "number", min: "0", max: "10000", value: "0" })),
+        el("div", {}, el("label", {}, "Priority"), el("input", { id: "c-priority", type: "number", value: "40" })),
+        el("div", {}, el("label", {}, "Promotion code (optional)"), el("input", { id: "c-promo" })),
+        el("div", {}, el("label", {}, "Single use"),
+          el("select", { id: "c-single" }, el("option", {}, "false"), el("option", {}, "true"))),
+        el("div", {}, el("label", {}, "Max redemptions (0 = unlimited)"),
+          el("input", { id: "c-max", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Live until (blank = open)"), el("input", { id: "c-until", type: "number" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Eligibility only. Pricing never redeems a coupon and never counts a redemption — " +
+        "whoever records the redemption enforces the limit."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/coupons", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("c-code"), display_name: val("c-name"), percentage_bp: num("c-bp") || 0,
+            priority: num("c-priority") || 40, promotion_code: val("c-promo"),
+            single_use: val("c-single") === "true", max_redemptions: num("c-max") || 0,
+            effective_from: 0, effective_until: num("c-until"),
+          }),
+        }), "coupon created") }, "Issue coupon")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Coupons (${coupons.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Reduction", "Promotion", "Single use", "Max redemptions", "Until"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...coupons.map(c => el("tr", {},
+          el("td", {}, el("code", {}, c.code)),
+          el("td", { class: "num" }, c.discount.percentage_bp ? (c.discount.percentage_bp / 100) + "%" : money(c.discount.amount)),
+          el("td", {}, c.promotion_code || "—"),
+          el("td", {}, c.single_use ? "yes" : "no"),
+          el("td", { class: "num" }, c.max_redemptions || "unlimited"),
+          el("td", { class: "num" }, c.effective.effective_until ?? "open"),
+        )))),
+    ),
+  ];
+}
+
+// ── 8. Version History ─────────────────────────────────────────────────────────
+function versionsView() {
+  const versions = state.data.versions || [];
+  const activity = state.data.activity || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Publish an immutable pricing version"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Catalog version to pin to"),
+          el("input", { id: "v-catalog", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Notes"), el("input", { id: "v-notes" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Publishing pricing does not republish the catalog — the two version independently. " +
+        "Rollback publishes a new version carrying older prices; nothing is ever rewritten."),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/versions", {
+          method: "POST",
+          body: JSON.stringify({ catalog_version: num("v-catalog"), notes: val("v-notes"), require_priced_codes: [] }),
+        }), "pricing version published") }, "Publish"),
+        el("input", { id: "v-rollback", type: "number", min: "1", placeholder: "roll back to version", style: "width:200px" }),
+        el("button", { class: "ghost", onclick: () => act(() => api("/versions/rollback", {
+          method: "POST", body: JSON.stringify({ to_version: num("v-rollback"), notes: "" }),
+        }), "rolled forward with older prices") }, "Roll back"),
+      ),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Pricing versions (${versions.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Version", "Published", "By", "Catalog v", "Books", "Prices", "Rolled back from", "Notes"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...versions.map(v => el("tr", {},
+          el("td", {}, "v" + v.version),
+          el("td", { class: "num" }, v.published_at),
+          el("td", {}, v.published_by || "—"),
+          el("td", {}, v.catalog_version == null ? "—" : "v" + v.catalog_version),
+          el("td", {}, v.book_codes.join(", ") || "—"),
+          el("td", { class: "num" }, v.price_count),
+          el("td", {}, v.rolled_back_from == null ? "—" : "v" + v.rolled_back_from),
+          el("td", { class: "muted" }, v.notes || "—"),
+        )))),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, "Pricing activity (append-only)"),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["When", "Action", "Subject", "Actor", "Detail"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...activity.map(a => el("tr", {},
+          el("td", { class: "num" }, a.at),
+          el("td", {}, el("code", {}, a.action)),
+          el("td", {}, `${a.subject_kind} ${a.subject_code}`),
+          el("td", {}, a.actor_id || "system"),
+          el("td", { class: "muted" }, a.detail || "—"),
+        )))),
+    ),
+  ];
+}
+
+// ── 9. Pricing Resolver ────────────────────────────────────────────────────────
+function resolverView() {
+  const resolved = state.data.resolved;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Resolve a price"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Price code"), el("input", { id: "r-code", placeholder: "pro_monthly" })),
+        el("div", {}, el("label", {}, "Currency"),
+          el("select", { id: "r-currency" }, ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "At (epoch seconds)"), el("input", { id: "r-at", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Region"),
+          el("select", { id: "r-region" }, ...REGIONS.map(r => el("option", {}, r)))),
+        el("div", {}, el("label", {}, "Channel"),
+          el("select", { id: "r-channel" }, ...CHANNELS.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Customer tier"),
+          el("select", { id: "r-tier" }, ...TIERS.map(t => el("option", {}, t)))),
+        el("div", {}, el("label", {}, "Coupon code"), el("input", { id: "r-coupon" })),
+        el("div", {}, el("label", {}, "Promotion codes (comma separated)"), el("input", { id: "r-promos" })),
+        el("div", {}, el("label", {}, "Quantity (eligibility only)"),
+          el("input", { id: "r-qty", type: "number", value: "0" })),
+        el("div", {}, el("label", {}, "Pricing version (blank = live)"),
+          el("input", { id: "r-version", type: "number", min: "1" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Quantity is an eligibility input — a volume discount needs to know it qualifies. " +
+        "It is never multiplied by a price: that is rating, and it is a different engine."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: async () => {
+          state.error = ""; state.notice = "";
+          try {
+            state.data.resolved = await api("/resolve", {
+              method: "POST",
+              body: JSON.stringify({
+                price_code: val("r-code"), currency: val("r-currency"), at: num("r-at") || 0,
+                region: val("r-region"), channel: val("r-channel"), customer_tier: val("r-tier"),
+                coupon_code: val("r-coupon"),
+                promotion_codes: val("r-promos") ? val("r-promos").split(",").map(s => s.trim()) : [],
+                quantity: num("r-qty") || 0, pricing_version: num("r-version"),
+              }),
+            });
+          } catch (e) { state.error = e.message; state.data.resolved = null; }
+          render();
+        } }, "Resolve")),
+    ),
+    resolved ? el("div", { class: "card" },
+      el("h2", {}, `${resolved.price_code} · ${resolved.price_book_code} v${resolved.price_book_version}`),
+      el("div", {},
+        resolved.discounts.length
+          ? el("span", { class: "strike" }, money(resolved.list_amount) + "  ")
+          : null,
+        el("span", { class: "big" }, money(resolved.net_amount || resolved.list_amount || resolved.unit_amount)),
+        resolved.override_applied ? el("span", { class: "pill", style: "margin-left:.6rem" }, "override applied") : null,
+      ),
+      resolved.discounts.length ? el("table", { style: "margin-top:.8rem" },
+        el("thead", {}, el("tr", {}, ...["Discount", "Kind", "Source", "Priority", "Off"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...resolved.discounts.map(d => el("tr", {},
+          el("td", {}, el("code", {}, d.code)),
+          el("td", {}, d.kind),
+          el("td", {}, d.source),
+          el("td", { class: "num" }, d.priority),
+          el("td", { class: "num" }, "−" + money(d.reduction)),
+        )))) : null,
+      resolved.net_tiers && resolved.net_tiers.length ? el("table", { style: "margin-top:.8rem" },
+        el("thead", {}, el("tr", {}, ...["Up to", "List unit", "Net unit"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...resolved.net_tiers.map((t, i) => el("tr", {},
+          el("td", {}, t.up_to ?? "∞"),
+          el("td", { class: "num" }, money(resolved.tiers[i] && resolved.tiers[i].unit_price)),
+          el("td", { class: "num" }, money(t.unit_price)),
+        )))) : null,
+      el("div", { class: "path" }, "resolution path\n  " + resolved.resolution_path.join("\n  ")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "This is a price, not a charge: no quantity, no period, no tax, no total."),
+    ) : null,
+  ];
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([key, label]) =>
+    el("button", { class: state.tab === key ? "active" : "",
+      onclick: () => { state.tab = key; state.notice = ""; load(); } }, label)));
+  const views = { books: booksView, editor: editorView, currencies: currenciesView,
+    regions: regionsView, discounts: discountsView, promotions: promotionsView,
+    coupons: couponsView, versions: versionsView, resolver: resolverView };
+  const view = document.getElementById("view");
+  view.replaceChildren(
+    ...(views[state.tab]() || []).filter(Boolean),
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice && !state.error ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+document.getElementById("token").addEventListener("change", load);
+render();
+load();
+</script>
+</body>
+</html>

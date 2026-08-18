@@ -3,6 +3,752 @@
 All notable releases of the VoxVoice platform. Versioning follows SemVer at the
 platform-baseline level (see `docs/releases/`).
 
+## Unreleased — Epic 9 (Billing & Subscription Platform) · 🟢 Implemented (M9.0A–M9.25) · 🔒 Epic 9 architecture FROZEN (M9.25) · 📦 **RELEASED v4.0.0** (M9.26)
+
+The opening of **Epic 9**: an architecture blueprint and one ratified ADR fixing the
+permanent ownership boundary of revenue **before** implementation begins. No code, no APIs,
+no schemas, no migrations, no UI, and **no change to any frozen Epic** (5/6/7/8 remain
+byte-for-byte unchanged).
+
+### Added
+
+- **Epic 9 Billing Platform Blueprint (M9.0A)** — `docs/architecture/epic9/billing-platform-blueprint.md`.
+  Design-only blueprint delivering all 28 requested artifacts (ownership, revenue,
+  subscription, metering, pricing and entitlement models; billing/payment/invoice/refund
+  lifecycles; tax incl. GST/VAT; marketplace; enterprise licensing; reseller/white-label
+  strategy; integrations with Epic 8 / Product Runtime / Deployment / Observability;
+  security, compliance, scalability; a 12-item risk register; 7 recommended ADRs; and a
+  20-milestone roadmap M9.0A–M9.19 on a revenue spine with four release gates).
+  Organizing invariant: **Billing owns revenue and nothing else.** Keeps Observability's
+  **estimated** cost and Billing's **authoritative** charge architecturally separate.
+  Indexed in `docs/INDEX.md`; rationale **DL-0107**.
+- **Epic 9 Repository Release — Billing Platform v1.0 · v4.0.0 (M9.26)** — the release commit and
+  annotated tag `v4.0.0`, plus `docs/releases/epic9-billing-platform-v1.0.md` finalized with release
+  notes. **Contributes repository-release metadata only**: no financial fact, no table, no
+  migration, no route, no Studio page, no production module, and no version-file change — the
+  annotated tag is the single release identity, as it was for v1.0.0, v2.0.0 and v3.0.0.
+  **Discharges M9.25's FZ-12**: the Epic 9 tree was entirely uncommitted at freeze (roadmap risk
+  **D-11**, the same condition Epic 8 recorded at M8.20 §22), so the freeze described a working
+  directory no commit preserved; one commit now preserves the whole frozen epic and the repository
+  is reconstructable from it. Certification digest `39790b95d061a763…` and freeze manifest digest
+  `eed692224f0aeb82…` both **preserved unchanged**; migration head remains **0033**; 27 controls, 24
+  blocking, 0 blocking violations, 0 inconclusive. **Neither advisory was fixed and no limitation
+  was closed** — NS-5 and ST-3 remain open advisories with named owners, and all nine declared
+  limitations remain owned by the milestones that can close them. One release blocker was found and
+  resolved before committing: an M9.25 freeze assertion tested the *absence* of `v4.0.0`, which is
+  not a property of a frozen tree; it was relocated to the M9.26 release suite inverted and
+  strengthened (the tag must exist, be annotated, and point at the release commit). 22 release
+  tests. Rationale **DL-0137**.
+- **Epic 9 Architecture Freeze (M9.25)** — `tests/freeze/manifest.py`,
+  `tests/test_billing_freeze.py`, `docs/architecture/epic9/freeze.md` and
+  `docs/releases/epic9-billing-platform-v1.0.md`. Freezes the exact state M9.24 certified.
+  **Introduces no financial fact, no table, no migration, no route, no Studio page and no
+  production module.** The freeze manifest is content-addressed and deterministic — digest
+  `eed692224f0aeb82…` — split into **derived** values (recomputed from the tree) and **declared
+  release inputs** (the regression and ruff results, which are facts about running the suite rather
+  than reading the tree), because a manifest that claimed to derive them would overstate what it can
+  prove. Twelve freeze invariants **FZ-1..FZ-12**, all asserted and failing closed; migration head
+  pinned at **0033**; certification digest pinned at `39790b95d061a763…` so a drifting tree fails
+  the freeze rather than re-certifying quietly. **FZ-12 is not satisfied and says so**: Epic 9 is
+  entirely uncommitted (`HEAD` is Epic 8's release), which is roadmap risk **D-11**, anticipated by
+  the freeze/release split and discharged by **M9.26**. Two determinism defects found by the freeze
+  and fixed at the owning layer: the certification digest was context-dependent because `NS-2`
+  counted every index in the process rather than Billing's, and the manifest repeated the same
+  defect class. Neither changed the certification catalogue, a severity or a clause; the corrected
+  digest is **identical** to M9.24's recorded value. 29 freeze tests. **M9.26 remains the Repository
+  Release milestone** — commit, tag, baseline v4.0.0. Rationale **DL-0136**.
+- **Billing Certification (M9.24)** — `tests/certification/{catalogue,runner}.py` and
+  `tests/test_billing_certification.py`. **Adds zero production code**: `billing/` is unchanged by
+  this milestone apart from the shadowing renames. The
+  final domain milestone, specified by the roadmap as *"independent certification against ADR-0023,
+  the Blueprint and the Provider Strategy"* with the DoD **"certification is reproducible as tests,
+  not a one-off document."** **M9.24 owns no financial fact**: it reads module graphs, package
+  namespaces, schema metadata, route tables, FSM definitions and the migration chain, and returns a
+  verdict. It ships **no table, no migration, no repository, no command bus, no customer API and no
+  Studio page**, and lives outside `billing/` entirely — each absence deliberate, because a stored verdict is a staler answer than
+  re-running the suite and an org-scoped endpoint for a repository-wide engineering fact would be a
+  lie about ownership. 27 controls (24 blocking, 3 advisory) across eight families, each citing a
+  ratified clause; a control that cannot gather its evidence is **`INCONCLUSIVE`, never a pass**,
+  and an inconclusive blocking control fails certification. Verdict:
+  **`CERTIFIED_WITH_ADVISORIES`** — 0 blocking violations, 0 inconclusive, 2 owned advisories
+  (`NS-5` 29 module-qualified OpenAPI schema names, `ST-3` two Studio pages rescaling by a
+  hardcoded exponent), 9 declared limitations each with an owning milestone. The audit found and
+  fixed **10 colliding names across 21 definitions** spanning M9.12–M9.22 — including two identity
+  functions (`derive_evidence_digest`, `derive_policy_version_id`) each defined twice under one
+  name — closing
+  structurally the defect class M9.20, M9.21, M9.22 and M9.23 had each shipped. 71 tests. Migration
+  chain unchanged at **0033**. Rationale **DL-0135**.
+- **Billing Period Scope & Consolidation Engine (M9.23)** — `billing/foundation/{commercial_consolidation,consolidation_rules,consolidation_factories}.py`,
+  `billing/application/consolidation_engine.py`, `billing/persistence/{consolidation_models,consolidation_repositories}.py`,
+  migration `0033`, `billing/customer/{consolidation_schemas,routers/consolidation_engine}.py`, and
+  `billing/customer/studio/consolidations.html`. Which accounts belong to a reporting scope, for
+  which period, at which source revisions — and what could not be included, and why. **Versioned
+  scope definitions** with five modes whose semantics are declared as data; **immutable scope
+  snapshots** so an account that moves parent in March never changes what January's consolidation
+  covered; **pinned source bindings**, one row per `(account, domain)`, so a hundred-thousand-account
+  scope paginates and a re-collection cannot double-count; **named exceptions**; **validation**;
+  content-addressed **finalized results**; and **corrections** that land beside the original rather
+  than rewriting it. Closes M9.22's headline gap: every period-scoped read Billing publishes is
+  account-keyed, so a group filing needs a resolved scope first. **M9.23 owns scope and owns no
+  financial fact** — M9.8 keeps the account hierarchy (consumed through a reader with no write
+  method), M9.13–M9.18 keep their facts, M9.19 reconciliation, M9.20 correlation, M9.21
+  investigation, M9.22 filing. Attribution is **never guessed**, missing accounts and unreadable
+  sources **never become zero**, and currencies are **never combined implicitly or converted** —
+  there is no FX rate at any altitude. 11 commands, 14 queries, 10 tables, 22 paths under
+  `/consolidations`, 13 Studio screens, 121 tests. Rationale **DL-0134**.
+- **Billing Compliance & Regulatory Reporting Engine (M9.22)** — `billing/foundation/{commercial_reporting,reporting_rules,reporting_factories}.py`,
+  `billing/application/reporting_engine.py`, `billing/persistence/{reporting_models,reporting_repositories}.py`,
+  migration `0032`, `billing/customer/{reporting_schemas,routers/reporting_engine}.py`, and
+  `billing/customer/studio/reports.html`. What must be reported, for which period, under which
+  versioned definition, from which authoritative sources: **versioned report definitions**,
+  explicit **reporting periods** that name which of Billing's four period concepts they consume,
+  immutable **input manifests** that pin every source at the revision it was read, **report runs**,
+  **named exceptions**, **validation**, content-addressed **finalized snapshots**, **corrections**
+  that never rewrite a filing, and **submission packages** that are prepared and never sent.
+  **A report is derived evidence, not financial truth** — it creates no ledger entry, invoice, tax
+  determination, payment or recognition entry, imports no repository that could, and has **no
+  outward command at all**. Every field names its authoritative source; `ReportTransformation` is a
+  closed set of seven of which exactly one touches money, and that one **refuses a mixed-currency
+  input rather than converting it**. There is **no FX rate anywhere** and `CurrencyBasis` has no
+  `CONVERTED` member. **Missing evidence never becomes zero** — `EMPTY` (we looked, nothing was
+  there) stays distinct from `UNAVAILABLE` (we could not look) through the transformation, the
+  completeness verdict, a named exception and the wire. Definitions are immutable once published;
+  a filing stores the version that produced it, so no later rule reinterprets it. `FINALIZED` is
+  reachable only from a validation that passed, and acknowledging an exception does not unblock a
+  filing. No `DELETE`, `PUT` or `PATCH` on the surface. ADR-0023 PY5 unchanged, now holding at a
+  fourth altitude.
+- **Financial Investigation & Audit Evidence Engine (M9.21)** — `billing/foundation/{commercial_investigations,investigation_rules,investigation_factories}.py`,
+  `billing/application/investigation_engine.py`, `billing/persistence/{investigation_models,investigation_repositories}.py`,
+  migration `0031`, `billing/customer/{investigation_schemas,routers/investigation_engine}.py`, and
+  `billing/customer/studio/investigations.html`. What a human actually found out about an integrity
+  incident, on what evidence, and whether an auditor can reconstruct it **without relying on
+  application logs**: durable **investigations**, an append-only **timeline**, content-addressed
+  **evidence captures** with a **chain of custody**, **questions** with real outcomes,
+  **observations** that keep facts and hypotheses apart, **conclusions** that are superseded rather
+  than edited, and immutable **audit packages**. **An investigation records what was observed and
+  concluded and never becomes the source of financial truth** — there is no balance, total, tax,
+  price or recognized amount anywhere, `Money` is not imported, and an AST scan asserts no
+  arithmetic touches a figure. **A reference is not a snapshot**: a `LIVE_REFERENCE` structurally
+  carries no body and no digest and can never back a confirmed conclusion, a snapshot must carry
+  both, and the evidence store has **no update path at all** — so neither becomes the other. Evidence
+  is append-only: a source becoming unavailable, redacted or superseded appends a **new link** naming
+  the one it follows, and nothing is ever replaced. **"Could not retrieve" never becomes
+  "verified"** — an unavailable capture stays visible as a named gap, blocks closure, and makes an
+  audit package `INCOMPLETE`. A hypothesis cannot be promoted to a fact; a `CONFIRMED` conclusion
+  requires an available snapshot and `INCONCLUSIVE` requires none, so **nobody is forced to invent a
+  root cause to close a case**. Closure is reachable **only** through a recorded conclusion, and a
+  closed investigation is never reopened. Audit packages are content-addressed and immutable:
+  exporting unchanged state twice returns the same package, and a package cannot contain the record
+  of its own creation. Exactly one canonicalizer, which **refuses floats**. Closing the investigation
+  is **not** resolving the incident — M9.20 keeps that, and M9.21 has **no outward command at all**.
+  No `DELETE`, `PUT` or `PATCH` on the surface. ADR-0023 PY5 unchanged, now holding at a third
+  altitude.
+- **Financial Integrity Correlation & Audit Engine (M9.20)** — `billing/foundation/{commercial_incidents,incident_rules,incident_factories}.py`,
+  `billing/application/incident_engine.py`, `billing/persistence/{incident_models,incident_repositories}.py`,
+  migration `0030`, `billing/customer/{incident_schemas,routers/incident_engine}.py`, and
+  `billing/customer/studio/incidents.html`. Which reconciliation findings belong to the same
+  financial integrity incident, what the common evidence is, and whether an auditor can reconstruct
+  the chain: durable **incidents**, evidence-backed **finding links**, an append-only **audit
+  trail**, non-destructive **merges** and **correlation corrections**, and repair references that
+  never claim to be resolutions. Closes the limitation M9.19 shipped with. **Correlation is an
+  evidence relationship and never manufactures a root cause** — identity is extracted from a
+  declared precedence over identifiers the owning domains already made immutable, and amount,
+  timestamp, account, invoice number, description, customer and payment method correlate nothing
+  alone or together. Precedence under-correlates rather than over-correlates, deliberately.
+  `RootCause` declares no infrastructure causes and conflicting divergences classify as `UNKNOWN`;
+  impact is classified, never calculated. Severity is **monotonic**. **Repair is never resolution** —
+  no `REPAIR_IN_PROGRESS → RESOLVED` edge exists, and verification refuses when anything is still
+  divergent *or unreadable*. History is never rewritten: merges and corrections are new facts, links
+  are detached rather than deleted, and status is a projection over an append-only trail.
+  **No balance, total, amount or currency exists anywhere in the milestone.** 11 commands + 14
+  queries, 6 tables via migration 0030, 25 API paths under `/integrity/incidents` (396 total,
+  path-disjoint from M9.19's), 10 Studio screens, 108 tests, 4186/4186 repository-wide, ruff clean.
+  **Two defects found and fixed.** Indexed in `docs/INDEX.md`; rationale **DL-0131**.
+- **Billing Reconciliation & Financial Integrity Engine (M9.19)** — `billing/foundation/{commercial_reconciliation,reconciliation_rules,reconciliation_factories}.py`,
+  `billing/application/reconciliation_engine.py`, `billing/persistence/{reconciliation_models,reconciliation_repositories}.py`,
+  migration `0029`, `billing/customer/{reconciliation_schemas,routers/reconciliation_engine}.py`, and
+  `billing/customer/studio/integrity.html`. Whether the six financial domains agree with one
+  another: durable reconciliation **runs**, **findings** and evidence-backed **resolutions** across
+  six declared relationships (payment↔ledger, invoice↔ledger, invoice↔tax, invoice↔recognition,
+  payment↔invoice, recognition↔ledger). **A reconciliation result is an observation, not permission
+  to mutate another domain** — enforced structurally: no other domain's repository is imported,
+  `PostJournalEntry` is provably unreachable, and the whole repair surface is a two-entry whitelist
+  dispatching the *owning* domain's own command. The pre-implementation audit reused M9.2's
+  `ReconciliationVerdict`, left M9.16's payment↔provider reconciliation entirely alone, and
+  *delegated* invoice↔ledger and invoice↔tax to M9.14's and M9.15's own comparison services rather
+  than writing a second opinion. Runs are identified by an **evidence digest** over exactly what was
+  compared and nothing volatile, so two workers converge, an unchanged re-run writes nothing, and a
+  re-run after a repair is genuinely a new observation. ADR-0023 **PY5 is unamended and now
+  structural**: the finding lifecycle has no edge out of `RESOLVED` or `CLOSED`, and `resolve`
+  re-reads both sides and refuses unless they agree. Severity is a declared table — a fabricated
+  financial fact, a duplicate posting and an amount mismatch are always CRITICAL, and no divergence
+  is ever informational. **No balance, total or monetary sum exists anywhere in the milestone.**
+  10 commands + 15 queries, 5 tables via migration 0029, 25 API paths under `/integrity` (371
+  total), 10 Studio screens, 109 tests, 4078/4078 repository-wide, ruff clean. **Three defects found
+  and fixed**, including one that made the engine blind to its own headline case. Indexed in
+  `docs/INDEX.md`; rationale **DL-0130**.
+- **Revenue Recognition & Deferred Revenue Engine (M9.18)** — `billing/foundation/{commercial_revenue,revenue_rules,revenue_factories}.py`,
+  `billing/application/revenue_engine.py`, `billing/persistence/{revenue_models,revenue_repositories}.py`,
+  migration `0028`, `billing/customer/{revenue_schemas,routers/revenue_engine}.py`, and
+  `billing/customer/studio/revenue.html`. When a billed amount becomes earned: immutable versioned
+  recognition policies, schedules derived from **issued invoice snapshots** and identified by a
+  **basis digest** covering every input that can change the answer, dated period entries,
+  corrections as new facts, and an explanation assembled without consulting current pricing, tax,
+  payment or subscription state. **Deferred revenue is never stored** — total minus recognized
+  minus adjusted, derived on every read (ADR-0023 RS6: recognition is a projection over the ledger,
+  not a second set of books). **Paid is not earned**: no payment or collection module is imported.
+  Every split uses M9.2's largest-remainder allocator; conservation is asserted across nine
+  schedule shapes. Calendar arithmetic is pure integers rather than `datetime`, so the Foundation's
+  ambient-clock ban stayed intact, and it is proven against the stdlib. Closed accounting periods
+  reuse M9.13's `LateEntryDisposition`; a Ledger refusal produces an `UNPOSTED` recognition and a
+  repair queue. M9.2's `RecognitionState` and M9.13's `AccountingPeriod` are untouched;
+  `PostingSource.REVENUE_RECOGNITION` and `PostJournalEntry.recognition` are additive extensions.
+  10 commands + 16 queries, 5 tables, 24 paths under `/revenue`, 110 tests, 3969/3969
+  repository-wide, ruff clean. Two defects found and fixed. Rationale **DL-0129**.
+- **Dunning & Collections Engine (M9.17)** — `billing/foundation/{commercial_collections,collection_rules,collection_factories}.py`,
+  `billing/application/collections_engine.py`, `billing/persistence/{collection_models,collection_repositories}.py`,
+  migration `0027`, `billing/customer/{collection_schemas,routers/collections_engine}.py`, and
+  `billing/customer/studio/recovery.html`. Recovery **policy**: immutable versioned strategies, one
+  case per obligation, durable actions decided before anything leaves the building, append-only
+  execution evidence, and a decision trail that replays after the strategy is rewritten.
+  **Collections decides whether to ask; Payments moves the money; Ledger records the fact.** It
+  reaches no provider, posts no ledger entry, recalculates no invoice total, and holds no balance —
+  there is no amount anywhere in the domain. An *ambiguous* payment outcome is never a retry
+  candidate (three independent gates, inheriting the M9.16-R1 invariant). Case transitions are
+  compare-and-set against a `version`, so a stale worker cannot undo a recovery; one obligation is
+  one case by derived primary key. Billing runs **no scheduler** — what is due is a query.
+  M9.2's `DunningProcess`, `DunningPolicy` and `cp_billing_dunning` are untouched, and its three
+  `billing.dunning.*` event types are **reused rather than renamed**. 12 commands + 15 queries,
+  6 tables, 25 paths under `/recovery`, 97 tests, 3859/3859 repository-wide, ruff clean.
+  Four defects found and fixed. Indexed in `docs/INDEX.md`; rationale **DL-0128**.
+- **Payment Engine (M9.16)** — `billing/foundation/{commercial_payments,payment_rules,payment_factories}.py`,
+  `billing/application/payment_engine.py`, `billing/persistence/{payment_models,payment_repositories}.py`,
+  migration `0026`, `billing/customer/{payment_schemas,routers/payment_engine}.py`, and
+  `billing/customer/studio/payments.html`. External money movement: collection objectives,
+  append-only attempts, the durable provider-operation claim, verified provider callbacks,
+  refunds as new financial facts, reconciliation, diagnostics, search and an append-only audit
+  trail — 14 commands + 17 queries, 8 tables, 30 API paths under `/collections`, an 11-screen
+  Studio. **The provider moves money; Billing owns the financial fact that it moved** (ADR-0023
+  PY1/PY4, M9.0C). `PaymentIntent` is split from append-only `PaymentAttempt`, so a retry appends
+  attempt *n+1* rather than rewriting attempt *n*. The money-moving path is **three phases with
+  the provider call between two transactions**, with the operation row committed first under a
+  **composite primary key on `(org_id, operation_key)`** — so two workers produce one claim and
+  the loser retrieves instead of sending. A timeout becomes `AMBIGUOUS`, which **blocks any
+  further attempt** until reconciliation retrieves the same key. Neither FSM has an edge out of a
+  settled state. **No provider is named anywhere**; routing is operator-declared and the migration
+  seeds nothing. 133 tests including 25 named demonstrations; rationale **DL-0126**.
+- **Payment Engine corrective hardening (M9.16-R1)** — closes the three findings an independent
+  review rejected M9.16 for. **S0:** a successful provider *void* was read through the
+  money-movement table and recorded as a **capture**, posting a ledger credit for money never
+  collected; outcome interpretation is now action-aware (`ACTION_TRIGGERS`, with `CANCEL` mapping
+  `SUCCEEDED` to a cancellation and `REFUND` moving no attempt state) and the Ledger is reached only
+  behind `asserts_money_moved`. **S1:** a *raised* provider call left an attempt in `started`,
+  blocking retry, cancellation and reconciliation permanently; every provider call now yields
+  `AMBIGUOUS` unless the adapter raises `ProviderNotSent` to prove nothing was transmitted, and
+  reconciliation resolves any externally-open attempt. **S2:** the refund ceiling was a
+  read-modify-write two different request keys could walk past; `(org_id, attempt_id, sequence)` is
+  now unique so the database arbitrates, verified by two Applications over two connections to one
+  file-backed database. Also: `PARTIALLY_PAID`/`SETTLE_PARTIAL` removed as unreachable, the ledger
+  exception boundary narrowed to `BillingError`, an ambiguous attempt is no longer voidable, and
+  the event endpoint is renamed and documented as an **internal relay** — M9.16 is explicitly not
+  ADR-0023 PY4 webhook compliance. 28 new tests (161 total); rationale **DL-0127**.
+- **Tax Determination Engine (M9.15)** — `billing/foundation/{commercial_tax,tax_rules,tax_factories}.py`,
+  `billing/application/tax_engine.py`, `billing/persistence/{tax_models,tax_repositories}.py`,
+  migration `0025`, `billing/customer/{tax_schemas,routers/tax_engine}.py`, and
+  `billing/customer/studio/taxation.html`. Tax treatment of already-determined amounts:
+  jurisdictions, classifications, supplier nexus and registrations, customer exemptions,
+  **effective-dated rate evidence** carrying the authority that set it, deterministic
+  place-of-supply resolution, declared treatment precedence, integer-only calculation with a
+  recorded rounding mode and scope, attributed overrides, immutable content-addressed
+  determinations that supersede rather than edit, an explanation that answers *why was this tax
+  applied?* **without calling the provider again**, reconciliation, diagnostics, search, and an
+  append-only audit trail. 13 commands + 16 queries, 7 tables, 24 API paths under `/taxation`, an
+  11-screen Studio, and 19 named determination demonstrations. **Billing declares no rate
+  anywhere** (ADR-0023 TX1): an AST scan forbids an integer literal reaching `rate_basis_points=`,
+  the migration seeds nothing, and a fresh installation determines no tax until an operator declares
+  one behind the `TaxRateProvider` adapter port. `TaxAssessment.to_determination()` is the single
+  projection onto M9.2's `TaxDetermination`, so **M9.14 needed no change to start presenting tax**.
+  Five defects found and fixed, four by the end-to-end smoke and two financially material in
+  opposite directions: CGST and SGST collided on the derived rate id, which would have taxed every
+  Indian intra-state invoice at half the correct rate; and inclusive pricing extracted per component
+  instead of against the combined rate, which would have over-collected on every tax-inclusive sale.
+  Two frozen assertions **sharpened, not weakened** — a parameter named `country` contains the
+  substring `try:`. Repository-wide 3601 tests passing, zero regressions.
+
+- **Invoice Engine (M9.14)** — `billing/foundation/{commercial_invoicing,invoice_rules,invoice_factories}.py`,
+  `billing/application/invoice_engine.py`, `billing/persistence/{invoice_models,invoice_repositories}.py`,
+  migration `0024`, `billing/customer/{invoice_schemas,routers/invoice_engine}.py`, and
+  `billing/customer/studio/invoices.html`. Customer documents: invoices, credit notes and debit
+  notes with **gapless, jurisdiction-aware numbering allocated inside the issuing transaction**,
+  immutable **content-addressed** snapshots that reproduce byte-identically forever, append-only
+  revision history, corrections by credit and debit note rather than by editing, document
+  relationships recorded on both sides, deterministic HTML and PDF document-model rendering that
+  computes nothing, delivery and attachment **metadata only**, structured export, inspection,
+  diagnostics, reconciliation against the ledger, and append-only history. 13 commands + 14 queries,
+  7 tables, 26 API paths under `/documents`, an 11-screen Studio, and 19 named document
+  demonstrations. Consumes a **closed** accounting period and refuses an open one — a document is a
+  statement of a figure that has stopped moving. Reuses M9.2's `InvoiceState`, `ChargeLineKind`,
+  `InvoiceNumber`, `InvoiceTotalsService` and `InvoiceNumberFormatter` unchanged, each asserted to
+  remain the only declaration. Five defects found and fixed, two by the end-to-end smoke: all three
+  document kinds printed the same number because each counts in its own series and the format
+  carried no kind token; and a revision silently discarded the supplier, template and payment
+  instructions the draft was prepared with, and would then have been issued that way. One frozen
+  assertion **sharpened, not weakened** (carrying a Foundation value is not duplicating a Foundation
+  rule), following the M9.7 precedent. Repository-wide 3449 tests passing, zero regressions.
+
+- **Credit & Revenue Ledger (M9.13)** — `billing/foundation/{commercial_ledger,ledger_rules,ledger_factories}.py`,
+  `billing/application/ledger_engine.py`, `billing/persistence/{ledger_models,ledger_repositories}.py`,
+  migration `0023`, `billing/customer/{ledger_schemas,routers/ledger_engine}.py`, and
+  `billing/customer/studio/ledger.html`. Financial recording: immutable append-only journal entries
+  with **exactly-once posting keyed by what caused them**, balances **derived on every read and
+  never stored**, accounting periods with a one-way close and a sealed content digest a replay
+  proves against, corrections by reversal and adjustment rather than mutation, credits whose
+  remaining value is derived from their applications and which are spent earliest-expiring first, a
+  trial-balance control report, reconciliation against rated charges, balance checkpoints that are
+  caches with proofs, inspection, diagnostics, and append-only history. 12 commands + 14 queries,
+  7 tables, 24 API paths under `/accounting`, an 11-screen Studio, and 19 named accounting
+  demonstrations. Declares itself an **accounts-receivable subledger** rather than a general ledger,
+  with `TrialBalance` as the reconciliation surface — recommended for ratification into ADR-0023.
+  Implements the guard M9.12's spec recorded as missing: **a provisional rating run is refused**.
+  Four defects found and fixed, two by the end-to-end smoke: the deferral path was unreachable
+  because a posting request never named the period it belonged to, so a late correction would have
+  posted silently into the open period losing its audit signal; and corrections shadowed their
+  originals during reconciliation, making every corrected charge read as an amount mismatch.
+  Repository-wide 3293 tests passing, zero regressions.
+
+- **Rating Engine (M9.12)** — `billing/foundation/{commercial_rating,rating_rules,rating_factories}.py`,
+  `billing/application/rating_engine.py`, `billing/persistence/{rating_models,rating_repositories}.py`,
+  migration `0022`, `billing/customer/{rating_schemas,routers/rating_engine}.py`, and
+  `billing/customer/studio/rating.html`. Commercial charge calculation: flat, seat, per-unit,
+  allowance/overage, graduated, volume, package and hybrid charges, each with a breakdown that sums
+  **exactly** to the charge and provenance naming every frozen artefact that produced it;
+  entitlement-over-price allowance precedence; minimum commitments applied after every other charge;
+  deterministic rating runs whose id is **derived from an input digest**, making rerating idempotent
+  at the database and replay byte-comparable; a draft→rated→finalized lifecycle with **no edge out of
+  finalized**, so a finalized figure is *adjusted* and a provisional one *superseded*; comparison,
+  explanation, inspection, snapshots, diagnostics, search, and append-only history. 9 commands +
+  12 queries, 5 tables, 19 API paths under `/charges`, an 11-screen Studio, and 19 named correctness
+  demonstrations. All money is integer minor units — no float participates anywhere.
+  **Fixes a genuine defect in frozen M9.7 additively:** every discount, including fixed sums, is
+  folded into the *unit* rate, so a one-time "₹500 off this line" became "₹500 off each unit" once
+  rating multiplied by quantity — ₹1,000 billed where ₹5,500 was owed. Rating re-bases the rate,
+  applies the fixed sum once at charge level, and shows the correction in the breakdown; M9.7 is
+  untouched and the result is arithmetically identical wherever it was already right.
+  Repository-wide 3158 tests passing, zero regressions.
+
+- **Metering Engine (M9.11)** — `billing/foundation/{commercial_metering,metering_rules,metering_factories}.py`,
+  `billing/application/metering_engine.py`, `billing/persistence/metering_{models,repositories}.py`,
+  `billing/customer/{metering_schemas.py,routers/metering_engine.py,studio/metering.html}`
+  (+ spec at `docs/architecture/epic9/metering-engine.md`). The domain that owns **commercial
+  usage records and nothing else** — the highest-risk correctness milestone of Epic 9, because it
+  is the only one whose errors are silent.
+  **Billing never measures.** Signals arrive through `MetricStreamPort`, an ABC declared inside
+  this plane and implemented outside it: no producer import, no polling, no reach into runtime
+  state, and no outbound call of any kind (AST-asserted). The port has **no emit, publish, or
+  write method**, so Billing is structurally incapable of producing an operational metric; an
+  unwired port ingests nothing rather than inventing usage.
+  **Exactly one authoritative usage record per source event**, defended four deep: a *derived*
+  primary key, a read-before-write, a database unique constraint, and an `IntegrityError` re-read
+  inside a `SAVEPOINT` — so two instances racing on one event are indistinguishable from one
+  processing it twice, and the loser's transaction survives intact.
+  Two unusual, deliberate decisions: a usage id is **derived** rather than minted, so replay
+  produces byte-identical usage including ids; and a sealed period carries a **seal digest** over
+  its billable content, so a replay months later *proves* it reproduced the same commercial usage
+  rather than asserting it.
+  Owns versioned meters with exactly one authoritative source (two meters claiming one signal is
+  rejected — the double-counting failure), exact integer normalization with declared rounding
+  (no float touches a quantity, `HALF_EVEN` available so meters are not biased in VoxVoice's
+  favour), total attribution with an alerting quarantine, a declared late-arrival policy,
+  windowed aggregation anchored to the billing period, **one-way sealing**, append-only
+  corrections that never edit, deterministic replay using the *same* pure ingestion decision as
+  the live path, continuous reconciliation, provenance, diagnostics, and byte-identical exports.
+  Owns **no** money, ledger, invoice, payment, or entitlement (AST-asserted).
+  Fourteen explicit correctness demonstrations — deterministic replay, duplicate suppression,
+  idempotency under concurrent ingestion, replay after restart with a different id generator and
+  clock, sealing rules, late-event determinism, multi-instance aggregate convergence, append-only
+  history, and independence from Runtime availability.
+  17 commands / 12 queries, 7 tables via **migration 0021**, 26 API paths under a separate
+  `/usage` prefix (M9.5's `/metering` untouched), an 11-screen Studio, 184 tests. Additive
+  throughout: `metering_engine` defaults to `None` on both `BillingRepositories` and
+  `BillingContext`; M9.2's `metering.py` and its three usage tables are untouched; 18 new
+  `billing.*` events, 20 new diagnostic codes; foundation exports 429→510. **Five defects found
+  and fixed**, four in the correctness core (usage could land in a sealed period; an adjustment
+  landed back in the period it adjusted; two overlapping meters could both go live; a correction
+  was swallowed by the exactly-once constraint). Rationale **DL-0121**.
+- **Entitlement Engine (M9.10)** — `billing/foundation/{commercial_entitlements,entitlement_rules,entitlement_factories}.py`,
+  `billing/application/entitlements_engine.py`, `billing/persistence/entitlement_{models,repositories}.py`,
+  `billing/customer/{entitlement_schemas.py,routers/entitlement_engine.py,studio/entitlements.html}`
+  (+ spec at `docs/architecture/epic9/entitlement-engine.md`). The domain that answers *what is
+  this billing account entitled to right now, and what should an enforcing plane do if it cannot
+  see fresh data* — the platform unlock every other plane consumes. Implements the load-bearing
+  Epic 9 invariant as **code shape**: Billing decides, Billing publishes immutable versioned
+  snapshots, the owning platform enforces locally, and **Billing never performs authorization**
+  (no module contains `principal`, `Permission`, `scope`, `has_role`, `check_permission`,
+  `is_authorized`, `RoleAssignment`, or `RBAC` — a test greps for every one).
+  Owns a gate registry where **every capability carries a fail-open / fail-closed / degrade
+  classification** (an unclassified gate is an *error*, ADR-0023 E3), nestable bundles that report
+  cycles as the path that closes them, precedence-resolved grants, half-open effective dating,
+  scheduled intent, deterministic snapshot composition, staleness directives, inspection, and
+  diagnostics. Owns **no** money, usage, ledger, invoice, payment, or tax (AST-asserted).
+  Three structural decisions: M9.2's `GateClassification` / `GrantSource` / `GRANT_PRECEDENCE`
+  are **reused, not re-declared** (§A2.5); `EntitlementSet.to_snapshot()` projects onto M9.2's
+  frozen `EntitlementSnapshot`, so a plane written against the M9.5 contract consumes an M9.10
+  decision unchanged; and grants live inside the profile aggregate because precedence is only
+  correct when it sees all of an account's grants at once.
+  Grant lifecycle draft→active→suspended→revoked/expired→archived with **no deletion state at
+  all** and no `revoked→active` (re-granting is a new grant, or 'was this ever revoked?' becomes
+  unanswerable). **Effective dating never mutates state** — a closed window simply stops being
+  composed — which is why this domain contains no scheduler; revocation closes the *window* as
+  well as the state so a later snapshot cannot re-admit the grant. Resolution is fully ordered
+  (declared precedence → generosity → grant id) and order-independent, asserted by rotating the
+  grant list through every offset; every answer carries a `resolution_path`, and inspection keeps
+  the **losing** grants because 'why *not*?' is unanswerable from the winner alone. Snapshots are
+  returned as published, never recomputed, with a pure `preview` for 'what would be published';
+  republishing an unchanged decision is refused.
+  19 commands / 12 queries, 5 tables via **migration 0020**, 28 API paths under a separate
+  `/capabilities` prefix (M9.5's `/entitlements` untouched and unshadowed), an 11-screen Studio,
+  199 tests. Additive throughout: `entitlements_engine` defaults to `None` on both
+  `BillingRepositories` and `BillingContext`; M9.2's entitlement module and tables are untouched;
+  18 new `billing.*` events, 22 new diagnostic codes; foundation exports 371→429. Rationale
+  **DL-0120**.
+- **Subscription Engine (M9.9)** — `billing/foundation/{commercial_subscriptions,subscription_rules,subscription_factories}.py`,
+  `billing/application/subscriptions_engine.py`, `billing/persistence/subscription_{models,repositories}.py`,
+  `billing/customer/{subscription_schemas.py,routers/subscription_engine.py,studio/subscriptions.html}`
+  (+ spec at `docs/architecture/epic9/subscription-engine.md`). The domain that answers *what
+  commercial agreement currently exists between a billing account and VoxVoice*, binding the three
+  domains before it: **this account** (M9.8), on **this published catalog version** (M9.6), at
+  **this published pricing version** (M9.7).
+  All three references are immutable integer pins into frozen snapshots — never live objects, and
+  deliberately **not** foreign keys, because a foreign key would make the two version lines a
+  coupling the database enforces when the whole point is that they version independently. Tests
+  assert both directions: publishing a new catalog never mutates an existing subscription, and
+  publishing new pricing never mutates one either.
+  It owns **no money at all**: `Money`, `minor`, `PriceTier`, `.times(`, `.allocate(`, and
+  `.scaled(` appear nowhere across the eight modules, no amount reaches the wire, and the Studio
+  has no money formatter — an agreement records what was *agreed*, and turning that into a charge
+  is rating (M9.11).
+  Adds a `draft → trialing/active → past_due/suspended/paused → cancelled → expired → archived`
+  FSM on `core.fsm` with **no deletion state at all** — stronger than the catalog, pricing, and
+  account lifecycles, because a subscription *is* the commercial agreement and ADR-0023 RS4 makes
+  its record permanent; no `cancelled → active` (winning a customer back is a new agreement, and
+  conflating them makes churn unmeasurable); no path between pause and suspension (one is the
+  customer's choice, the other ours); and **renewal deliberately absent from the FSM** — it
+  advances the billing cycle rather than changing state, with a test asserting the machine
+  contains no self-loops at all.
+  Scheduled changes persist **intent with no scheduler**: there is no timer, no worker, and no
+  auto-apply, and a test reads due changes at a far-future instant and asserts the agreement is
+  untouched — keeping "what we agreed" auditable independently of "what the system managed to
+  run". Versions embed the whole agreement and roll **forward** with recorded provenance;
+  freezing is deterministic, so two freezes of unchanged terms are byte-identical.
+  Six item kinds (flat, seat, usage, tiered, volume, hybrid) live on **one** agreement rather than
+  several subscriptions per customer. 23 commands / 6 queries on the existing buses, 4
+  `cp_billing_*` tables via migration **0019** (two append-only), 25 API paths under a separate
+  `/agreements` prefix so M9.5's `/subscriptions` wildcard cannot shadow them, and a 10-screen
+  Studio. 165 new tests; repository-wide **2628 passing**, zero regressions. Rationale **DL-0119**.
+- **Billing Accounts (M9.8)** — `billing/foundation/{commercial_accounts,account_rules,account_factories}.py`,
+  `billing/application/billing_accounts.py`, `billing/persistence/account_{models,repositories}.py`,
+  `billing/customer/{account_schemas.py,routers/billing_accounts.py,studio/accounts.html}` (+ spec at
+  `docs/architecture/epic9/billing-accounts.md`). The domain that answers *who has the commercial
+  relationship with VoxVoice*: commercial identity, billing hierarchy, payer relationships,
+  contacts, addresses, legal entity, billing and invoice preferences, a tax-profile reference,
+  credit profile and limit, commercial status, notes, activity, and history. It owns **no**
+  subscription, price, catalog entry, usage record, payment, runtime object, or deployment —
+  AST-asserted — and holds **no balance**: a credit limit is what we are willing to be owed, so
+  `CreditProfile.permits(exposure)` takes the exposure as an argument and `Money.times`/`allocate`/
+  `scaled` appear nowhere in the domain.
+  Two separations are load-bearing. The **billing hierarchy is not Epic 8 tenancy** (ADR-0023 §5.2):
+  `org_id` is a string this domain scopes on and never dereferences, and a test asserts no module
+  imports `api` or mentions `Organization`/`Workspace`/`Project` — so a reseller hierarchy provably
+  requires no change to organization tenancy. The **payer graph is not the parent graph**: a test
+  constructs a parent whose payer is its own child and asserts neither graph is malformed, which is
+  the modelling error this domain exists to avoid.
+  Adds a `draft→active→suspended→closed→archived→deleted` FSM on `core.fsm` with **exactly one edge
+  into `deleted`, and it starts at `draft`** — everything past draft has revenue attached, and
+  ADR-0023 RS4 says revenue outlives the customer record (the whole machine is enumerated to prove
+  it). `restore` returns an archived account to *closed*, not active, because un-filing a record and
+  reopening a relationship are separate decisions. Closed and archived accounts are read-only,
+  except for notes — a note is a record *about* the relationship, not a change to it.
+  Cycles and payer loops are reported as the offending **path** (`a → b → c → a`), hierarchy depth
+  is bounded at 6, and tree traversal terminates even on malformed data. Account numbers come from a
+  stored per-organization sequence rather than `max + 1`, so deleting a draft never hands its number
+  back. 14 commands / 5 queries on the existing buses, 3 `cp_billing_*` tables via migration **0018**
+  (one append-only), 17 API paths under a separate `/billing-accounts` prefix so M9.5's `/accounts`
+  wildcard cannot shadow them, and a 9-screen Studio. 130 new tests; repository-wide **2463
+  passing**, zero regressions. Rationale **DL-0118**.
+- **Pricing Engine (M9.7)** — `billing/foundation/{price_books,pricing_rules,pricing_factories}.py`,
+  `billing/application/pricing.py`, `billing/persistence/pricing_{models,repositories}.py`,
+  `billing/customer/{pricing_schemas.py,routers/pricing_engine.py,studio/pricing.html}` (+ spec at
+  `docs/architecture/epic9/pricing-engine.md`). The domain that answers *what does this catalog
+  version cost*: price books, price-book versions, currencies, regional pricing, effective dating,
+  price resolution, overrides, discounts, promotions, coupons, and pricing history.
+  Organizing boundary, **asserted rather than intended**: pricing answers what something *costs*,
+  never what someone *owes* — `Money.times` and `Money.allocate`, the operations that turn a price
+  into a charge, appear nowhere in the domain, and resolving the same price at `quantity=1` and
+  `quantity=1000` returns the identical answer because quantity is an *eligibility* gate for
+  volume discounts. Rating is M9.11.
+  Adds a `draft→published→archived→deleted` FSM on `core.fsm` with **no `published→draft` edge** —
+  repricing publishes a new revision, so the book an old invoice was rated against survives
+  byte-for-byte; half-open `[from, until)` effective dating with collision detection (same code and
+  *same version* overlapping, since a different version is how a superseding price is expressed);
+  a deterministic resolver ranked by scope specificity → version → code that returns a
+  `resolution_path`; a discount engine ordered by `(priority, code)` where each reduction comes off
+  the **list price** (two 25% discounts are worth 50%, not 43.75%), a non-stackable discount ends
+  the chain, and the total floors at zero; promotions and coupons that embed their own reduction
+  (eligibility only — Pricing never redeems anything or counts a redemption); and immutable
+  per-book and org-wide version lines whose rollback **publishes forward** with recorded
+  provenance. Percentages are integer basis points and no float touches money anywhere
+  (AST-asserted). Pricing pins to a *published catalog version by number*, so changing a price
+  never republishes the catalog and changing the catalog never republishes prices.
+  12 commands / 10 queries on the existing buses, 7 `cp_billing_*` tables via migration **0017**
+  (three append-only; no money in any projection column), 18 API paths with **no collision** with
+  M9.5's `/pricing/price-books`, and a 9-screen Pricing Studio. 144 new tests;
+  repository-wide **2333 passing**, zero regressions. Rationale **DL-0117**.
+- **Commercial Catalog (M9.6)** — `billing/foundation/{products,catalog_rules,catalog_factories}.py`,
+  `billing/application/catalog.py`, `billing/persistence/catalog_{models,repositories}.py`,
+  `billing/customer/{catalog_schemas.py,routers/catalog_admin.py,studio/}` (+ spec at
+  `docs/architecture/epic9/commercial-catalog.md`). The domain that answers *what do we sell*:
+  products, editions, plans, features, feature groups, bundles, and commercial metadata.
+  Organizing boundary, **asserted rather than intended**: the Catalog owns commercial products
+  and owns **no price, subscription, invoice, entitlement, or usage** — not one catalog type
+  carries a `Money`, currency, amount, or rate. Adds 9 aggregates and a
+  draft→published→deprecated→archived→deleted FSM on `core.fsm` (a published product cannot be
+  deleted in one step; `deleted` is terminal and recorded, never a row removal); a validator that
+  never raises and reports **every** finding, including bundle cycles **as the offending path**;
+  deterministic search with no scoring engine; 15 commands + 11 queries on the *same* M9.3 buses;
+  6 `cp_billing_*` tables via migration **0016**; 21 API endpoints (60 total, no collisions); and
+  a 9-screen Studio at `/studio` — self-contained, stateless, and with **no pricing screen**
+  (ADR-0021: the Studio is a Consumer).
+  **Versioning:** publishing freezes a self-contained, immutable `CatalogVersion` that
+  subscriptions reference by number; historical versions remain readable forever; **rollback
+  publishes a new version carrying older content** and records its provenance, so history is
+  appended to and never rewritten; catalog activity is append-only and written inside the same
+  transaction as the change it describes. Additive throughout — without catalog repositories
+  wired, the Application is exactly what M9.3 assembled — and two frozen vocabularies
+  (`BillingEventType`, `BillingDiagnosticCode`) gained members while losing none.
+  99 tests; repository-wide **2188/2188** green. Indexed in `docs/INDEX.md`; rationale **DL-0116**.
+
+### Changed
+
+- **Three more Epic 9 boundary assertions sharpened, not relaxed (M9.9), and three real
+  defects fixed.** The "every controller dispatches through a bus" scan checked *every function*
+  in a router file, which a private wire-mapping helper legitimately is not; it now identifies a
+  route **structurally** by its `@router.<verb>` decorator — stricter than excluding helpers by
+  name, since a new route cannot slip past by being called something the exclusion list allows.
+  The plane-wide DELETE allow-list gained two sub-resource deletions (a subscription *item* while
+  the agreement is editable, and a *pending intention*), each carrying the reason it removes no
+  revenue, plus a new assertion that the agreement itself and every version of it are never
+  deletable. The Foundation package-layout test gained the three new subscription modules.
+  Three defects were found by the new tests and fixed at the right layer: items supplied at
+  subscription creation were stored with the caller's (empty) id, leaving every such line
+  un-addressable by `/items/{item_id}` — now minted by the factory, because construction is the
+  factory's job; a pricing-only upgrade/downgrade was rejected for "not saying what changes" when
+  a target pricing version says exactly that; and an early draft of M9.9 duplicated M9.2's
+  `INTERVAL_SECONDS`, which would have given "how long is a month" two answers — removed in favour
+  of `PeriodService`. A stale five-option interval dropdown in the M9.7 Pricing Studio (which
+  would have produced a 422 against the two-member `BillingInterval`) was corrected at the same
+  time.
+- **Four more Epic 9 boundary assertions sharpened, not relaxed (M9.8).** The plane-wide
+  "no DELETE on revenue records" scan asserted a frozen one-item list of DELETE verbs; M9.8 adds a
+  draft-account deletion that provably removes no revenue. The scan now states the rule instead of
+  the count: an allow-list where each entry carries the reason it cannot destroy revenue, **plus** a
+  new assertion that no DELETE exists on any path touching invoices, ledger, payments, refunds,
+  credits, metering, subscriptions, taxes, contracts, licenses, or a published price/catalog
+  version. Two migration-chain tests asserted `MIGRATIONS[-1]`, which every future milestone would
+  break; both now assert the migration's *position* plus ordering and contiguity, which is the
+  actual rule. The Foundation package-layout test gained the three new account modules. One new
+  assertion added; none weakened.
+- **Three more Epic 9 boundary assertions sharpened, not relaxed (M9.7).** The Application's
+  "duplicates no Foundation rule" scan banned the string `Rounding.HALF` outright; a pricing
+  *command* legitimately carries a caller's declared rounding policy through to the Foundation as
+  a field default. The scan now bans the money-arithmetic calls themselves (`.scaled(`,
+  `.allocate(`) and a new AST assertion forbids any `Rounding.` reference **inside a function
+  body** — data in transit is allowed, a rounding decision in the wrong layer is not. The catalog
+  migration-chain test asserted an exact four-version list; it now asserts the prefix plus
+  ordering and contiguity, which is the actual rule (the chain grows, it never reorders). The
+  Foundation package-layout test gained the three new pricing modules. Two new assertions were
+  added; none was weakened.
+- **Eight Epic 9 boundary assertions sharpened, not relaxed (M9.6).** Four searched for a *word*
+  the catalog legitimately owns — `CatalogAssembler.rollback` publishes a new catalog version, and
+  a `metric.*` string in an OpenAPI example documents a *consumed* event. Those now search for
+  transaction machinery (`session.`, `.commit()`, `uow.`) and for emission capability rather than
+  for vocabulary. Four asserted frozen counts (`len(__all__) == 203`, exact migration and table
+  lists) and now assert **supersets**, which is the actual rule (§A12: surfaces grow additively and
+  nothing is ever removed). Two new assertions were added; the suite is stricter after this
+  milestone than before it.
+
+- **Billing Control Plane API (M9.5)** — `platform/billing/customer/` (+ spec at
+  `docs/architecture/epic9/billing-control-plane-api.md`). The thin HTTP transport for the
+  revenue plane: **15 routers / 39 paths / 46 operations** across all 14 bounded contexts plus
+  health/ready/version, `create_billing_app()` with lifespan and a DI container over the M9.4
+  composition root, Pydantic wire DTOs, centralized error translation, middleware
+  (correlation ids, timing, metrics, structured logging, security headers, payload limit, CORS,
+  GZip), and versioned OpenAPI with per-route error responses and a bearer scheme.
+  **Nothing bypasses the Application** — AST-asserted that every route body reaches a command or
+  query bus. Deliberately a **separate ASGI application** from the Epic 8 Control Plane, because
+  ADR-0023 gives revenue its own failure domain. Identity is a platform-issued HS256 token
+  verified by a stdlib re-implementation (ADR-0031 IR3 forbids `billing`→`api`; interop is proven
+  by minting every test token with Epic 8's own encoder); **Billing issues no tokens, exposes no
+  auth route, and evaluates no permission** — authorization stays in the Application's
+  `BillingAuthorizer` seam and remains **deny-by-default** through production wiring. The
+  organization always comes from the verified token, never the request body. Controllers are
+  source-asserted to contain no repository access, transaction, pricing, entitlement, or
+  authorization logic, and to catch nothing. **Foundation and Application byte-for-byte
+  unchanged**; frozen Epics 5–8 untouched; Billing still absent from `platform/bootstrap.py`.
+  74 integration tests over the real ASGI app and the real database; repository-wide
+  **2089/2089** green. Indexed in `docs/INDEX.md`; rationale **DL-0115**.
+
+### Fixed
+
+- **`SqlPlanRepository.add` raised `IntegrityError` when publishing a plan (M9.4, found at
+  M9.5).** `PlanRepository` declares `add` and no `replace`, and the Application legitimately
+  calls `add` twice for one plan version (define, then store the published copy). Against the
+  in-memory fakes M9.3 tested with the second call overwrote; against the real table it violated
+  the catalog's uniqueness constraint, so **the first HTTP request to publish a plan returned
+  500**. `add` now upserts on `(org, code, version)`, leaving the Foundation contract and the
+  frozen Application untouched.
+
+- **Billing Persistence layer (M9.4)** — `platform/billing/persistence/` (+ spec at
+  `docs/architecture/epic9/billing-persistence-layer.md`). The only production implementation of
+  the Foundation's **29 repository contracts** and the Application's `UnitOfWork`: 29 SQL-backed
+  repositories, `SqlBillingUnitOfWork` (**durable atomicity** replacing M9.3's boundary-only
+  abstraction — repository writes and staged application events now commit or vanish together, with
+  events published only *after* durable success), a type-driven aggregate↔JSON codec with asserted
+  lossless round-trip for all 30 aggregates, a durable `billing.*` fact stream written inside the
+  caller's transaction, **30 `cp_billing_*` tables** via migrations **0013–0015** continuing the
+  platform's single chain from Epic 8's `0012`, and `build_persistent_billing_application(...)`.
+  Storage owns storage only: no business rule, no orchestration, no transport, no provider call.
+  Storage-level invariants enforced where a database can guarantee them — append-only
+  ledger/credits/usage/tax-evidence/events (**no update or delete method exists to call**), issued
+  invoices and published entitlement snapshots immutable, sealing a usage period a one-way door, and
+  usage exactly-once at both the repository *and* the unique-constraint layer. **Foundation and
+  Application byte-for-byte unchanged and provably unaware persistence exists**; frozen Epics 5–8
+  untouched; Billing still absent from `platform/bootstrap.py` (ADR-0031 CR2); deny-by-default
+  authorization survives production wiring. 105 integration tests against a real database;
+  repository-wide **2012/2012** green. Indexed in `docs/INDEX.md`; rationale **DL-0114**.
+- **Billing Application layer (M9.3)** — `platform/billing/application/` (+ spec at
+  `docs/architecture/epic9/billing-application-layer.md`). The CQRS orchestration layer over
+  the M9.2 Foundation: **26 commands + 19 queries** across all 14 bounded contexts, command
+  and query buses with DI and duplicate-registration rejection, a single coverage-asserted
+  handler wiring table, command/query use cases, the **UnitOfWork abstraction** (transaction
+  boundary + application-event outbox — commit publishes, rollback discards, `__exit__` never
+  suppresses; the Foundation is provably unaware transactions exist), **authorization
+  orchestration** over an injected `BillingAuthorizer` seam with a **deny-by-default**
+  authorizer, 18 view DTOs with pure mappers, and a **disjoint** application-event vocabulary
+  (every dispatch audited exactly once; rejections emitted outside the rolled-back
+  transaction). **The layer owns no business rules** — validation, construction, lifecycle
+  legality, money arithmetic, proration, entitlement composition, quota derivation, invoice
+  totals and numbering remain Foundation behaviour, enforced by a structural no-duplication
+  test. No persistence, no SQL, no API/HTTP, no Studio, no adapters, no payment or tax
+  execution; `BillingApplicationFactory` deliberately has no `.default()`. **1907/1907
+  repository-wide tests pass (1855 prior + 52 new, zero regression); ruff clean; the
+  Foundation and frozen Epics 5/6/7/8 are byte-for-byte unchanged.** Indexed in
+  `docs/INDEX.md`; rationale **DL-0113**.
+- **Billing Foundation (M9.2)** — `platform/billing/foundation/` (+ spec at
+  `docs/architecture/epic9/billing-foundation.md`). The **first Epic 9 implementation**: the
+  pure-domain layer of the revenue plane, 24 modules covering all 14 bounded contexts
+  (money · shared domain · accounts · catalog · pricing · subscriptions · entitlements ·
+  metering · ledger + credits · invoicing · payments · refunds · tax · contracts +
+  licensing) plus lifecycle tables built on `core.fsm`, validation, diagnostics, the
+  `billing.*` event vocabulary, 29 repository **interfaces**, stateless services,
+  factories, DTOs, and deterministic Clock/Id seams. **Foundation only** — no application
+  layer, no persistence implementation, no API/HTTP/FastAPI, no SQL or migrations, no
+  Studio, no adapters, no payment/tax providers, no payment execution. Design rules are
+  enforced as executable tests: every public aggregate frozen + slotted; transitions return
+  new aggregates; `time` imported by exactly one module; an AST test bans
+  socket/http/sql/fastapi/pydantic/random/datetime/os from the plane; repositories are
+  non-instantiable ABCs; validation never raises while factories fail fast; append-only
+  repositories declare no update/delete. ADR-0023 ownership is likewise executable
+  (no `metric.*` emitted; usage as a projection keyed by its source event; entitlement ≠
+  authorization; mandatory gate classification; integer-minor-unit money; immutable issued
+  invoices with gapless numbering; token-only payment instruments; bounded refunds with
+  separation of duties; no tax rate table), as are ADR-0031's import rules IR1–IR9.
+  **1855/1855 repository-wide tests pass (1774 prior + 81 new, zero regression); `ruff
+  check` and `ruff format --check` clean; frozen Epics 5/6/7/8 byte-for-byte unchanged.**
+  Indexed in `docs/INDEX.md`; rationale **DL-0112**.
+- **ADR-0031 ratified (M9.1A)** — `docs/adr/ADR-0031-billing-plane-repository-placement.md`.
+  The **structural placement** record CODING_STANDARDS §2 requires for a new top-level
+  directory (ADR-0018 / ADR-0022 precedent), satisfying the Implementation Plan's M9.2
+  kickoff entry criterion. Ratifies that the Billing Platform lives permanently at
+  **`platform/billing/`** — a self-contained top-level plane, peer to `product/` and
+  `actuator/`, importing **`platform/core/` and the standard library only**, with exactly
+  one capped read-only exception (`billing/refs.py` → `product`, mirroring
+  `actuator/planning.py`). Everything else Billing consumes — organization/seat facts, the
+  `metric.*` stream, deployment status, the clock — arrives by **injection through neutral
+  ports, never by import**, making the graph acyclic by construction. Fixes: the package
+  layout (14 bounded contexts → 14 sub-packages + an `adapters/` tree for the rented
+  edges); the layer structure (domain plane + **additive** Epic 8 foundation/application/
+  persistence/routers/Studio surface, which imports `billing` and is never imported by it);
+  dependency direction (`api → billing`, never the reverse; **no frozen Epic imports
+  Billing**); the **composition root** (control plane only — **Billing is never wired into
+  `platform/bootstrap.py`**, the placement-level expression of ADR-0023's
+  never-blocks-the-runtime guarantee); import rules IR1–IR9 as executable AST assertions;
+  a narrow **public surface** (facade, inbound ports, adapter contracts, published read
+  contracts) with everything else internal and refactorable without an ADR; extension
+  points; testing seams (offline deterministic default, no socket, no money moved); and
+  nine repository conventions. Rejects `platform/revenue/` and `platform/commercial/` on
+  ubiquitous-language grounds, and nesting under `api/`, `product/`, or `actuator/` as
+  freeze-breaking or ownership-inverting. **ADR-0024** stays reserved for Coach and
+  **ADR-0025–0030** for the recommended Epic 9 batch. Epic 9 repository topology is now
+  frozen — no future placement ADR, no package movement. Registered in
+  `docs/adr/README.md` and `docs/INDEX.md`; rationale **DL-0111**.
+- **Epic 9 Implementation Plan (M9.1)** — `docs/roadmap/epic9-implementation-plan.md`.
+  The last planning milestone before code; **no new architecture and no new ADR** (it
+  realizes ADR-0023 + the Blueprint + the Provider Strategy). Delivers a 6-phase plan,
+  **7 engineering streams** coordinated by published contracts, **14 bounded contexts** on
+  the commercial-lifecycle spine, a dependency graph with three concurrent chains
+  (commercial / consumption / adapters) converging at rating, the critical path, a 12-item
+  delivery-risk register, a **25-milestone breakdown (M9.2–M9.26)** with per-milestone
+  complexity/risk/test-strategy/DoD, a fully offline hermetic testing strategy, a **4-gate
+  release strategy** (G1 shadow → G2 design-partner → G3 self-serve GA → G4
+  enterprise/marketplace), a 12-line universal Definition of Done, repository impact, and
+  10 future extension points. Key scheduling decisions: metering (M9.10) starts at M9.4 in
+  parallel with a dedicated reviewer; adapter contracts + deterministic offline fakes land
+  at M9.2 before the engines; the entitlement snapshot contract publishes at M9.9 and is
+  enforced only at M9.17; **no customer money moves before G1 passes**. Records the
+  milestone renumbering superseding Blueprint §27, identifies one structural placement ADR
+  as an M9.2 entry criterion, and splits architecture freeze (M9.25) from repository
+  release (M9.26). Indexed in `docs/INDEX.md`; rationale **DL-0110**.
+- **Billing Build-vs-Buy & Provider Strategy accepted (M9.0C)** —
+  `docs/architecture/epic9/billing-provider-strategy.md`. The permanent commercial-provider
+  decision, taken before any Epic 9 implementation and moving no ownership boundary:
+  **Option C — VoxVoice owns commercial truth; payment and tax providers are rented edges
+  behind adapters.** Evaluates Stripe / Paddle / Lemon Squeezy / Chargebee / Recurly /
+  custom / hybrid (each as an *owner* and as a *rented edge*) across 22 dimensions.
+  **Option B (delegate everything) rejected as unratifiable** — a vendor writing plans,
+  pricing, subscriptions, entitlements, or catalog is a second writer (§A2.5, ADR-0023
+  §5–§7), and its lock-in is the irreversible kind; **Option A (own everything) rejected**
+  on tax-correctness liability, PCI scope, payment-method breadth, and delivery risk.
+  Ratifies that providers own **payment movement only** — never subscriptions, plans,
+  pricing, entitlements, the commercial catalog, or revenue state — and that Billing stays
+  authoritative even while every provider is unavailable. Fixes four adapter families
+  (Payment / Tax / Document / Export) under the §A6 capability-plugin pattern with no
+  vendor type crossing the seam, mandatory idempotency, verified callbacks, bounded
+  retries + circuit breakers, credential-seam secrets, and a **deterministic offline
+  adapter as the default outside production**; **multi-provider from day one** with
+  deterministic recorded routing; and **merchant-of-record rented per market as a
+  distribution channel, never as an owner**. Provider replacement must never require a
+  customer migration. Answers the Blueprint's open question and risk **R-12**. This is the
+  substance of recommended **ADR-0027**; **ADR-0024 stays reserved for Coach**. Indexed in
+  `docs/INDEX.md`; rationale **DL-0109**.
+- **ADR-0023 ratified (M9.0B)** — `docs/adr/ADR-0023-billing-sole-owner-of-revenue.md`.
+  Ratifies the Billing Platform as the **sole owner of revenue** (plans, pricing, price
+  books, commercial catalog, billing accounts, subscriptions, usage records, credits,
+  entitlements, discounts/coupons, invoices, payments, refunds, taxes, ledger, contracts,
+  licenses, revenue-recognition state) and the owner of **nothing else** — organizations,
+  workspaces, projects, agents, knowledge, deployments, runtime, conversation/session
+  state, messages, metrics, audit, Product Runtime, Customer Platform, Observability,
+  infrastructure, provider execution, authentication, authorization, and RBAC all keep
+  their frozen owners. Ratifies that Billing **consumes authoritative facts only**, **never
+  measures usage** (`metric.*` read-only), **never blocks Runtime or Deployment**, **never
+  performs a permission check** (entitlement ≠ authorization), **publishes immutable
+  entitlement snapshots** the owning platform enforces locally (§A2.6, with a mandatory
+  fail-open/fail-closed classification per gate), and **never becomes synchronous
+  infrastructure**. Fixes `Billing → Platform` as one-way and acyclic (AR-15): **no frozen
+  Epic may depend on Billing.** Fulfils the future-owner recommendation in ADR-0021 and
+  leaves its Billing-Ledger Forbidden Write unchanged. **ADR-0024 stays reserved for
+  Coach**; ADR-0025–0030 are recommended and ratified separately. Registered in
+  `docs/adr/README.md` and `docs/INDEX.md`; rationale **DL-0108**.
+
 ## Unreleased — Epic 8 (Customer Platform) · 🟡 Design only (M8.0A)
 
 **Product Blueprint & Customer Platform Architecture** — the master, design-only

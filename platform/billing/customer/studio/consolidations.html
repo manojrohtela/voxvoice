@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Consolidations</title>
+<!--
+  Period Scope &amp; Consolidation Studio (M9.23).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no scope rule, and knows nothing the
+  API does not tell it &mdash; every screen renders a response from /v1/billing/consolidations/*,
+  and every action dispatches to it.
+
+  It aggregates nothing. Not a total, not a tax, not a balance, not a rate, not a conversion. Every
+  figure on this page arrived as integer minor units plus a currency from the domain that decided
+  it, and is rendered exactly as received. A client that added two per-currency aggregates would be
+  a second opinion about a number the Ledger owns.
+
+  It chooses no accounts. Which accounts a scope contains is the server's answer, resolved once
+  into an immutable snapshot; this page shows the membership and the exclusions with their reasons
+  and never derives either.
+
+  It resolves no attribution. Where the server says a source is unattributable, this page shows
+  that word and the diagnostic. There is no fallback here that picks the payer, the parent, the
+  newest account or the largest amount.
+
+  It converts no currency. A scope spanning currencies shows one aggregate per currency, exactly as
+  served. There is no division, no multiplication, no rate and no FX table in this file.
+
+  It never renders a missing figure as zero. `amount_minor` comes back null when a source could not
+  be read, and this page shows the status and the reason instead of a number. That distinction is
+  the whole milestone: a missing account and an account with nothing in it are not the same fact.
+
+  It reconciles nothing (M9.19), correlates nothing (M9.20), investigates nothing (M9.21) and files
+  nothing (M9.22). Where it shows an integrity signal, that verdict arrived on the consolidation.
+
+  It decides no consolidation state. `allowed_triggers` drives every button; a finalized run shows
+  none because the server returns an empty list. There is no client-side "looks ready to me".
+
+  It calls no external API and modifies no source domain.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; margin:.2rem .3rem 0 0; }
+  button.act[disabled] { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.finalized, .pill.ready, .pill.complete, .pill.evidence_complete, .pill.resolved,
+  .pill.present, .pill.no_finding, .pill.closed, .pill.acknowledged { color:var(--ok); border-color:var(--ok); }
+  .pill.validating, .pill.preparing, .pill.incomplete, .pill.empty, .pill.advisory,
+  .pill.open_finding, .pill.not_applicable { color:var(--warn); border-color:var(--warn); }
+  .pill.blocked, .pill.exceptions_raised, .pill.unavailable, .pill.evidence_incomplete,
+  .pill.source_unavailable, .pill.unsupported, .pill.blocking, .pill.open_incident,
+  .pill.indeterminate { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.not_required, .pill.superseded { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:250px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+  .gap { border-left:3px solid var(--bad); padding-left:.7rem; margin:.5rem 0; font-size:13px; }
+  pre.body { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.6rem;
+             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+             max-height:24rem; overflow:auto; margin:.3rem 0 0; }
+</style></head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Consolidations</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="run" placeholder="consolidation id" style="width:190px" />
+  <input id="snap" placeholder="snapshot id" style="width:170px" />
+  <input id="token" placeholder="Bearer token" style="width:130px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+<script>
+"use strict";
+const API = "/v1/billing/consolidations";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, "");
+    else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "posture", data: {}, error: "", notice: "", page: 1 };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["posture", "Posture"], ["scopes", "Scopes"], ["snapshot", "Scope snapshot"],
+  ["members", "Members"], ["periods", "Periods"], ["list", "Consolidations"],
+  ["run", "Consolidation"], ["sources", "Source manifest"], ["exceptions", "Exceptions"],
+  ["validation", "Validation"], ["result", "Finalized result"], ["provenance", "Provenance"],
+  ["timeline", "Trail"],
+];
+
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "—"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function cid() { return val("run"); }
+function sid() { return val("snap"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+// A figure, exactly as the server sent it. `amount_minor` is null when the source could not be
+// read, and this renders the status and the reason rather than a number — never a zero. Nothing
+// here divides by a currency scale or formats a locale amount, because the minor unit is what the
+// owning domain wrote and rescaling it would be this page forming an opinion about money.
+function figure(v) {
+  if (v.amount_minor === null || v.amount_minor === undefined) {
+    return el("span", {}, pill(v.status), " ",
+      el("span", { class: "muted", style: "font-size:12px" }, v.detail || "no value"));
+  }
+  return el("span", { class: "mono" }, `${v.amount_minor} ${v.currency || ""} (minor units)`);
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "posture") state.data.posture = await api("/posture");
+    if (t === "scopes") state.data.scopes = await api("/scopes" + q({ limit: 100 }));
+    if (t === "periods") state.data.periods = await api("/periods" + q({ limit: 100 }));
+    if (t === "list") state.data.page = await api("" + q({ page: state.page, page_size: 25 }));
+    if (t === "snapshot" && sid()) state.data.snapshot = await api(`/scopes/snapshots/${sid()}`);
+    if (t === "members" && sid()) {
+      state.data.members = await api(`/scopes/snapshots/${sid()}/members` + q({ page: state.page, page_size: 50 }));
+    }
+    if (t === "run" && cid()) state.data.run = await api(`/${cid()}`);
+    if (t === "sources" && cid()) state.data.sources = await api(`/${cid()}/sources` + q({ page: state.page, page_size: 50 }));
+    if (t === "exceptions" && cid()) state.data.exceptions = await api(`/${cid()}/exceptions`);
+    if (t === "provenance" && cid()) state.data.provenance = await api(`/${cid()}/provenance`);
+    if (t === "timeline" && cid()) state.data.timeline = await api(`/${cid()}/timeline` + q({ limit: 200 }));
+    if (t === "validation" && cid()) {
+      try { state.data.validation = await api(`/${cid()}/validation`); }
+      catch (e) { state.data.validation = null; state.notice = "not validated yet"; }
+    }
+    if (t === "result" && cid()) {
+      try { state.data.result = await api(`/${cid()}/result`); }
+      catch (e) { state.data.result = null; state.notice = "not finalized"; }
+    }
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, ok) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = ok; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+// Every button below comes from `allowed_triggers`. This function maps a server-declared trigger
+// onto the endpoint that performs it; it never decides that a trigger is legal.
+const TRIGGER_ROUTES = {
+  complete_collection: ["/complete-collection", "collection closed"],
+  pass_validation: ["/validate", "validated"],
+  fail_validation: ["/validate", "validated"],
+  recollect: ["/recollect", "sent back to collection"],
+  finalize: ["/finalize", "finalized"],
+};
+
+function triggerButtons(run) {
+  const seen = new Set();
+  const out = [];
+  for (const t of run.allowed_triggers || []) {
+    const route = TRIGGER_ROUTES[t];
+    if (!route || seen.has(route[0])) continue;
+    seen.add(route[0]);
+    out.push(el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${run.id}${route[0]}`, { method: "POST", body: JSON.stringify({}) }), route[1]),
+    }, t.replace(/_/g, " ")));
+  }
+  if (run.status === "collecting") {
+    out.push(el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${run.id}/collect`, { method: "POST", body: JSON.stringify({ batch_size: 100 }) }), "batch collected"),
+    }, "collect batch"));
+  }
+  if (run.status === "finalized" && !run.superseded_by) {
+    out.push(el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/${run.id}/correction`, { method: "POST", body: JSON.stringify({ reason: "studio correction" }) }), "correction opened"),
+    }, "open correction"));
+  }
+  if (!out.length) {
+    out.push(el("p", { class: "muted" },
+      "The server returned no permitted transitions. A finalized consolidation has none — it is corrected, never edited."));
+  }
+  return out;
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h => el("th", { class: h.num ? "num" : "" }, h.label || h)))),
+    el("tbody", {}, rows)));
+}
+
+function screenPosture() {
+  const p = state.data.posture;
+  if (!p) return el("p", { class: "muted" }, "no data");
+  document.getElementById("count-pill").textContent = `${p.total_runs} runs`;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Consolidations"),
+      el("div", { class: "row" },
+        el("div", {}, el("div", { class: "big" }, p.total_runs), el("div", { class: "muted" }, "total runs")),
+        el("div", {}, el("div", { class: "big" }, p.scope_definitions), el("div", { class: "muted" }, "scope rules")),
+        el("div", {}, el("div", { class: "big" }, p.open_exceptions), el("div", { class: "muted" }, "open exceptions")),
+        el("div", {}, el("div", { class: "big" }, p.blocking_exceptions), el("div", { class: "muted" }, "blocking")))),
+    el("div", { class: "card" }, el("h2", {}, "By status"),
+      table(["Status", { label: "Runs", num: true }],
+        Object.entries(p.by_status).map(([k, v]) =>
+          el("tr", {}, el("td", {}, pill(k)), el("td", { class: "num" }, v))))),
+    el("div", { class: "card" }, el("h2", {}, "By completeness"),
+      el("p", { class: "muted" },
+        "Four values, and the distinctions are the point. Partial means some members contributed and some did not; unavailable means no member's sources could be read; blocked means a blocking exception stands. None of them is ever a zero."),
+      table(["Completeness", { label: "Runs", num: true }],
+        Object.entries(p.by_completeness).map(([k, v]) =>
+          el("tr", {}, el("td", {}, pill(k)), el("td", { class: "num" }, v))))),
+  ];
+}
+
+function screenScopes() {
+  const rows = (state.data.scopes || []).map(d => el("tr", {},
+    el("td", {}, el("span", { class: "mono" }, d.scope_code), " v", d.version,
+      el("div", { class: "digest" }, short(d.definition_digest))),
+    el("td", {}, pill(d.mode)),
+    el("td", {}, d.hierarchy),
+    el("td", {}, d.anchor_account_id || "—"),
+    el("td", {}, pill(d.currency_mode), " ", d.declared_currency || ""),
+    el("td", {}, d.period_basis),
+    el("td", {}, el("button", {
+      class: "ghost",
+      onclick: () => act(() => api("/scopes/resolve", {
+        method: "POST", body: JSON.stringify({ scope_definition_id: d.id }),
+      }).then(s => { document.getElementById("snap").value = s.id; }), "scope resolved"),
+    }, "resolve"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Scope rules"),
+      el("p", { class: "muted" },
+        "Versioned and immutable. Re-publishing a version with different content is refused by the server — consolidations already bound to it must keep covering the accounts they covered."),
+      table(["Code", "Mode", "Hierarchy", "Anchor", "Currency", "Period basis", ""], rows)),
+    ...(state.data.scopes || []).slice(0, 3).map(d => el("div", { class: "card" },
+      el("h2", {}, `${d.scope_code} v${d.version} — declared semantics`),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Inclusion"), el("dd", {}, d.inclusion_rule),
+        el("dt", {}, "Exclusion"), el("dd", {}, d.exclusion_rule),
+        el("dt", {}, "Hierarchy graph"), el("dd", {}, d.hierarchy),
+        el("dt", {}, "Required domains"), el("dd", {}, (d.required_domains || []).join(", ") || "—"),
+        el("dt", {}, "Integrity blocks finalization"), el("dd", {}, String(d.integrity_blocks_finalization))))),
+  ];
+}
+
+function screenSnapshot() {
+  const s = state.data.snapshot;
+  if (!s) return el("p", { class: "muted" }, "enter a snapshot id above");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Resolved membership"),
+      el("p", { class: "muted" },
+        "Immutable. An account that moves parent tomorrow does not change what this snapshot covered — the membership digest is its identity."),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Snapshot"), el("dd", { class: "mono" }, s.id),
+        el("dt", {}, "Scope rule"), el("dd", { class: "mono" }, `${s.scope_definition_id} v${s.scope_version}`),
+        el("dt", {}, "Mode"), el("dd", {}, pill(s.mode)),
+        el("dt", {}, "Hierarchy walked"), el("dd", {}, s.hierarchy),
+        el("dt", {}, "Members"), el("dd", {}, s.member_count),
+        el("dt", {}, "Currency handling"), el("dd", {}, pill(s.currency_mode), " ", (s.currencies || []).join(", ")),
+        el("dt", {}, "Membership digest"), el("dd", { class: "digest" }, s.membership_digest),
+        el("dt", {}, "Snapshot digest"), el("dd", { class: "digest" }, s.snapshot_digest),
+        el("dt", {}, "Resolved at"), el("dd", {}, when(s.effective_at)))),
+    el("div", { class: "card" }, el("h2", {}, "Excluded accounts"),
+      el("p", { class: "muted" },
+        "Every exclusion carries a reason. A silently dropped account and a deliberately excluded one look identical in a total, so neither is silent here."),
+      (s.excluded || []).length
+        ? table(["Account", "Reason", "Detail"], s.excluded.map(e => el("tr", {},
+            el("td", { class: "mono" }, e.account_id), el("td", {}, pill(e.reason)), el("td", {}, e.detail || "—"))))
+        : el("p", { class: "muted" }, "none")),
+  ];
+}
+
+function screenMembers() {
+  const m = state.data.members;
+  if (!m) return el("p", { class: "muted" }, "enter a snapshot id above");
+  return el("div", { class: "card" }, el("h2", {}, `Members — ${m.total} accounts`),
+    el("p", { class: "muted" },
+      "Paginated at the database. Each row records the account revision at resolution time: the parent and payer edges it had, not the ones it has now."),
+    table(["Account", "Inclusion", "Revision", "Currency", { label: "Depth", num: true }, "Path"],
+      m.members.map(x => el("tr", {},
+        el("td", { class: "mono" }, x.account_id),
+        el("td", {}, pill(x.inclusion)),
+        el("td", { class: "digest" }, x.account_revision),
+        el("td", {}, x.currency || "—"),
+        el("td", { class: "num" }, x.depth),
+        el("td", { class: "digest" }, (x.hierarchy_path || []).join(" → ") || "—")))),
+    el("button", { class: "ghost", onclick: () => { state.page = Math.max(1, state.page - 1); load(); } }, "prev"),
+    el("button", { class: "ghost", onclick: () => { state.page += 1; load(); } }, "next"));
+}
+
+function screenPeriods() {
+  return el("div", { class: "card" }, el("h2", {}, "Consolidation periods"),
+    el("p", { class: "muted" },
+      "The basis is part of the identity. An accounting period is not a tax period is not a recognition period, and a consolidation names which one it consumes rather than assuming they coincide."),
+    table(["Period", "Basis", "Window", "Aligned source"],
+      (state.data.periods || []).map(p => el("tr", {},
+        el("td", { class: "mono" }, p.period_key),
+        el("td", {}, pill(p.basis)),
+        el("td", { class: "digest" }, `${when(p.start)} → ${when(p.end)}`),
+        el("td", { class: "mono" }, p.aligned_source_id || "—")))));
+}
+
+function screenList() {
+  const p = state.data.page;
+  if (!p) return el("p", { class: "muted" }, "no data");
+  return el("div", { class: "card" }, el("h2", {}, `Consolidations — ${p.total}`),
+    table(["Consolidation", "Period", "Status", "Completeness", { label: "Members", num: true }, "Corrects", ""],
+      p.consolidations.map(r => el("tr", {},
+        el("td", { class: "mono" }, short(r.id)),
+        el("td", {}, r.period_key, el("div", { class: "digest" }, r.period_basis)),
+        el("td", {}, pill(r.status)),
+        el("td", {}, pill(r.completeness)),
+        el("td", { class: "num" }, `${r.collected_count}/${r.member_count}`),
+        el("td", { class: "mono" }, short(r.corrects) || "—"),
+        el("td", {}, el("button", {
+          class: "ghost",
+          onclick: () => { document.getElementById("run").value = r.id; state.tab = "run"; load(); },
+        }, "open"))))),
+    el("button", { class: "ghost", onclick: () => { state.page = Math.max(1, state.page - 1); load(); } }, "prev"),
+    el("button", { class: "ghost", onclick: () => { state.page += 1; load(); } }, "next"));
+}
+
+function screenRun() {
+  const r = state.data.run;
+  if (!r) return el("p", { class: "muted" }, "enter a consolidation id above");
+  return [
+    r.superseded_by ? el("div", { class: "alert" },
+      `Superseded by ${r.superseded_by}. This consolidation is retained unchanged — a correction is a new run beside it, never an edit.`) : null,
+    el("div", { class: "card" }, el("h2", {}, "Consolidation"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Id"), el("dd", { class: "mono" }, r.id),
+        el("dt", {}, "Scope snapshot"), el("dd", { class: "mono" }, r.scope_snapshot_id),
+        el("dt", {}, "Scope rule version"), el("dd", {}, r.scope_version),
+        el("dt", {}, "Period"), el("dd", {}, `${r.period_key} (${r.period_basis})`),
+        el("dt", {}, "Status"), el("dd", {}, pill(r.status)),
+        el("dt", {}, "Completeness"), el("dd", {}, pill(r.completeness)),
+        el("dt", {}, "Collected"), el("dd", {}, `${r.collected_count} of ${r.member_count} members`),
+        el("dt", {}, "Sources"), el("dd", {}, `${r.source_count} pinned, ${r.unavailable_source_count} unavailable`),
+        el("dt", {}, "Exceptions"), el("dd", {}, `${r.exception_count} (${r.blocking_exception_count} blocking)`),
+        el("dt", {}, "Currency handling"), el("dd", {}, pill(r.currency_mode), " ", r.declared_currency || ""),
+        el("dt", {}, "Source digest"), el("dd", { class: "digest" }, r.consolidation_digest || "—"),
+        el("dt", {}, "Corrects"), el("dd", { class: "mono" }, r.corrects || "—"),
+        el("dt", {}, "Finalized"), el("dd", {}, when(r.finalized_at)))),
+    el("div", { class: "card" }, el("h2", {}, "Consolidated amounts"),
+      el("p", { class: "muted" },
+        "One aggregate per domain per currency. Never a combined figure across currencies and never a converted one — there is no rate anywhere in this milestone."),
+      (r.amounts || []).length
+        ? table(["Domain", "Currency", { label: "Minor units", num: true }, { label: "Accounts", num: true }, { label: "Records", num: true }],
+            r.amounts.map(a => el("tr", {},
+              el("td", {}, a.domain), el("td", {}, a.currency),
+              el("td", { class: "num mono" }, a.amount_minor),
+              el("td", { class: "num" }, a.contributing_accounts),
+              el("td", { class: "num" }, a.contributing_records))))
+        : el("p", { class: "muted" }, "no monetary source has resolved")),
+    el("div", { class: "card" }, el("h2", {}, "Permitted transitions"),
+      el("p", { class: "muted" },
+        "Served by the API. This page renders exactly what the server permits and derives nothing locally."),
+      ...triggerButtons(r)),
+  ];
+}
+
+function screenSources() {
+  const s = state.data.sources;
+  if (!s) return el("p", { class: "muted" }, "enter a consolidation id above");
+  return el("div", { class: "card" }, el("h2", {}, `Pinned sources — ${s.total}`),
+    el("p", { class: "muted" },
+      "Each row is one source, at the revision it was read. A source that could not be read carries no figure at all — the status and the reason are shown instead of a number, never a zero."),
+    table(["Account", "Domain", "Read", "Status", "Period applied", { label: "Records", num: true }, "Figure"],
+      s.sources.map(b => el("tr", {},
+        el("td", { class: "mono" }, b.account_id),
+        el("td", {}, b.domain, el("div", { class: "digest" }, b.artifact)),
+        el("td", { class: "digest" }, b.read_name),
+        el("td", {}, pill(b.status), el("div", { class: "digest" }, b.completeness)),
+        el("td", {}, b.period_applied ? "yes" : el("span", { class: "muted" }, "no — account-keyed read")),
+        el("td", { class: "num" }, b.record_count),
+        el("td", {}, figure(b))))),
+    el("button", { class: "ghost", onclick: () => { state.page = Math.max(1, state.page - 1); load(); } }, "prev"),
+    el("button", { class: "ghost", onclick: () => { state.page += 1; load(); } }, "next"));
+}
+
+function screenExceptions() {
+  const rows = (state.data.exceptions || []).map(e => el("tr", {},
+    el("td", {}, pill(e.kind)),
+    el("td", {}, pill(e.severity)),
+    el("td", { class: "mono" }, e.subject),
+    el("td", {}, e.diagnostic),
+    el("td", {}, e.state === "acknowledged"
+      ? el("span", {}, pill("acknowledged"), el("div", { class: "digest" }, `${e.acknowledged_by} — ${e.acknowledgement_note || ""}`))
+      : el("button", {
+          class: "ghost",
+          onclick: () => act(() => api(`/exceptions/${e.id}/acknowledge`, {
+            method: "POST", body: JSON.stringify({ note: "seen in Studio" }),
+          }), "acknowledged — still blocking"),
+        }, "acknowledge"))));
+  return el("div", { class: "card" }, el("h2", {}, "Exceptions"),
+    el("p", { class: "muted" },
+      "Named problems, never a generic failure. Acknowledging one records that somebody looked — it does not unblock the consolidation, and `is_blocking` stays true."),
+    rows.length ? table(["Kind", "Severity", "Subject", "Diagnostic", "State"], rows)
+                : el("p", { class: "muted" }, "none"));
+}
+
+function screenValidation() {
+  const v = state.data.validation;
+  if (!v) return el("p", { class: "muted" }, "not validated yet");
+  return el("div", { class: "card" },
+    el("h2", {}, "Validation — ", pill(v.passed ? "ready" : "blocked")),
+    el("p", { class: "muted" },
+      "Every check asks about the consolidation. None compares two financial domains against each other — that is the Reconciliation Engine's question and it stays there."),
+    table(["Check", "Result", "Detail"], v.checks.map(c => el("tr", {},
+      el("td", { class: "mono" }, c.name),
+      el("td", {}, pill(c.passed ? "resolved" : "blocked")),
+      el("td", {}, c.detail || "—")))),
+    el("p", { class: "digest" }, `validated ${when(v.validated_at)} by ${v.validated_by || "—"}`));
+}
+
+function screenResult() {
+  const r = state.data.result;
+  if (!r) return el("p", { class: "muted" }, "this consolidation is not finalized");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Finalized result"),
+      el("p", { class: "muted" },
+        "Content-addressed on pinned state only. The digest and the representation below are byte-identical after every source moves, which is what makes this reconstructable later without relying on application logs."),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Result"), el("dd", { class: "mono" }, r.id),
+        el("dt", {}, "Consolidation digest"), el("dd", { class: "digest" }, r.consolidation_digest),
+        el("dt", {}, "Scope snapshot digest"), el("dd", { class: "digest" }, r.scope_snapshot_digest),
+        el("dt", {}, "Source digest"), el("dd", { class: "digest" }, r.source_digest),
+        el("dt", {}, "Completeness"), el("dd", {}, pill(r.completeness)),
+        el("dt", {}, "Finalized"), el("dd", {}, `${when(r.finalized_at)} by ${r.finalized_by || "—"}`))),
+    el("div", { class: "card" }, el("h2", {}, "Representation"),
+      el("pre", { class: "body" }, r.representation || "—")),
+  ];
+}
+
+function screenProvenance() {
+  const p = state.data.provenance;
+  if (!p) return el("p", { class: "muted" }, "enter a consolidation id above");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Provenance"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Scope snapshot"), el("dd", { class: "mono" }, p.scope_snapshot_id),
+        el("dt", {}, "Scope rule"), el("dd", { class: "mono" }, `${p.scope_definition_id} v${p.scope_version}`),
+        el("dt", {}, "Period"), el("dd", {}, `${p.period_key} (${p.period_basis})`),
+        el("dt", {}, "Hierarchy walked"), el("dd", {}, p.hierarchy),
+        el("dt", {}, "Domains"), el("dd", {}, (p.domains || []).join(", ") || "—"),
+        el("dt", {}, "Corrects"), el("dd", { class: "mono" }, p.corrects || "—"),
+        el("dt", {}, "Superseded by"), el("dd", { class: "mono" }, p.superseded_by || "—"))),
+    el("div", { class: "card" }, el("h2", {}, "Which accounts contributed"),
+      table(["Account", "Inclusion", { label: "Resolved", num: true }, { label: "Empty", num: true }, { label: "Unavailable", num: true }, { label: "Records", num: true }, "Contributed"],
+        (p.contributions || []).map(c => el("tr", {},
+          el("td", { class: "mono" }, c.account_id),
+          el("td", {}, pill(c.inclusion)),
+          el("td", { class: "num" }, c.resolved_sources),
+          el("td", { class: "num" }, c.empty_sources),
+          el("td", { class: "num" }, c.unavailable_sources),
+          el("td", { class: "num" }, c.record_count),
+          el("td", {}, pill(c.contributed ? "resolved" : "unavailable")))))),
+    el("div", { class: "card" }, el("h2", {}, "Which accounts did not, and why"),
+      (p.excluded || []).length
+        ? table(["Account", "Reason", "Detail"], p.excluded.map(e => el("tr", {},
+            el("td", { class: "mono" }, e.account_id), el("td", {}, pill(e.reason)), el("td", {}, e.detail || "—"))))
+        : el("p", { class: "muted" }, "none excluded")),
+  ];
+}
+
+function screenTimeline() {
+  const t = state.data.timeline;
+  if (!t) return el("p", { class: "muted" }, "enter a consolidation id above");
+  return el("div", { class: "card" }, el("h2", {}, "Trail"),
+    el("p", { class: "muted" },
+      "The authority on what happened. The status shown elsewhere is a projection over these entries, not the other way round."),
+    el("div", { class: "steps" }, t.map(e => el("div", { class: "st" },
+      el("strong", {}, e.kind.replace(/_/g, " ")), " ",
+      el("span", { class: "muted" }, e.detail || ""),
+      el("div", { class: "digest" }, `#${e.sequence} · ${when(e.occurred_at)} · ${e.actor || "system"} · ${e.subject}`)))));
+}
+
+const SCREENS = {
+  posture: screenPosture, scopes: screenScopes, snapshot: screenSnapshot, members: screenMembers,
+  periods: screenPeriods, list: screenList, run: screenRun, sources: screenSources,
+  exceptions: screenExceptions, validation: screenValidation, result: screenResult,
+  provenance: screenProvenance, timeline: screenTimeline,
+};
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) => el("button", {
+    class: state.tab === id ? "active" : "",
+    onclick: () => { state.tab = id; state.page = 1; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("p", { class: "ok" }, state.notice));
+  const screen = SCREENS[state.tab];
+  const out = screen ? screen() : null;
+  if (Array.isArray(out)) parts.push(...out.filter(Boolean));
+  else if (out) parts.push(out);
+  view.replaceChildren(...parts);
+}
+
+for (const id of ["run", "snap", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

@@ -24,14 +24,14 @@ dev = [
 # named `platform` per Constitution §A14, but it is the project root, *not* a
 # Python package — that avoids shadowing the stdlib `platform` module.
 # Package set follows the Constitution §A14 layer map (M1 reshape):
-#   core · api · runtime · providers · events · observability
+#   core · api · runtime · providers · events · observability · billing (Epic 9)
 # (`tests` and the `voicebot` prototype are not installed packages.)
 [tool.setuptools]
 py-modules = ["bootstrap"]  # composition root (wires runtime into the Control Plane)
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "api*", "runtime*", "providers*", "events*", "observability*"]
+include = ["core*", "api*", "runtime*", "providers*", "events*", "observability*", "billing*"]
 exclude = ["tests*", "voicebot*"]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Regulatory Reports</title>
+<!--
+  Compliance &amp; Regulatory Reporting Studio (M9.22).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no reporting rule, and knows nothing
+  the API does not tell it &mdash; every screen renders a response from /v1/billing/reports/*, and
+  every action dispatches to it.
+
+  It calculates nothing. Not a total, not a tax, not a balance, not a rate, not a conversion. Every
+  figure on this page arrived as integer minor units plus a currency from the domain that decided
+  it, and is rendered exactly as received. A client that summed two report fields would be a second
+  opinion about a number the Ledger owns.
+
+  It converts no currency. Where the server says a field is UNSUPPORTED because its sources span
+  currencies, this page shows that word and the reason. It does not divide, multiply or apply a
+  rate, and there is no FX table in this file.
+
+  It never renders a missing figure as zero. `amount_minor` comes back null when a source could not
+  be read, and this page shows the status and the reason instead of a number. That distinction is
+  the whole milestone: a regulator cannot tell a zero that means nothing happened from one that
+  means we could not look.
+
+  It reconciles nothing (M9.19), correlates nothing (M9.20) and investigates nothing (M9.21). Where
+  it shows an integrity posture, that verdict arrived on the report.
+
+  It decides no report state. `allowed_triggers` drives every button; a finalized report shows none
+  because the server returns an empty list. There is no client-side "looks ready to me".
+
+  It submits nothing to a regulator. The submission-package screen shows a bundle that was
+  prepared; `submitted_at` is always empty, because M9.22 transmits nothing.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; margin:.2rem .3rem 0 0; }
+  button.act[disabled] { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.finalized, .pill.ready, .pill.complete, .pill.evidence_complete, .pill.resolved,
+  .pill.present, .pill.no_finding, .pill.closed, .pill.acknowledged { color:var(--ok); border-color:var(--ok); }
+  .pill.validating, .pill.preparing, .pill.incomplete, .pill.empty, .pill.advisory,
+  .pill.open_finding, .pill.not_applicable { color:var(--warn); border-color:var(--warn); }
+  .pill.blocked, .pill.exceptions_raised, .pill.unavailable, .pill.evidence_incomplete,
+  .pill.source_unavailable, .pill.unsupported, .pill.blocking, .pill.open_incident,
+  .pill.indeterminate { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.not_required, .pill.superseded { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:250px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+  .gap { border-left:3px solid var(--bad); padding-left:.7rem; margin:.5rem 0; font-size:13px; }
+  pre.body { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.6rem;
+             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+             max-height:24rem; overflow:auto; margin:.3rem 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Regulatory Reports</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="report" placeholder="report id" style="width:180px" />
+  <input id="token" placeholder="Bearer token" style="width:130px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/reports";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, "");
+    else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "posture", data: {}, error: "", notice: "", offset: 0 };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["posture", "Posture"], ["definitions", "Definitions"], ["periods", "Periods"],
+  ["list", "Reports"], ["report", "Report"], ["sources", "Source manifest"],
+  ["evidence", "Evidence"], ["validation", "Validation"], ["exceptions", "Exceptions"],
+  ["snapshot", "Filed snapshot"], ["provenance", "Provenance"], ["package", "Submission package"],
+];
+
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "—"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function rid() { return val("report"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+// A figure, exactly as the server sent it. `amount_minor` is null when the source could not be
+// read, and this renders the status rather than a number — never a zero. Nothing here divides by
+// a currency scale or formats a locale amount, because the minor unit is what the owning
+// domain wrote and rescaling it would be this page forming an opinion about money.
+function figure(v) {
+  if (v.amount_minor === null || v.amount_minor === undefined) {
+    return el("span", {}, pill(v.status), " ",
+      el("span", { class: "muted", style: "font-size:12px" }, v.detail || "no value"));
+  }
+  return el("span", { class: "mono" }, `${v.amount_minor} ${v.currency || ""} (minor units)`);
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "posture") state.data.posture = await api("/posture");
+    if (t === "definitions") state.data.definitions = await api("/definitions");
+    if (t === "periods") state.data.periods = await api("/periods");
+    if (t === "list") state.data.page = await api("" + q({ limit: 25, offset: state.offset }));
+    if (t === "report" && rid()) state.data.report = await api(`/${rid()}`);
+    if (t === "sources" && rid()) state.data.sources = await api(`/${rid()}/sources` + q({ limit: 100 }));
+    if (t === "evidence" && rid()) state.data.evidence = await api(`/${rid()}/evidence`);
+    if (t === "exceptions" && rid()) state.data.exceptions = await api(`/${rid()}/exceptions`);
+    if (t === "validation" && rid()) {
+      try { state.data.validation = await api(`/${rid()}/validation`); }
+      catch (e) { state.data.validation = null; if (!/^404/.test(e.message)) throw e; }
+    }
+    if (t === "snapshot" && rid()) {
+      try { state.data.snapshot = await api(`/${rid()}/snapshot`); }
+      catch (e) { state.data.snapshot = null; if (!/^404/.test(e.message)) throw e; }
+    }
+    if (t === "provenance" && rid()) state.data.provenance = await api(`/${rid()}/provenance`);
+    if (t === "package" && rid()) {
+      try { state.data.package = await api(`/${rid()}/submission-package`); }
+      catch (e) { state.data.package = null; if (!/^404/.test(e.message)) throw e; }
+    }
+    const p = state.data.posture;
+    document.getElementById("count-pill").textContent =
+      p ? `${p.total} report(s) · ${p.blocked} blocked` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // Blocked and complete are different news. Reporting both as "prepared" would let a compliance
+    // officer believe a filing with an unreadable source was ready.
+    if (r && r.completeness !== undefined && r.status !== undefined) {
+      state.notice = r.completeness === "blocked"
+        ? `${r.status} — BLOCKED: ${r.blocking_exception_count} blocking exception(s); a required source could not be read`
+        : `${r.status} — ${r.completeness}, ${r.evidence_completeness}`;
+      if (r.id) document.getElementById("report").value = r.id;
+    } else if (r && r.passed !== undefined) {
+      state.notice = r.passed
+        ? "validation passed"
+        : `validation FAILED — ${r.checks.filter(c => !c.passed).map(c => c.name).join(", ")}`;
+    } else if (r && r.package_digest !== undefined) {
+      state.notice = `submission package prepared (digest ${short(r.package_digest)}) — nothing was sent`;
+    } else if (r && r.blocks_finalization !== undefined) {
+      state.notice = "acknowledged — this does not unblock the filing";
+    } else if (r && r.period_key !== undefined) {
+      state.notice = `period ${r.period_key} is ${r.state}`;
+    } else {
+      state.notice = "done";
+    }
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h =>
+      el("th", { class: /#$/.test(h) ? "num" : "" }, h)))),
+    el("tbody", {}, rows)));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+// ── screens ───────────────────────────────────────────────────────────────────
+
+function screenPosture() {
+  const p = state.data.posture;
+  if (!p) return el("p", { class: "muted" }, "no posture loaded");
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Filings"),
+      el("div", { class: "row" },
+        el("div", {}, el("div", { class: "big" }, p.total), el("div", { class: "muted" }, "total")),
+        el("div", {}, el("div", { class: "big" }, p.finalized), el("div", { class: "muted" }, "finalized")),
+        el("div", {}, el("div", { class: "big" }, p.blocked), el("div", { class: "muted" }, "blocked")),
+        el("div", {}, el("div", { class: "big" }, p.blocking_exceptions), el("div", { class: "muted" }, "blocking exceptions")),
+      ),
+      el("p", { class: "muted", style: "margin-top:.8rem;font-size:12px" },
+        "Counts only. There is no monetary figure on this screen — a report's figures live on the "
+        + "report, where the domains that decided them put them."),
+    ),
+    el("div", { class: "card" }, el("h2", {}, "By status"),
+      table(["status", "count #"], Object.entries(p.by_status).sort().map(([s, n]) =>
+        el("tr", {}, el("td", {}, pill(s)), el("td", { class: "num" }, n))))),
+    el("div", { class: "card" }, el("h2", {}, "By completeness"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "BLOCKED means a required source could not be read or a mandatory field has no value. It "
+        + "is never filed as zero."),
+      table(["completeness", "count #"], Object.entries(p.by_completeness).sort().map(([s, n]) =>
+        el("tr", {}, el("td", {}, pill(s)), el("td", { class: "num" }, n))))),
+  ];
+}
+
+function screenDefinitions() {
+  const ds = state.data.definitions;
+  if (!ds) return el("p", { class: "muted" }, "no definitions loaded");
+  return el("div", { class: "card" },
+    el("h2", {}, "Reporting definitions"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "A definition is versioned and immutable. A rule that changes gets a new version; it never "
+      + "reinterprets a filing somebody already made. `digest` is what lets a re-publication be "
+      + "proven identical rather than assumed."),
+    table(["code", "v", "jurisdiction", "period basis", "currency basis", "required sources",
+           "fields #", "digest"],
+      ds.map(d => el("tr", {},
+        el("td", { class: "mono" }, d.report_code),
+        el("td", { class: "num" }, d.version),
+        el("td", {}, d.jurisdiction || "—"),
+        el("td", {}, pill(d.period_basis)),
+        el("td", {}, pill(d.currency_basis) , " ", d.declared_currency || ""),
+        el("td", {}, (d.required_sources || []).join(", ") || "—"),
+        el("td", { class: "num" }, (d.fields || []).length),
+        el("td", { class: "digest" }, short(d.definition_digest))))));
+}
+
+function screenPeriods() {
+  const ps = state.data.periods;
+  const form = el("div", { class: "card" },
+    el("h2", {}, "Open a reporting period"),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "The basis is part of the identity. A calendar month is not an accounting period is not a "
+      + "tax period — Billing owns four of these, and filing one as another is wrong in a way "
+      + "nobody notices until an audit."),
+    el("div", { class: "row" },
+      el("div", {}, el("label", {}, "basis"),
+        el("select", { id: "p-basis" }, ["calendar_month", "calendar_quarter", "calendar_year",
+          "accounting_period", "recognition_period", "tax_period"]
+          .map(b => el("option", { value: b }, b)))),
+      el("div", {}, el("label", {}, "period key"), el("input", { id: "p-key", placeholder: "2026-03" })),
+      el("div", {}, el("label", {}, "start (epoch s)"), el("input", { id: "p-start", value: "0" })),
+      el("div", {}, el("label", {}, "end (epoch s)"), el("input", { id: "p-end", value: "4000000000" })),
+    ),
+    el("p", {}, el("button", { class: "act",
+      onclick: () => act(() => api("/periods", { method: "POST", body: JSON.stringify({
+        basis: val("p-basis"), period_key: val("p-key"),
+        start: Number(val("p-start")), end: Number(val("p-end")) }) })) }, "Open period")));
+  if (!ps) return [form];
+  return [form, el("div", { class: "card" }, el("h2", {}, "Reporting periods"),
+    table(["basis", "key", "state", "window", "closed"],
+      ps.map(p => el("tr", {},
+        el("td", {}, pill(p.basis)),
+        el("td", { class: "mono" }, p.period_key),
+        el("td", {}, pill(p.state)),
+        el("td", { class: "muted" }, `${when(p.start)} → ${when(p.end)}`),
+        el("td", {}, p.closed_at ? when(p.closed_at) : el("button", { class: "ghost",
+          onclick: () => act(() => api(`/periods/${p.id}/close`, { method: "POST" })) }, "close"))))))];
+}
+
+function screenList() {
+  const page = state.data.page;
+  if (!page) return el("p", { class: "muted" }, "no reports loaded");
+  return el("div", { class: "card" },
+    el("h2", {}, `Reports (${page.total})`),
+    table(["id", "code", "v", "period", "scope", "status", "completeness", "evidence",
+           "integrity", "exceptions #"],
+      page.reports.map(r => el("tr", {},
+        el("td", {}, el("button", { class: "ghost",
+          onclick: () => { document.getElementById("report").value = r.id; state.tab = "report"; load(); } },
+          short(r.id))),
+        el("td", { class: "mono" }, r.report_code),
+        el("td", { class: "num" }, r.definition_version),
+        el("td", { class: "mono" }, short(r.period_id)),
+        el("td", {}, pill(r.scope)),
+        el("td", {}, pill(r.status)),
+        el("td", {}, pill(r.completeness)),
+        el("td", {}, pill(r.evidence_completeness)),
+        el("td", {}, pill(r.integrity_posture)),
+        el("td", { class: "num" }, r.exception_count)))),
+    el("p", { style: "margin-top:.7rem" },
+      el("button", { class: "ghost", onclick: () => { state.offset = Math.max(0, state.offset - 25); load(); } }, "← previous"), " ",
+      el("button", { class: "ghost", onclick: () => { if (page.has_more) { state.offset += 25; load(); } } }, "next →"), " ",
+      el("span", { class: "muted" }, `offset ${page.offset} of ${page.total}`)));
+}
+
+function screenReport() {
+  const r = state.data.report;
+  if (!r) return el("p", { class: "muted" }, "enter a report id above");
+  const allowed = r.allowed_triggers || [];
+  const btn = (trigger, label, path) => el("button", { class: "act",
+    disabled: !allowed.includes(trigger),
+    onclick: () => act(() => api(`/${r.id}/${path}`, { method: "POST" })) }, label);
+  return [
+    r.completeness === "blocked" ? el("div", { class: "alert" },
+      "This report is BLOCKED. A required source could not be read, or a mandatory field has no "
+      + "value. It cannot be finalized, and the missing figures are not zero — see Exceptions.") : null,
+    el("div", { class: "card" }, el("h2", {}, "Report"),
+      kv([
+        ["id", el("span", { class: "mono" }, r.id)],
+        ["definition", `${r.report_code} v${r.definition_version}`],
+        ["period", el("span", { class: "mono" }, r.period_id)],
+        ["scope", el("span", {}, pill(r.scope), " ", r.account_id || "(organization-wide)")],
+        ["status", pill(r.status)],
+        ["completeness", pill(r.completeness)],
+        ["evidence", pill(r.evidence_completeness)],
+        ["integrity (M9.19/M9.20 own this)", pill(r.integrity_posture)],
+        ["input manifest", el("span", { class: "digest" }, r.manifest_digest)],
+        ["report digest", el("span", { class: "digest" }, r.report_digest || "—")],
+        ["exceptions", `${r.exception_count} (${r.blocking_exception_count} blocking)`],
+        ["corrects", r.corrects ? el("span", { class: "mono" }, r.corrects) : "—"],
+        ["corrected by", r.corrected_by ? el("span", { class: "mono" }, r.corrected_by) : "—"],
+        ["finalized", r.finalized_at ? `${when(r.finalized_at)} by ${r.finalized_by}` : "—"],
+      ])),
+    el("div", { class: "card" }, el("h2", {}, "Values"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Each field names the transformation that produced it and the sources it came from. A "
+        + "field whose source was unreadable shows its status and reason — never a zero."),
+      table(["field", "status", "transformation", "value", "sources"],
+        (r.values || []).map(v => el("tr", {},
+          el("td", { class: "mono" }, v.key),
+          el("td", {}, pill(v.status)),
+          el("td", {}, v.transformation),
+          el("td", {}, v.amount_minor !== null && v.amount_minor !== undefined ? figure(v)
+            : v.number !== null && v.number !== undefined ? el("span", { class: "mono" }, v.number)
+            : v.text ? el("span", {}, v.text) : figure(v)),
+          el("td", { class: "digest" }, (v.source_locators || []).join(" ") || "—"))))),
+    el("div", { class: "card" }, el("h2", {}, "Actions"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Every button is enabled by the server's own allowed_triggers. A finalized report shows "
+        + "none, because the lifecycle has no edge out of it — this page decides nothing."),
+      btn("prepare", "Prepare", "prepare"),
+      btn("pass_validation", "Validate", "validate"),
+      btn("finalize", "Finalize", "finalize"),
+      el("button", { class: "act", disabled: r.status !== "finalized",
+        onclick: () => act(() => api(`/${r.id}/correction`, { method: "POST",
+          body: JSON.stringify({ reason: "correction" }) })) }, "File correction"),
+      el("button", { class: "act", disabled: r.status !== "finalized",
+        onclick: () => act(() => api(`/${r.id}/submission-package`, { method: "POST" })) },
+        "Prepare submission package"),
+      allowed.length ? null : el("p", { class: "muted", style: "margin-top:.6rem;font-size:12px" },
+        "No transition is available — this filing is final. A correction opens a new report "
+        + "beside it; it is never edited.")),
+  ];
+}
+
+function screenSources() {
+  const page = state.data.sources;
+  if (!page) return el("p", { class: "muted" }, "enter a report id above");
+  return el("div", { class: "card" },
+    el("h2", {}, `Pinned input manifest (${page.total})`),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Provenance, not content. Each row names a source, the revision it was read at and its "
+      + "digest — so an examiner can tell whether it has moved since the filing."),
+    table(["locator", "status", "revision", "digest", "facts #", "reason"],
+      page.sources.map(s => el("tr", {},
+        el("td", { class: "mono" }, s.locator),
+        el("td", {}, pill(s.status)),
+        el("td", { class: "digest" }, s.revision || "—"),
+        el("td", { class: "digest" }, short(s.digest)),
+        el("td", { class: "num" }, s.fact_count),
+        el("td", { class: "muted" }, s.unavailable_reason || "—")))));
+}
+
+function screenEvidence() {
+  const es = state.data.evidence;
+  if (!es) return el("p", { class: "muted" }, "enter a report id above");
+  const missing = es.filter(s => s.status === "unavailable");
+  return [
+    missing.length ? el("div", { class: "alert" },
+      `${missing.length} source(s) could not be read. They are listed below rather than omitted — `
+      + "a manifest that dropped what it could not fetch would present as complete.") : null,
+    el("div", { class: "card" }, el("h2", {}, "Evidence manifest"),
+      missing.map(s => el("div", { class: "gap" },
+        el("div", { class: "mono" }, s.locator),
+        el("div", {}, pill(s.status), " ", s.unavailable_reason))),
+      table(["locator", "domain", "status", "digest", "resolved", "facts #"],
+        es.map(s => el("tr", {},
+          el("td", { class: "mono" }, s.locator),
+          el("td", {}, s.domain),
+          el("td", {}, pill(s.status)),
+          el("td", { class: "digest" }, short(s.digest)),
+          el("td", {}, when(s.resolved_at)),
+          el("td", { class: "num" }, s.fact_count))))),
+  ];
+}
+
+function screenValidation() {
+  const v = state.data.validation;
+  if (!v) return el("p", { class: "muted" }, "this report has not been validated");
+  return el("div", { class: "card" },
+    el("h2", {}, `Validation — ${v.passed ? "passed" : "FAILED"}`),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Validation is not reconciliation. Every check asks about the report; none compares two "
+      + "financial domains against each other — that is M9.19's question."),
+    table(["check", "result", "subject", "detail"],
+      v.checks.map(c => el("tr", {},
+        el("td", { class: "mono" }, c.name),
+        el("td", {}, c.passed ? pill("complete") : pill("blocked")),
+        el("td", { class: "mono" }, c.subject || "—"),
+        el("td", { class: "muted" }, c.detail || "—")))));
+}
+
+function screenExceptions() {
+  const page = state.data.exceptions;
+  if (!page) return el("p", { class: "muted" }, "enter a report id above");
+  return el("div", { class: "card" },
+    el("h2", {}, `Exceptions (${page.total})`),
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Each names what an operator must go and do — there is no generic “report failed”. "
+      + "Acknowledging records that somebody saw the problem; it does not unblock the filing."),
+    table(["kind", "severity", "subject", "state", "blocks", "diagnostic", ""],
+      page.exceptions.map(e => el("tr", {},
+        el("td", { class: "mono" }, e.kind),
+        el("td", {}, pill(e.severity)),
+        el("td", { class: "mono" }, e.subject),
+        el("td", {}, pill(e.state)),
+        el("td", {}, e.blocks_finalization ? pill("blocked") : "—"),
+        el("td", { class: "muted" }, e.diagnostic),
+        el("td", {}, e.state === "open" ? el("button", { class: "ghost",
+          onclick: () => act(() => api(`/${rid()}/exceptions/acknowledge`, { method: "POST",
+            body: JSON.stringify({ exception_id: e.id, reason: prompt("why acknowledge?") || "" }) })) },
+          "acknowledge") : "—")))));
+}
+
+function screenSnapshot() {
+  const s = state.data.snapshot;
+  if (!s) return el("p", { class: "muted" }, "this report has not been finalized");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Filed snapshot"),
+      kv([
+        ["report digest", el("span", { class: "digest" }, s.report_digest)],
+        ["definition version", s.definition_version],
+        ["input manifest", el("span", { class: "digest" }, s.manifest_digest)],
+        ["completeness", pill(s.completeness)],
+        ["evidence", pill(s.evidence_completeness)],
+        ["validation", s.validation_passed ? pill("complete") : pill("blocked")],
+        ["finalized", `${when(s.finalized_at)} by ${s.finalized_by}`],
+      ]),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The digest is recomputable from the representation below, which is what makes this filing "
+        + "defensible rather than merely archived. Everything in it is pinned state — a source "
+        + "moving next week changes nothing about what this says.")),
+    el("div", { class: "card" }, el("h2", {}, "Representation"),
+      el("pre", { class: "body" }, JSON.stringify(s.representation, null, 2))),
+  ];
+}
+
+function screenProvenance() {
+  const p = state.data.provenance;
+  if (!p) return el("p", { class: "muted" }, "enter a report id above");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Provenance"),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+        "Assembled from stored rows alone — the pinned manifest, the version the run recorded and "
+        + "the snapshot. It reads no current source and depends on no application log."),
+      kv([
+        ["definition", `${p.report_code} v${p.definition_version}`],
+        ["period", `${p.period_key} (${p.period_basis})`],
+        ["input manifest", el("span", { class: "digest" }, p.manifest_digest)],
+        ["report digest", el("span", { class: "digest" }, p.report_digest || "—")],
+        ["validation", p.validation_passed ? pill("complete") : pill("blocked")],
+        ["finalized", p.finalized_at ? `${when(p.finalized_at)} by ${p.finalized_by}` : "—"],
+        ["corrects", p.corrects || "—"],
+        ["corrected by", p.corrected_by || "—"],
+        ["exceptions", (p.exception_kinds || []).join(", ") || "none"],
+      ])),
+    (p.unavailable_sources || []).length ? el("div", { class: "card" },
+      el("h2", {}, "Unavailable at filing time"),
+      (p.unavailable_sources).map(s => el("div", { class: "gap" }, el("span", { class: "mono" }, s)))) : null,
+    el("div", { class: "card" }, el("h2", {}, "Where each field came from"),
+      table(["field", "domain", "source type", "transformation", "status", "sources"],
+        (p.traces || []).map(t => el("tr", {},
+          el("td", { class: "mono" }, t.field_key),
+          el("td", {}, t.domain),
+          el("td", {}, t.source_type),
+          el("td", {}, t.transformation),
+          el("td", {}, pill(t.status)),
+          el("td", { class: "digest" }, (t.locators || []).join(" ") || "—"))))),
+  ];
+}
+
+function screenPackage() {
+  const p = state.data.package;
+  if (!p) return el("p", { class: "muted" }, "no submission package has been prepared");
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Submission package"),
+      kv([
+        ["package digest", el("span", { class: "digest" }, p.package_digest)],
+        ["report digest", el("span", { class: "digest" }, p.report_digest)],
+        ["completeness", pill(p.completeness)],
+        ["validation", p.validation_passed ? pill("complete") : pill("blocked")],
+        ["prepared", `${when(p.prepared_at)} by ${p.prepared_by}`],
+        ["submitted", p.submitted_at ? when(p.submitted_at) : "never — this platform sends nothing"],
+      ]),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The package is prepared for an external submission that this milestone does not perform. "
+        + "There is no network client, no regulator endpoint and no secret anywhere in it.")),
+    el("div", { class: "card" }, el("h2", {}, "Artifact"),
+      el("pre", { class: "body", style: "max-height:32rem" }, JSON.stringify(p.artifact, null, 2))),
+  ];
+}
+
+const SCREENS = {
+  posture: screenPosture, definitions: screenDefinitions, periods: screenPeriods,
+  list: screenList, report: screenReport, sources: screenSources, evidence: screenEvidence,
+  validation: screenValidation, exceptions: screenExceptions, snapshot: screenSnapshot,
+  provenance: screenProvenance, package: screenPackage,
+};
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) => el("button", {
+    class: state.tab === id ? "active" : "",
+    onclick: () => { state.tab = id; state.offset = 0; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("p", { class: "ok" }, state.notice));
+  const screen = SCREENS[state.tab];
+  const out = screen ? screen() : null;
+  if (Array.isArray(out)) parts.push(...out.filter(Boolean));
+  else if (out) parts.push(out);
+  view.replaceChildren(...parts);
+}
+
+for (const id of ["report", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

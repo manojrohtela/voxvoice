@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Payments</title>
+<!--
+  Payment Studio (M9.16).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no payment rule, and knows nothing
+  the API does not tell it — every screen renders a response from /v1/billing/collections/*, and
+  every action dispatches to it.
+
+  It names no provider. There is no vendor string anywhere in this file: the provider shown on an
+  attempt is the one the server routed to, and the routing reason beside it is the server's. A
+  client that knew a provider name would be a client with an opinion about where money goes.
+
+  It computes no money. Not a total, not a balance, not what is still refundable, not what is
+  outstanding. Every figure is the server's — a client that subtracted refunds from captures would
+  eventually disagree with the ledger, and the ledger is the one that is right.
+
+  It never calls a provider, and it cannot: there is no provider endpoint in this file. Money moves
+  only through POST /collections/intents/{id}/attempts, inside the server's three-phase boundary.
+
+  It respects the server's allowed transitions. Buttons come from `allowed_triggers` on the
+  response; the client decides nothing about what is legal, which is why a settled attempt shows no
+  retry button and an ambiguous one shows reconcile rather than retry.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.paid, .pill.succeeded, .pill.applied, .pill.matched, .pill.refunded, .pill.resolved,
+  .pill.completed { color:var(--ok); border-color:var(--ok); }
+  .pill.pending, .pill.requires_action, .pill.authorized, .pill.partially_paid, .pill.sending,
+  .pill.stale, .pill.duplicate, .pill.acknowledged { color:var(--warn); border-color:var(--warn); }
+  .pill.failed, .pill.cancelled, .pill.expired, .pill.ambiguous, .pill.conflicting,
+  .pill.unverified, .pill.uncorrelated, .pill.open { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.abandoned, .pill.unsupported { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .warn { color:var(--warn); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Payments</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:140px" />
+  <input id="intent" placeholder="intent id" style="width:150px" />
+  <input id="attempt" placeholder="attempt id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:140px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/collections";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "intents", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["intents", "Collections"], ["collect", "Collect"], ["intent", "Objective"],
+  ["attempts", "Attempts"], ["explain", "Why?"], ["operations", "Operations"],
+  ["events", "Provider events"], ["refunds", "Refunds"], ["divergences", "Divergences"],
+  ["routes", "Routes"], ["activity", "Audit trail"],
+];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+function amount(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "—"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function iid() { return val("intent"); }
+function aid() { return val("attempt"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "intents") state.data.intents = await api("/intents" + q({ account_id: acct() }));
+    if (t === "intent" && iid()) {
+      state.data.intent = await api(`/intents/${iid()}`);
+      state.data.position = await api(`/intents/${iid()}/position`);
+      state.data.inspection = await api(`/intents/${iid()}/inspect`);
+      state.data.diagnostics = await api(`/intents/${iid()}/diagnostics`);
+    }
+    if (t === "attempts" && iid()) state.data.attempts = await api(`/intents/${iid()}/attempts`);
+    if (t === "explain" && iid()) state.data.explanation = await api(`/intents/${iid()}/explain`);
+    if (t === "operations") {
+      state.data.operations = iid()
+        ? await api(`/intents/${iid()}/operations`)
+        : await api("/intents/operations");
+    }
+    if (t === "events") {
+      state.data.events = aid()
+        ? await api(`/attempts/${aid()}/events`)
+        : await api("/events");
+    }
+    if (t === "refunds" && iid()) {
+      state.data.refunds = await api(`/intents/${iid()}/refunds`);
+      if (aid()) state.data.refundable = await api(`/attempts/${aid()}/refundable`);
+    }
+    if (t === "divergences") state.data.divergences = await api("/intents/divergences" + q({ open_only: false }));
+    if (t === "routes") state.data.routes = await api("/routes" + q({ include_retired: true }));
+    if (t === "activity") state.data.activity = iid()
+      ? await api(`/intents/${iid()}/timeline`) : [];
+    const all = state.data.intents || [];
+    document.getElementById("count-pill").textContent = all.length ? `${all.length} objective(s)` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // The server's receipt says what actually happened. `succeeded` is one of eight answers, and
+    // a client that reported them all as success would call a timeout a collection.
+    state.notice = r && r.outcome ? `outcome: ${r.outcome}` : "done";
+    if (r && r.requires_reconciliation) {
+      state.notice += " — the provider never answered; reconcile before attempting again";
+    }
+    if (r && r.attempt_id) document.getElementById("attempt").value = r.attempt_id;
+    if (r && r.intent_id) document.getElementById("intent").value = r.intent_id;
+    else if (r && r.id && r.account_id !== undefined && r.state !== undefined && !r.attempt_id) {
+      document.getElementById("intent").value = r.id;
+    }
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...headers.map(h =>
+      el("th", { class: String(h).startsWith("#") ? "num" : "" }, String(h).replace(/^#/, ""))))),
+    el("tbody", {}, rows.length ? rows
+      : el("tr", {}, el("td", { colspan: headers.length, class: "muted" }, "nothing yet")))));
+}
+function field(id, label, value, placeholder) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("input", { id, value: value || "", placeholder: placeholder || "" }));
+}
+function select(id, label, options, value) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("select", { id }, ...options.map(o =>
+      el("option", { value: o, ...(o === value ? { selected: "selected" } : {}) }, o || "(any)"))));
+}
+
+// ── 1. Collections ─────────────────────────────────────────────────────────────
+function intentsScreen() {
+  const rows = (state.data.intents || []).map(i =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(i.id))),
+      el("td", {}, pill(i.state)),
+      el("td", { class: "num" }, amount(i.amount)),
+      el("td", {}, i.purpose || "—"),
+      el("td", {}, el("code", {}, short(i.subject_id))),
+      el("td", {}, i.route ? i.route.provider_code || "—" : "—"),
+      el("td", { class: "num" }, i.attempts_opened),
+      el("td", {}, when(i.created_at)),
+      el("td", {}, el("button", {
+        class: "ghost",
+        onclick: () => { document.getElementById("intent").value = i.id; state.tab = "intent"; load(); },
+      }, "open"))));
+  return [el("div", { class: "card" }, el("h2", {}, "Collection objectives"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "An objective is what Billing wants to collect. It is not a payment: the attempts that " +
+      "moved money against it are separate, append-only facts, and every one of them survives a " +
+      "retry."),
+    table(["Intent", "State", "#Amount", "Purpose", "Subject", "Provider", "#Attempts", "Created", ""], rows))];
+}
+
+// ── 2. Collect ─────────────────────────────────────────────────────────────────
+function collectScreen() {
+  return [el("div", { class: "card" }, el("h2", {}, "Open a collection objective"),
+    el("p", { class: "muted", style: "font-size:12px" },
+      "The amount is what the issued document says is payable — this screen sends it, it does " +
+      "not work it out. The request key makes the objective idempotent: the same key twice is one " +
+      "objective, because a retried checkout must not become two collections."),
+    el("div", { class: "row" },
+      field("f-account", "account id", acct()),
+      field("f-subject", "document id (optional)"),
+      select("f-subject-kind", "subject", ["invoice", "debit_note", "account", "none"], "invoice"),
+      select("f-purpose", "purpose", ["invoice", "deposit", "verification"], "invoice"),
+      field("f-minor", "amount (minor units)", "0"),
+      select("f-currency", "currency", ["INR", "USD", "EUR", "GBP", "AED", "SGD"], "INR"),
+      select("f-method", "method",
+        ["card", "bank_debit", "upi", "netbanking", "wallet", "offline_transfer", "credit_balance"], "card"),
+      field("f-country", "payer country"),
+      field("f-key", "request key")),
+    el("p", {}, el("button", {
+      class: "act",
+      onclick: () => act(() => api("/intents", {
+        method: "POST",
+        body: JSON.stringify({
+          account_id: val("f-account"), subject_id: val("f-subject"),
+          subject_kind: val("f-subject-kind"), purpose: val("f-purpose"),
+          amount_minor: Number(val("f-minor")), currency: val("f-currency"),
+          method: val("f-method"), country: val("f-country"), request_key: val("f-key"),
+        }),
+      })),
+    }, "Open objective")),
+    el("hr", { style: "border:0;border-top:1px solid var(--line);margin:1rem 0" }),
+    el("h2", {}, "Move money"),
+    el("p", { class: "muted", style: "font-size:12px" },
+      "The token is a provider reference. Instrument data never reaches this page and there is " +
+      "no field it could be typed into."),
+    el("div", { class: "row" },
+      field("f-token", "instrument token (provider reference)"),
+      field("f-customer", "provider customer reference"),
+      field("f-return", "return url")),
+    el("p", {}, el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/intents/${iid()}/attempts`, {
+        method: "POST",
+        body: JSON.stringify({
+          instrument_token: val("f-token"), customer_reference: val("f-customer"),
+          return_url: val("f-return"),
+        }),
+      })),
+    }, "Start attempt"))];
+}
+
+// ── 3. Objective ───────────────────────────────────────────────────────────────
+function intentScreen() {
+  const i = state.data.intent, p = state.data.position, insp = state.data.inspection;
+  if (!i) return [el("div", { class: "card muted" }, "enter an intent id above")];
+  const triggers = i.allowed_triggers || [];
+  const cards = [];
+  if (insp && !insp.is_clean) {
+    cards.push(el("div", { class: "alert" },
+      el("strong", {}, "This objective needs attention. "),
+      (insp.notes || []).join(" · ")));
+  }
+  cards.push(el("div", { class: "card" }, el("h2", {}, "Objective"),
+    el("dl", { class: "kv" },
+      el("dt", {}, "intent"), el("dd", {}, el("code", {}, i.id)),
+      el("dt", {}, "state"), el("dd", {}, pill(i.state)),
+      el("dt", {}, "account"), el("dd", {}, el("code", {}, i.account_id)),
+      el("dt", {}, "requested"), el("dd", {}, amount(i.amount)),
+      el("dt", {}, "purpose"), el("dd", {}, i.purpose),
+      el("dt", {}, "document"), el("dd", {}, el("code", {}, i.subject_id || "—")),
+      el("dt", {}, "document digest"), el("dd", { class: "digest" }, i.subject_digest || "—"),
+      el("dt", {}, "provider"), el("dd", {}, i.route ? i.route.provider_code || "—" : "—"),
+      el("dt", {}, "why this provider"), el("dd", { class: "muted" }, i.route ? i.route.reason || "—" : "—"),
+      el("dt", {}, "request key"), el("dd", { class: "mono" }, i.request_key || "—"),
+      el("dt", {}, "attempts opened"), el("dd", {}, i.attempts_opened))));
+  if (p) {
+    cards.push(el("div", { class: "card" }, el("h2", {}, "Position — every figure is the server's"),
+      el("p", { class: "big" }, amount(p.net)),
+      el("dl", { class: "kv" },
+        el("dt", {}, "requested"), el("dd", {}, amount(p.requested)),
+        el("dt", {}, "captured"), el("dd", {}, amount(p.captured)),
+        el("dt", {}, "refunded"), el("dd", {}, amount(p.refunded)),
+        el("dt", {}, "outstanding"), el("dd", {}, amount(p.outstanding)),
+        el("dt", {}, "attempts"), el("dd", {}, `${p.attempts} (${p.successful_attempts} succeeded, ${p.open_attempts} open)`),
+        el("dt", {}, "unresolved"), el("dd", {}, p.unresolved_attempts ? pill("ambiguous") : "none"),
+        el("dt", {}, "fully collected"), el("dd", {}, p.is_fully_collected ? "yes" : "no"),
+        el("dt", {}, "overpaid"), el("dd", {}, p.is_overpaid ? pill("failed") : "no")),
+      p.is_blocked ? el("p", { class: "warn" },
+        "Blocked: an attempt is ambiguous. Reconcile it before attempting again — retrying past " +
+        "an unresolved outcome is how one payment becomes two charges.") : null));
+  }
+  // Lifecycle actions come from the server's allowed_triggers. The client decides nothing.
+  const actions = [];
+  if (triggers.includes("cancel")) {
+    actions.push(el("button", {
+      class: "ghost danger",
+      onclick: () => act(() => api(`/intents/${i.id}/cancel`, {
+        method: "POST", body: JSON.stringify({ reason: "cancelled from studio" }),
+      })),
+    }, "cancel"));
+  }
+  if (triggers.includes("expire")) {
+    actions.push(el("button", {
+      class: "ghost",
+      onclick: () => act(() => api(`/intents/${i.id}/expire`, {
+        method: "POST", body: JSON.stringify({ reason: "expired from studio" }),
+      })),
+    }, "expire"));
+  }
+  if (triggers.includes("retry") || triggers.includes("start")) {
+    actions.push(el("button", {
+      class: "act",
+      onclick: () => act(() => api(`/intents/${i.id}/attempts`, {
+        method: "POST", body: JSON.stringify({}),
+      })),
+    }, "start another attempt"));
+  }
+  cards.push(el("div", { class: "card" }, el("h2", {}, "Actions the server allows"),
+    el("p", { class: "muted", style: "font-size:12px" },
+      "These buttons are the server's `allowed_triggers`, rendered. Nothing here decides what is " +
+      "legal — a settled objective simply has no button."),
+    el("p", {}, ...(actions.length ? actions : [el("span", { class: "muted" }, "none")]))));
+  const d = state.data.diagnostics;
+  if (d && d.findings && d.findings.length) {
+    cards.push(el("div", { class: "card" }, el("h2", {}, "Diagnostics"),
+      table(["Path", "Code", "Severity", "Message"], d.findings.map(f =>
+        el("tr", {}, el("td", { class: "mono" }, f.path), el("td", {}, f.code),
+          el("td", {}, pill(f.severity === "error" ? "failed" : "pending")),
+          el("td", { class: "muted" }, f.message))))));
+  }
+  return cards;
+}
+
+// ── 4. Attempts ────────────────────────────────────────────────────────────────
+function attemptsScreen() {
+  const rows = (state.data.attempts || []).map(a =>
+    el("tr", {},
+      el("td", { class: "num" }, a.sequence),
+      el("td", {}, el("code", {}, short(a.id))),
+      el("td", {}, pill(a.state)),
+      el("td", { class: "num" }, amount(a.amount)),
+      el("td", {}, a.provider_code || "—"),
+      el("td", { class: "mono" }, short(a.provider_reference)),
+      el("td", { class: "mono" }, short(a.operation_key)),
+      el("td", {}, a.failure_code || "—"),
+      el("td", { class: "mono" }, short(a.journal_entry_id)),
+      el("td", {}, ...attemptActions(a))));
+  return [el("div", { class: "card" }, el("h2", {}, "Attempts"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only. A retry is attempt n+1 — the failure code, provider reference, timestamps, " +
+      "and evidence of every earlier attempt survive it untouched, because \"we tried three times " +
+      "and the third worked\" and \"it worked\" are different histories."),
+    table(["#Seq", "Attempt", "State", "#Amount", "Provider", "Reference", "Operation key",
+           "Failure", "Ledger fact", ""], rows))];
+}
+function attemptActions(a) {
+  const acts = [];
+  const allowed = a.allowed_triggers || [];
+  if (a.is_unresolved) {
+    acts.push(el("button", {
+      class: "ghost danger",
+      onclick: () => act(() => api(`/attempts/${a.id}/reconcile`, { method: "POST" })),
+    }, "reconcile"));
+  }
+  if (allowed.includes("succeed") && a.state === "authorized") {
+    acts.push(el("button", {
+      class: "ghost",
+      onclick: () => act(() => api(`/attempts/${a.id}/capture`, { method: "POST" })),
+    }, "capture"));
+  }
+  if (allowed.includes("cancel")) {
+    acts.push(el("button", {
+      class: "ghost",
+      onclick: () => act(() => api(`/attempts/${a.id}/cancel`, {
+        method: "POST", body: JSON.stringify({ reason: "cancelled from studio" }),
+      })),
+    }, "void"));
+  }
+  if (a.state === "succeeded" && !a.journal_entry_id) {
+    acts.push(el("button", {
+      class: "ghost danger",
+      onclick: () => act(() => api(`/attempts/${a.id}/post`, { method: "POST" })),
+    }, "post to ledger"));
+  }
+  acts.push(el("button", {
+    class: "ghost",
+    onclick: () => { document.getElementById("attempt").value = a.id; state.tab = "events"; load(); },
+  }, "events"));
+  return acts;
+}
+
+// ── 5. Why? ────────────────────────────────────────────────────────────────────
+function explainScreen() {
+  const e = state.data.explanation;
+  if (!e) return [el("div", { class: "card muted" }, "enter an intent id above")];
+  const steps = [];
+  steps.push(el("div", { class: "st" }, el("div", { class: "stage" }, "routing"),
+    `${e.provider_code || "no provider"} — ${e.routing_reason || "no route matched"}`));
+  for (const a of e.attempts || []) {
+    steps.push(el("div", { class: "st" },
+      el("div", { class: "stage" }, `attempt ${a.sequence} · ${a.state}`),
+      `${amount(a.amount)} under key ${short(a.operation_key)}` +
+      (a.provider_reference ? ` → ${a.provider_reference}` : "") +
+      (a.failure_code ? ` — ${a.failure_code}` : "")));
+    for (const o of a.observations || []) {
+      steps.push(el("div", { class: "st" },
+        el("div", { class: "stage" }, "provider said"),
+        `${o.reported_state}${o.verified ? " (verified)" : " (unverified)"} at ${when(o.received_at)}`));
+    }
+  }
+  for (const ev of e.events || []) {
+    steps.push(el("div", { class: "st" },
+      el("div", { class: "stage" }, `callback · ${ev.disposition}`),
+      `${ev.event_type} ${short(ev.event_ref)}${ev.note ? " — " + ev.note : ""}`));
+  }
+  for (const id of e.journal_entry_ids || []) {
+    steps.push(el("div", { class: "st" }, el("div", { class: "stage" }, "ledger fact"), id));
+  }
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Why is this payment in this state?"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Assembled entirely from stored evidence. No provider was called to produce this page — " +
+        "which is what makes a payment from two years ago still explainable after the " +
+        "integration has been replaced and the credentials rotated."),
+      el("div", { class: "steps" }, ...steps)),
+    (e.notes || []).length
+      ? el("div", { class: "card" }, el("h2", {}, "Notes"),
+          el("ul", {}, ...e.notes.map(n => el("li", { class: "muted" }, n))))
+      : null,
+    el("div", { class: "card" }, el("h2", {}, "Self-contained"),
+      el("p", {}, e.is_self_contained
+        ? "Every attempt carries the provider evidence it was decided from."
+        : pill("failed"))),
+  ];
+}
+
+// ── 6. Operations ──────────────────────────────────────────────────────────────
+function operationsScreen() {
+  const rows = (state.data.operations || []).map(o =>
+    el("tr", {},
+      el("td", { class: "mono" }, short(o.operation_key)),
+      el("td", {}, pill(o.state)),
+      el("td", {}, o.action),
+      el("td", {}, o.provider_code || "—"),
+      el("td", { class: "num" }, amount(o.amount)),
+      el("td", { class: "num" }, o.attempts_sent),
+      el("td", {}, when(o.sent_at)),
+      el("td", { class: "mono" }, short(o.attempt_id)),
+      el("td", { class: "muted" }, o.last_error || o.outcome_status || "—")));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Provider operations"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Each row was committed <em>before</em> the provider was called and names the exact " +
+        "idempotency key it was given. A row still <code>sending</code> is a crash signature: it " +
+        "is resolved by retrieving that same key, never by sending another one."),
+      table(["Operation key", "State", "Action", "Provider", "#Amount", "#Sent", "At", "Attempt", "Detail"], rows)),
+    el("div", { class: "card" }, el("h2", {}, "Crash recovery"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Retrieves every operation still sending past the window. The server asks the provider " +
+        "what happened to each key; nothing new is transmitted."),
+      el("div", { class: "row" }, field("f-older", "older than (seconds)", "300")),
+      el("p", {}, el("button", {
+        class: "act",
+        onclick: () => act(() => api("/reconciliation/sweep", {
+          method: "POST",
+          body: JSON.stringify({ older_than_seconds: Number(val("f-older")), limit: 100 }),
+        })),
+      }, "Sweep"))),
+  ];
+}
+
+// ── 7. Provider events ─────────────────────────────────────────────────────────
+function eventsScreen() {
+  const rows = (state.data.events || []).map(e =>
+    el("tr", {},
+      el("td", { class: "mono" }, short(e.event_ref)),
+      el("td", {}, e.event_type || "—"),
+      el("td", {}, pill(e.disposition)),
+      el("td", {}, e.verified ? "yes" : pill("unverified")),
+      el("td", {}, e.provider_code || "—"),
+      el("td", {}, e.outcome_status || "—"),
+      el("td", { class: "mono" }, short(e.attempt_id)),
+      el("td", {}, when(e.received_at)),
+      el("td", { class: "muted" }, e.note || "—")));
+  return [el("div", { class: "card" }, el("h2", {}, "Provider callbacks"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Every callback that arrived, and what was done with it — including the ones that were " +
+      "not applied. A webhook that was ignored is exactly as interesting to an investigation as " +
+      "one that was applied, and more so when it was ignored because its signature failed."),
+    table(["Event", "Type", "Disposition", "Verified", "Provider", "Status", "Attempt", "Received", "Note"], rows))];
+}
+
+// ── 8. Refunds ─────────────────────────────────────────────────────────────────
+function refundsScreen() {
+  const rows = (state.data.refunds || []).map(r =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(r.id))),
+      el("td", {}, pill(r.state)),
+      el("td", { class: "num" }, amount(r.amount)),
+      el("td", {}, r.reason || "—"),
+      el("td", {}, r.destination || "—"),
+      el("td", { class: "mono" }, short(r.attempt_id)),
+      el("td", { class: "mono" }, short(r.journal_entry_id)),
+      el("td", {}, when(r.requested_at)),
+      el("td", { class: "muted" }, r.failure_code || "—")));
+  const refundable = state.data.refundable;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Refunds"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "A refund is a new financial fact, never a state on the payment it reverses — which is " +
+        "why the attempt above it still reads <code>succeeded</code>."),
+      table(["Refund", "State", "#Amount", "Reason", "To", "Attempt", "Ledger fact", "Requested", "Failure"], rows)),
+    el("div", { class: "card" }, el("h2", {}, "Refund a capture"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        refundable
+          ? `The server says ${amount(refundable)} is still refundable on this attempt. This page ` +
+            "did not work that out — it is captured minus already-refunded, computed from facts " +
+            "every time it is asked."
+          : "Enter an attempt id above to see what is still refundable."),
+      el("div", { class: "row" },
+        field("f-ramount", "amount (minor units)", "0"),
+        select("f-rcurrency", "currency", ["INR", "USD", "EUR", "GBP", "AED", "SGD"], "INR"),
+        select("f-rreason", "reason",
+          ["customer_request", "service_credit", "billing_error", "downgrade_credit", "goodwill",
+           "duplicate_charge"], "customer_request"),
+        field("f-rkey", "request key")),
+      el("p", {}, el("button", {
+        class: "act",
+        onclick: () => act(() => api(`/attempts/${aid()}/refunds`, {
+          method: "POST",
+          body: JSON.stringify({
+            amount_minor: Number(val("f-ramount")), currency: val("f-rcurrency"),
+            reason: val("f-rreason"), request_key: val("f-rkey"),
+          }),
+        })),
+      }, "Refund"))),
+  ];
+}
+
+// ── 9. Divergences ─────────────────────────────────────────────────────────────
+function divergencesScreen() {
+  const rows = (state.data.divergences || []).map(d =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(d.id))),
+      el("td", {}, pill(d.outcome)),
+      el("td", {}, pill(d.status)),
+      el("td", {}, d.billing_state || "—"),
+      el("td", {}, d.provider_state || "—"),
+      el("td", { class: "num" }, amount(d.billing_amount)),
+      el("td", { class: "num" }, amount(d.provider_amount)),
+      el("td", { class: "mono" }, short(d.attempt_id)),
+      el("td", {}, when(d.observed_at)),
+      el("td", {}, d.status === "resolved" ? el("span", { class: "muted" }, d.resolved_by)
+        : el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(`/reconciliation/${d.id}/resolve`, {
+              method: "POST",
+              body: JSON.stringify({ note: "reviewed in studio", acknowledge_only: false }),
+            })),
+          }, "resolve"))));
+  return [el("div", { class: "card" }, el("h2", {}, "Reconciliation findings"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Where Billing and a provider disagree, recorded with both sides so the disagreement is " +
+      "legible without calling the provider again — by the time anyone looks, the provider's " +
+      "answer will have changed. <strong>A divergence is never resolved automatically</strong>: " +
+      "closing one names the person who did it (ADR-0023 PY5)."),
+    table(["Finding", "Outcome", "Status", "Billing says", "Provider says", "#Billing", "#Provider",
+           "Attempt", "Observed", ""], rows))];
+}
+
+// ── 10. Routes ─────────────────────────────────────────────────────────────────
+function routesScreen() {
+  const rows = (state.data.routes || []).map(r =>
+    el("tr", {},
+      el("td", {}, el("code", {}, short(r.id))),
+      el("td", {}, r.provider_code),
+      el("td", { class: "num" }, r.priority),
+      el("td", {}, r.currency || "(any)"),
+      el("td", {}, r.country || "(any)"),
+      el("td", {}, r.method || "(any)"),
+      el("td", {}, r.account_id || "(any)"),
+      el("td", {}, r.version || "—"),
+      el("td", {}, r.is_active ? pill("applied") : pill("draft")),
+      el("td", {}, r.is_active ? el("button", {
+        class: "ghost danger",
+        onclick: () => act(() => api(`/routes/${r.id}/retire`, {
+          method: "POST", body: JSON.stringify({ reason: "retired from studio" }),
+        })),
+      }, "retire") : el("span", { class: "muted" }, "retired"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Payment routes"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Which provider serves which payments — operator-declared. Nothing in the platform names " +
+        "a provider: a fresh installation routes nowhere and collects nothing. Retiring keeps the " +
+        "row, because an attempt routed under a policy must stay explainable after it changes."),
+      table(["Route", "Provider", "#Priority", "Currency", "Country", "Method", "Account",
+             "Version", "State", ""], rows)),
+    el("div", { class: "card" }, el("h2", {}, "Declare a route"),
+      el("div", { class: "row" },
+        field("f-provider", "provider code"),
+        field("f-priority", "priority (lower wins)", "100"),
+        select("f-rc", "currency", ["", "INR", "USD", "EUR", "GBP", "AED", "SGD"], ""),
+        field("f-country2", "country"),
+        select("f-rm", "method",
+          ["", "card", "bank_debit", "upi", "netbanking", "wallet", "offline_transfer",
+           "credit_balance"], ""),
+        field("f-raccount", "account id (optional)"),
+        field("f-version", "routing table version")),
+      el("p", {}, el("button", {
+        class: "act",
+        onclick: () => act(() => api("/routes", {
+          method: "POST",
+          body: JSON.stringify({
+            provider_code: val("f-provider"), priority: Number(val("f-priority")),
+            currency: val("f-rc") || null, country: val("f-country2"),
+            method: val("f-rm") || null, account_id: val("f-raccount"),
+            version: val("f-version"),
+          }),
+        })),
+      }, "Declare"))),
+  ];
+}
+
+// ── 11. Audit trail ────────────────────────────────────────────────────────────
+function activityScreen() {
+  const rows = (state.data.activity || []).map(a =>
+    el("tr", {},
+      el("td", {}, when(a.at)),
+      el("td", {}, a.action),
+      el("td", { class: "mono" }, short(a.attempt_id || a.intent_id)),
+      el("td", {}, a.provider_code || "—"),
+      el("td", { class: "mono" }, short(a.operation_key)),
+      el("td", { class: "num" }, a.amount_minor || 0),
+      el("td", {}, a.actor_id || "—"),
+      el("td", { class: "muted" }, a.reason || a.detail || "—")));
+  return [el("div", { class: "card" }, el("h2", {}, "Payment audit trail"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only — including the operations that were refused and the callbacks that were " +
+      "rejected. <code>operation_duplicate</code> is the line that says a second worker computed " +
+      "the same key and did not send it, and it is the one an incident review looks for."),
+    table(["When", "Action", "Subject", "Provider", "Operation key", "#Amount", "Actor", "Detail"], rows))];
+}
+
+const SCREENS = {
+  intents: intentsScreen, collect: collectScreen, intent: intentScreen,
+  attempts: attemptsScreen, explain: explainScreen, operations: operationsScreen,
+  events: eventsScreen, refunds: refundsScreen, divergences: divergencesScreen,
+  routes: routesScreen, activity: activityScreen,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; state.notice = ""; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const screen = SCREENS[state.tab]();
+  view.replaceChildren(
+    ...(Array.isArray(screen) ? screen.filter(Boolean) : [screen]),
+    state.error ? el("div", { class: "err" }, state.error) : null,
+    state.notice ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+for (const id of ["account", "intent", "attempt"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

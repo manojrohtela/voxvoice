@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Incidents</title>
+<!--
+  Financial Integrity Correlation &amp; Audit Studio (M9.20).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no correlation rule, and knows
+  nothing the API does not tell it &mdash; every screen renders a response from
+  /v1/billing/integrity/incidents/*, and every action dispatches to it.
+
+  It correlates nothing. Which findings share a cause is decided by CorrelationService on the
+  server, from immutable anchors. A client that grouped findings by amount, account or timestamp
+  would be a second correlation authority producing conclusions nobody can prove.
+
+  It computes no severity, no root cause and no impact. All three arrive on the incident, derived
+  from declared tables. There is no branch in this file that decides how bad something is.
+
+  It sums nothing. There is no monetary total anywhere on this screen &mdash; not per incident, not
+  per owner, not across findings. There is no amount on any response this screen reads: every
+  figure lives on the M9.19 finding, where the domain that decided it put it.
+
+  It resolves nothing locally. `resolve` is a POST; the server re-reads every attached finding and
+  refuses unless all are settled and none was unreadable. There is no client-side "mark as fixed",
+  and a resolved incident shows no buttons because `allowed_triggers` comes back empty.
+
+  It rewrites no history. Merge and correction are POSTs that create new facts; detached links are
+  shown rather than hidden, because "this was once believed to belong here" is what an auditor asks.
+
+  It reaches no provider, posts no ledger entry, and mutates no financial domain.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.recognized, .pill.posted, .pill.fully_recognized, .pill.in_period,
+  .pill.paid, .pill.succeeded, .pill.applied, .pill.matched, .pill.refunded, .pill.resolved,
+  .pill.completed { color:var(--ok); border-color:var(--ok); }
+  .pill.scheduled, .pill.partially_recognized, .pill.next_open_period, .pill.deferred,
+  .pill.pending, .pill.requires_action, .pill.authorized, .pill.sending,
+  .pill.stale, .pill.duplicate, .pill.acknowledged { color:var(--warn); border-color:var(--warn); }
+  .pill.unposted, .pill.reversed, .pill.rejected_no_open_period,
+  .pill.failed, .pill.cancelled, .pill.expired, .pill.ambiguous, .pill.conflicting,
+  .pill.unverified, .pill.uncorrelated, .pill.open { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.abandoned, .pill.unsupported, .pill.skipped, .pill.superseded,
+  .pill.not_applicable { color:var(--muted); }
+  .pill.critical, .pill.missing_counterpart, .pill.missing_source, .pill.amount_mismatch,
+  .pill.currency_mismatch, .pill.duplicate_source, .pill.duplicate_counterpart,
+  .pill.over_accounted { color:var(--bad); border-color:var(--bad); }
+  .pill.error, .pill.account_mismatch, .pill.source_reference_mismatch,
+  .pill.unexpected_counterpart, .pill.evidence_malformed { color:var(--warn); border-color:var(--warn); }
+  .pill.warning, .pill.period_mismatch, .pill.stale_evidence, .pill.repair_requested { color:var(--warn); }
+  .pill.info, .pill.closed, .pill.operator { color:var(--muted); }
+  .pill.merged, .pill.repair_in_progress, .pill.verifying, .pill.investigating { color:var(--warn); border-color:var(--warn); }
+  .pill.source_fact_missing, .pill.source_fact_duplicated, .pill.confirmed_financial_impact,
+  .pill.financial_fact_missing, .pill.duplicate_financial_fact { color:var(--bad); border-color:var(--bad); }
+  .pill.potential_financial_impact, .pill.regulatory_evidence_impact { color:var(--warn); }
+  .pill.no_financial_impact, .pill.unknown, .pill.none { color:var(--muted); }
+  .pill.ledger_source, .pill.document, .pill.financial_fact { color:var(--accent); border-color:var(--accent); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .warn { color:var(--warn); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Incidents</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="incident" placeholder="incident id" style="width:150px" />
+  <input id="run" placeholder="run id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:130px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/integrity/incidents";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "posture", data: {}, error: "", notice: "", offset: 0 };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  \u2022 ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} \u2014 ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["posture", "Posture"], ["live", "Open incidents"], ["list", "All incidents"],
+  ["incident", "Incident"], ["findings", "Correlated findings"], ["evidence", "Evidence graph"],
+  ["timeline", "Audit trail"], ["explain", "Why?"], ["repairs", "Repairs"],
+  ["history", "Merges &amp; corrections"],
+];
+
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "\u2014"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function iid() { return val("incident"); }
+function short(d) { return d ? d.slice(0, 16) : "\u2014"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "\u2014"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "posture") state.data.posture = await api("/posture");
+    if (t === "live") state.data.live = await api("/live");
+    if (t === "list") state.data.page = await api("" + q({ limit: 25, offset: state.offset }));
+    if (t === "incident" && iid()) {
+      state.data.incident = await api(`/${iid()}`);
+      state.data.inspection = await api(`/${iid()}/inspect`);
+    }
+    if (t === "findings" && iid()) state.data.findings = await api(`/${iid()}/findings`);
+    if (t === "evidence" && iid()) state.data.evidence = await api(`/${iid()}/evidence`);
+    if (t === "timeline" && iid()) state.data.timeline = await api(`/${iid()}/timeline`);
+    if (t === "explain" && iid()) state.data.explanation = await api(`/${iid()}/explain`);
+    if (t === "repairs" && iid()) state.data.repairs = await api(`/${iid()}/repairs`);
+    if (t === "history" && iid()) {
+      state.data.merges = await api(`/${iid()}/merges`);
+      state.data.corrections = await api(`/${iid()}/corrections`);
+    }
+    const open = state.data.live || [];
+    document.getElementById("count-pill").textContent = open.length ? `${open.length} open` : "\u2014";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // A verification that failed and one that passed are different news. Reporting both as "done"
+    // would let an operator believe an unrepaired incident had been checked and cleared.
+    if (r && r.is_clean !== undefined) {
+      state.notice = r.is_clean
+        ? `verified \u2014 ${r.checked} finding(s) settled`
+        : `NOT verified \u2014 ${r.still_divergent} still divergent, ${r.unreadable} unreadable`;
+    } else if (r && r.correlated !== undefined) {
+      state.notice = `${r.correlated} finding(s) \u2192 ${r.incidents.length} incident(s); `
+        + `${r.attached} attached, ${r.already_attached} already, ${r.incidents_opened} opened`;
+      if (r.incidents.length) document.getElementById("incident").value = r.incidents[0].id;
+    } else if (r && r.observed !== undefined) {
+      // Acceptance is not resolution. Only verification is.
+      state.notice = `repair recorded with ${r.owner} \u2014 verify to observe the result`;
+    } else if (r && r.status) {
+      state.notice = `incident is now ${r.status}`;
+      if (r.id) document.getElementById("incident").value = r.id;
+    } else {
+      state.notice = "done";
+    }
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, h)))),
+    el("tbody", {}, rows.length
+      ? rows.map(r => el("tr", {}, r.map(c => el("td", {}, c))))
+      : [el("tr", {}, el("td", { colspan: String(headers.length), class: "muted" }, "nothing yet"))])
+  ));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+function openIncident(id) { document.getElementById("incident").value = id; state.tab = "incident"; load(); }
+
+// Every button is gated by the server&apos;s `allowed_triggers`. A resolved incident returns an
+// empty list, so no reopen button can exist for a transition the domain would refuse.
+function incidentButtons(i) {
+  const allowed = new Set(i.allowed_triggers || []);
+  const out = [];
+  if (allowed.has("acknowledge")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/${i.id}/acknowledge`, { method: "POST", body: JSON.stringify({ note: "seen" }) })) },
+    "acknowledge"));
+  if (allowed.has("investigate")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/${i.id}/investigate`, { method: "POST", body: JSON.stringify({ note: "" }) })) },
+    "investigate"));
+  if (allowed.has("request_repair")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/${i.id}/request-repair`, { method: "POST", body: JSON.stringify({ request_key: i.id }) })) },
+    "ask the owner"));
+  if (allowed.has("verify")) out.push(el("button", { class: "act", onclick: () =>
+    act(() => api(`/${i.id}/verify`, { method: "POST", body: JSON.stringify({ note: "" }) })) },
+    "verify"));
+  if (allowed.has("resolve")) out.push(el("button", { class: "act", onclick: () =>
+    act(() => api(`/${i.id}/resolve`, { method: "POST", body: JSON.stringify({ note: "verified" }) })) },
+    "resolve"));
+  if (allowed.has("close")) out.push(el("button", { class: "ghost danger", onclick: () =>
+    act(() => api(`/${i.id}/close`, { method: "POST", body: JSON.stringify({ reason: "accepted" }) })) },
+    "close"));
+  if (!out.length) out.push(el("span", { class: "muted" }, "settled \u2014 no action"));
+  return el("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap" }, out);
+}
+
+function incidentRows(list) {
+  return (list || []).map(i => [
+    el("button", { class: "ghost", onclick: () => openIncident(i.id) }, short(i.id)),
+    pill(i.severity), pill(i.status), pill(i.root_cause), pill(i.impact),
+    pill(i.anchor_kind), String(i.finding_count), when(i.first_detected_at),
+  ]);
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) =>
+    el("button", { class: state.tab === id ? "active" : "", onclick: () => { state.tab = id; load(); } }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("div", { class: "ok" }, state.notice));
+  parts.push(SCREENS[state.tab]());
+  view.replaceChildren(...parts.filter(Boolean));
+}
+
+const SCREENS = {
+  posture: () => {
+    const p = state.data.posture || {};
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Financial integrity incidents"),
+        el("div", { class: "big" },
+          p.is_clean ? "clean" : `${p.critical || 0} critical \u00b7 ${p.error || 0} error`),
+        el("p", { class: "muted" },
+          "M9.19 asks whether two facts agree. This asks which of those disagreements belong to " +
+          "one underlying cause. Counts only \u2014 there is deliberately no monetary total here; " +
+          "every figure lives on the finding, where the domain that decided it put it."),
+        kv([
+          ["incidents recorded", String(p.incidents || 0)],
+          ["open", String(p.open_incidents || 0)],
+          ["acknowledged", String(p.acknowledged || 0)],
+          ["investigating", String(p.investigating || 0)],
+          ["repair in progress", String(p.repair_in_progress || 0)],
+          ["verifying", String(p.verifying || 0)],
+          ["resolved", String(p.resolved || 0)],
+          ["closed (accepted)", String(p.closed || 0)],
+          ["merged", String(p.merged || 0)],
+        ])),
+      el("div", { class: "card" },
+        el("h2", {}, "Correlate"),
+        el("p", { class: "muted" },
+          "Correlation identity is derived on the server from immutable evidence \u2014 a ledger " +
+          "source, a document revision, a source fact. A client cannot supply one, because that " +
+          "would let it assert a correlation nobody can prove."),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/correlate", { method: "POST", body: JSON.stringify({ run_id: val("run") }) })) },
+          "correlate this run\u2019s findings")),
+      el("div", { class: "card" },
+        el("h2", {}, "Unresolved, by root cause"),
+        table(["root cause", "incidents"],
+          Object.entries(p.by_root_cause || {}).map(([k, v]) => [pill(k), String(v)]))),
+      el("div", { class: "card" },
+        el("h2", {}, "Unresolved, by impact"),
+        table(["impact", "incidents"],
+          Object.entries(p.by_impact || {}).map(([k, v]) => [pill(k), String(v)]))),
+      el("div", { class: "card" },
+        el("h2", {}, "Unresolved, by repair owner"),
+        el("p", { class: "muted" },
+          "Correlation records; the owning domain repairs. \u201coperator\u201d means no " +
+          "automatic repair is declared."),
+        table(["owner", "incidents"],
+          Object.entries(p.by_owner || {}).map(([k, v]) => [pill(k), String(v)]))));
+  },
+
+  live: () => el("div", { class: "card" },
+    el("h2", {}, "Open incidents \u2014 worst first"),
+    el("p", { class: "muted" },
+      "The read an external scheduler polls. Billing runs no scheduler of its own."),
+    table(["incident", "severity", "status", "root cause", "impact", "anchor", "findings", "first seen"],
+      incidentRows(state.data.live))),
+
+  list: () => {
+    const page = state.data.page || { incidents: [], total: 0, offset: 0, limit: 25, has_more: false };
+    return el("div", { class: "card" },
+      el("h2", {}, `All incidents \u2014 ${page.total} total`),
+      el("p", { class: "muted" },
+        "Paginated at the database. The total is a count, not the length of this page."),
+      table(["incident", "severity", "status", "root cause", "impact", "anchor", "findings", "first seen"],
+        incidentRows(page.incidents)),
+      el("div", { style: "display:flex;gap:.4rem;margin-top:.7rem" },
+        el("button", { class: "ghost", onclick: () => {
+          state.offset = Math.max(0, state.offset - page.limit); load(); } }, "previous"),
+        el("button", { class: "ghost", onclick: () => {
+          if (page.has_more) { state.offset += page.limit; load(); } } }, "next"),
+        el("span", { class: "muted" }, `showing ${page.offset + 1}\u2013${page.offset + page.incidents.length}`)));
+  },
+
+  incident: () => {
+    const i = state.data.incident, n = state.data.inspection;
+    if (!i) return el("div", { class: "card" }, el("p", { class: "muted" }, "enter an incident id"));
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Incident " + short(i.id)),
+        kv([
+          ["severity", pill(i.severity)],
+          ["status", pill(i.status)],
+          ["root cause", pill(i.root_cause)],
+          ["impact", pill(i.impact)],
+          ["correlated on", el("span", {}, pill(i.anchor_kind), " ", el("span", { class: "mono" }, i.anchor_value))],
+          ["correlation key", el("span", { class: "digest" }, i.correlation_key)],
+          ["findings", `${i.finding_count} (${i.unresolved_findings} unresolved)`],
+          ["relationships", (i.relationships || []).join(", ") || "\u2014"],
+          ["repair owners", (i.owners || []).join(", ") || "\u2014"],
+          ["first detected", when(i.first_detected_at)],
+          ["last observed", when(i.last_observed_at)],
+          ["evidence digest", el("span", { class: "digest" }, i.evidence_digest)],
+          ["superseded by", i.canonical_id ? el("button", { class: "ghost",
+            onclick: () => openIncident(i.canonical_id) }, short(i.canonical_id)) : "\u2014"],
+        ]),
+        el("p", { class: "muted" },
+          "Severity never decreases. A critical thing having happened is not undone by one of its " +
+          "findings being repaired, so an incident cannot slip off this screen while another " +
+          "finding remains open."),
+        incidentButtons(i)),
+      n ? el("div", { class: "card" },
+        el("h2", {}, "Inspection"),
+        kv([
+          ["counts self-consistent", n.is_counted_correctly ? "yes" : "NO"],
+          ["org-scoped", n.is_scoped ? "yes" : "NO"],
+          ["evidence connected", n.is_connected ? "yes" : "NO"],
+          ["severity monotonic", n.is_severity_monotonic ? "yes" : "NO"],
+          ["links recorded", String(n.links_recorded)],
+          ["audit lines", String(n.events_recorded)],
+        ]),
+        (n.notes || []).length ? el("p", { class: "warn" }, (n.notes || []).join(" \u00b7 ")) : null) : null);
+  },
+
+  findings: () => el("div", { class: "card" },
+    el("h2", {}, "Correlated findings"),
+    el("p", { class: "muted" },
+      "Each row carries the anchor that proved it belongs. Detached rows are shown rather than " +
+      "hidden \u2014 \u201cthis was once believed to belong here\u201d is what an auditor asks " +
+      "about after a correlation correction."),
+    table(["finding", "relationship", "divergence", "severity", "anchor", "edge", "state"],
+      (state.data.findings || []).map(f => [
+        el("span", { class: "mono" }, short(f.finding_id)),
+        pill(f.relationship), pill(f.divergence), pill(f.severity),
+        el("span", {}, pill(f.anchor_kind), " ", el("span", { class: "mono" }, short(f.anchor_value))),
+        pill(f.edge), f.is_attached ? "attached" : el("span", { class: "muted" }, "detached"),
+      ]))),
+
+  evidence: () => {
+    const g = state.data.evidence;
+    if (!g) return el("div", { class: "card" }, el("p", { class: "muted" }, "enter an incident id"));
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Evidence graph"),
+        el("p", { class: "muted" },
+          "A flat list says these things are wrong. A graph says why they are the same thing. " +
+          "Every edge names the anchor that proved it \u2014 an edge with no anchor cannot exist."),
+        el("p", { class: g.is_connected ? "ok" : "warn" },
+          g.is_connected ? "every node is justified by an edge"
+                         : "a node has no edge proving why it belongs")),
+      el("div", { class: "card" },
+        el("h2", {}, "Nodes"),
+        table(["node", "kind", "label", "detail"],
+          (g.nodes || []).map(n => [el("span", { class: "mono" }, short(n.id)), pill(n.kind), n.label, n.detail]))),
+      el("div", { class: "card" },
+        el("h2", {}, "Edges"),
+        table(["from", "to", "relationship", "proved by", "evidence"],
+          (g.edges || []).map(e => [
+            el("span", { class: "mono" }, short(e.source_id)),
+            el("span", { class: "mono" }, short(e.target_id)),
+            pill(e.kind), pill(e.anchor), el("span", { class: "mono" }, short(e.evidence)),
+          ]))));
+  },
+
+  timeline: () => el("div", { class: "card" },
+    el("h2", {}, "Audit trail"),
+    el("p", { class: "muted" },
+      "The persisted record, not an application log. It answers what happened, when Billing first " +
+      "observed it, which findings were attached, who acknowledged it, what repair was asked of " +
+      "whom, what evidence proved it, and when it was verified."),
+    table(["#", "when", "what", "actor", "finding", "summary"],
+      (state.data.timeline || []).map(e => [
+        String(e.sequence), when(e.at), pill(e.kind), e.actor_id || "system",
+        el("span", { class: "mono" }, short(e.finding_id)), e.summary || "\u2014",
+      ]))),
+
+  explain: () => {
+    const e = state.data.explanation;
+    if (!e) return el("div", { class: "card" }, el("p", { class: "muted" }, "enter an incident id"));
+    return el("div", { class: "card" },
+      el("h2", {}, "Why does this incident exist?"),
+      el("p", { class: "muted" },
+        "Assembled by the server from stored evidence, with no domain re-read. By the time an " +
+        "auditor opens a six-month-old incident the payment has settled and the period has closed."),
+      el("div", { class: "steps" }, (e.narrative || []).map(line => el("div", { class: "st" }, line))),
+      kv([
+        ["correlated on", el("span", {}, pill(e.anchor_kind), " ", el("span", { class: "mono" }, e.anchor_value))],
+        ["correlation key", el("span", { class: "digest" }, e.correlation_key)],
+        ["evidence digest", el("span", { class: "digest" }, e.evidence_digest || "\u2014")],
+        ["findings", (e.findings || []).map(f => short(f)).join(", ") || "\u2014"],
+      ]));
+  },
+
+  repairs: () => el("div", { class: "card" },
+    el("h2", {}, "Repairs requested"),
+    el("p", { class: "muted" },
+      "A reference, not a repair. The request goes through the reconciliation engine\u2019s own " +
+      "command, which itself only asks an owning domain. \u201cobserved\u201d means the owner " +
+      "reported back \u2014 not that the books agree. Only verification says that."),
+    table(["repair", "owner", "action", "reference", "observed", "when", "detail"],
+      (state.data.repairs || []).map(r => [
+        el("span", { class: "mono" }, short(r.id)), pill(r.owner), r.action,
+        el("span", { class: "mono" }, short(r.reference)),
+        r.observed ? "yes" : "no", when(r.requested_at), r.detail || "\u2014",
+      ]))),
+
+  history: () => el("div", {},
+    el("div", { class: "card" },
+      el("h2", {}, "Merges"),
+      el("p", { class: "muted" },
+        "A merge is a new fact. Neither original is rewritten: the merged incident keeps its " +
+        "severity, its findings and its whole history, and stays readable forever."),
+      table(["merge", "canonical", "merged", "reason", "evidence", "when", "by"],
+        (state.data.merges || []).map(m => [
+          el("span", { class: "mono" }, short(m.id)),
+          el("button", { class: "ghost", onclick: () => openIncident(m.canonical_id) }, short(m.canonical_id)),
+          el("button", { class: "ghost", onclick: () => openIncident(m.merged_id) }, short(m.merged_id)),
+          m.reason || "\u2014", el("span", { class: "mono" }, m.evidence || "\u2014"),
+          when(m.decided_at), m.decided_by || "system",
+        ]))),
+    el("div", { class: "card" },
+      el("h2", {}, "Correlation corrections"),
+      el("p", { class: "muted" },
+        "Both keys are shown deliberately: the auditor\u2019s question is never \u201cwhat is " +
+        "the correlation?\u201d but \u201cwhat did you believe, when, and on what grounds did " +
+        "you change your mind?\u201d."),
+      table(["correction", "finding", "previous", "corrected", "reason", "when", "by"],
+        (state.data.corrections || []).map(c => [
+          el("span", { class: "mono" }, short(c.id)),
+          el("span", { class: "mono" }, short(c.finding_id)),
+          el("span", { class: "digest" }, short(c.previous_key)),
+          el("span", { class: "digest" }, short(c.corrected_key)),
+          c.reason || "\u2014", when(c.corrected_at), c.corrected_by || "system",
+        ])))),
+};
+
+for (const id of ["incident", "run", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

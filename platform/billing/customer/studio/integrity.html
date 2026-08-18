@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Integrity</title>
+<!--
+  Reconciliation &amp; Financial Integrity Studio (M9.19).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no reconciliation rule, and knows
+  nothing the API does not tell it &mdash; every screen renders a response from
+  /v1/billing/integrity/*, and every action dispatches to it.
+
+  It compares nothing. Whether two financial facts agree is decided by MatchingService on the
+  server. A client that compared two amounts in JavaScript would be a second reconciliation
+  authority, and the two would eventually disagree about whether the books are clean.
+
+  It computes no severity. `severity` arrives on the finding, written once at detection from a
+  declared table. There is no branch in this file that decides how bad something is.
+
+  It sums nothing. There is no monetary total anywhere on this screen &mdash; not per run, not per
+  owner, not across findings. The two amounts shown on a finding are the two figures that
+  disagreed, rendered verbatim. A "total divergent value" computed here would be a number nobody
+  owns, and somebody would report it.
+
+  It resolves nothing locally. `resolve` is a POST; the server re-reads both sides and refuses
+  unless they now agree (ADR-0023 PY5). There is no client-side "mark as fixed", and a resolved
+  finding shows no buttons because `allowed_triggers` comes back empty.
+
+  It reaches no provider, posts no ledger entry, and retries no payment.
+
+  The relationship table is fetched from /relationships rather than hard-coded, so this screen
+  renders the engine&apos;s actual configuration instead of six pairs it would forget to update.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.recognized, .pill.posted, .pill.fully_recognized, .pill.in_period,
+  .pill.paid, .pill.succeeded, .pill.applied, .pill.matched, .pill.refunded, .pill.resolved,
+  .pill.completed { color:var(--ok); border-color:var(--ok); }
+  .pill.scheduled, .pill.partially_recognized, .pill.next_open_period, .pill.deferred,
+  .pill.pending, .pill.requires_action, .pill.authorized, .pill.sending,
+  .pill.stale, .pill.duplicate, .pill.acknowledged { color:var(--warn); border-color:var(--warn); }
+  .pill.unposted, .pill.reversed, .pill.rejected_no_open_period,
+  .pill.failed, .pill.cancelled, .pill.expired, .pill.ambiguous, .pill.conflicting,
+  .pill.unverified, .pill.uncorrelated, .pill.open { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.abandoned, .pill.unsupported, .pill.skipped, .pill.superseded,
+  .pill.not_applicable { color:var(--muted); }
+  .pill.critical, .pill.missing_counterpart, .pill.missing_source, .pill.amount_mismatch,
+  .pill.currency_mismatch, .pill.duplicate_source, .pill.duplicate_counterpart,
+  .pill.over_accounted { color:var(--bad); border-color:var(--bad); }
+  .pill.error, .pill.account_mismatch, .pill.source_reference_mismatch,
+  .pill.unexpected_counterpart, .pill.evidence_malformed { color:var(--warn); border-color:var(--warn); }
+  .pill.warning, .pill.period_mismatch, .pill.stale_evidence, .pill.repair_requested { color:var(--warn); }
+  .pill.info, .pill.closed, .pill.operator { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .warn { color:var(--warn); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Integrity</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:130px" />
+  <input id="document" placeholder="document id" style="width:130px" />
+  <input id="schedule" placeholder="schedule id" style="width:130px" />
+  <input id="finding" placeholder="finding id" style="width:130px" />
+  <input id="token" placeholder="Bearer token" style="width:130px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/integrity";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "posture", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  \u2022 ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} \u2014 ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["posture", "Posture"], ["findings", "Open findings"], ["reconcile", "Reconcile"],
+  ["runs", "Runs"], ["run", "Run detail"], ["finding", "Finding"],
+  ["explain", "Why?"], ["evidence", "Repairs &amp; evidence"],
+  ["relationships", "What is compared"], ["activity", "Audit trail"],
+];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+// There is no addition, subtraction or comparison of money anywhere in this file.
+function money(m) {
+  if (!m) return "\u2014";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "\u2014"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function doc() { return val("document"); }
+function sid() { return val("schedule"); }
+function fid() { return val("finding"); }
+function short(d) { return d ? d.slice(0, 16) : "\u2014"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "\u2014"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "posture") state.data.posture = await api("/posture");
+    if (t === "findings") state.data.findings = await api("/findings");
+    if (t === "runs") state.data.runs = await api("/runs" + q({ subject_id: acct() || doc() || sid() }));
+    if (t === "run" && state.data.runId) {
+      state.data.run = await api(`/runs/${state.data.runId}`);
+      state.data.runFindings = await api(`/runs/${state.data.runId}/findings`);
+      state.data.inspection = await api(`/runs/${state.data.runId}/inspect`);
+    }
+    if (t === "finding" && fid()) state.data.finding = await api(`/findings/${fid()}`);
+    if (t === "explain" && fid()) state.data.explanation = await api(`/findings/${fid()}/explain`);
+    if (t === "evidence" && fid()) {
+      state.data.requests = await api(`/findings/${fid()}/repair-requests`);
+      state.data.resolutions = await api(`/findings/${fid()}/resolutions`);
+    }
+    if (t === "relationships") state.data.relationships = await api("/relationships");
+    if (t === "activity" && state.data.runId) state.data.activity = await api(`/runs/${state.data.runId}/timeline`);
+    const open = state.data.findings || [];
+    document.getElementById("count-pill").textContent = open.length ? `${open.length} open` : "\u2014";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // A run that found nothing and a run that found something are different news. Reporting both
+    // as "done" would show clean books while critical findings piled up behind the screen.
+    if (r && r.run) {
+      state.data.runId = r.run.id;
+      state.notice = r.run.diverged
+        ? `${r.run.diverged} divergence(s) \u2014 worst: ${r.run.max_severity}`
+        : `clean \u2014 ${r.run.compared} compared, ${r.run.matched} matched`;
+      if (!r.is_new) state.notice += " (same evidence as a previous run; nothing re-recorded)";
+    } else if (r && r.dispatched_command !== undefined) {
+      // Acceptance is not evidence the divergence is gone. Only a later run is.
+      state.notice = r.accepted
+        ? `${r.owner} accepted ${r.dispatched_command} \u2014 re-run to observe the result`
+        : `${r.owner} must act: ${r.detail || r.action}`;
+    } else if (r && r.state) {
+      state.notice = `finding is now ${r.state}`;
+      if (r.id) document.getElementById("finding").value = r.id;
+    } else {
+      state.notice = "done";
+    }
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, h)))),
+    el("tbody", {}, rows.length
+      ? rows.map(r => el("tr", {}, r.map(c => el("td", {}, c))))
+      : [el("tr", {}, el("td", { colspan: String(headers.length), class: "muted" }, "nothing yet"))])
+  ));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+function openRun(id) { state.data.runId = id; state.tab = "run"; load(); }
+function openFinding(id) { document.getElementById("finding").value = id; state.tab = "finding"; load(); }
+
+// Every button is gated by the server&apos;s `allowed_triggers`. A resolved finding returns an
+// empty list, so no reopen button can exist for a transition the domain would refuse.
+function findingButtons(f) {
+  const allowed = new Set(f.allowed_triggers || []);
+  const out = [];
+  if (allowed.has("acknowledge")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/findings/${f.id}/acknowledge`, { method: "POST", body: JSON.stringify({ note: "seen" }) })) },
+    "acknowledge"));
+  if (allowed.has("request_repair")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/findings/${f.id}/request-repair`, { method: "POST", body: JSON.stringify({ request_key: f.id }) })) },
+    "ask " + f.owner));
+  if (allowed.has("resolve")) out.push(el("button", { class: "act", onclick: () =>
+    act(() => api(`/findings/${f.id}/resolve`, { method: "POST", body: JSON.stringify({ request_key: f.id, note: "verified" }) })) },
+    "resolve"));
+  if (allowed.has("close")) out.push(el("button", { class: "ghost danger", onclick: () =>
+    act(() => api(`/findings/${f.id}/close`, { method: "POST", body: JSON.stringify({ note: "accepted as permanent" }) })) },
+    "close"));
+  if (!out.length) out.push(el("span", { class: "muted" }, "settled \u2014 no action"));
+  return el("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap" }, out);
+}
+
+function findingRows(list) {
+  return (list || []).map(f => [
+    el("button", { class: "ghost", onclick: () => openFinding(f.id) }, short(f.id)),
+    pill(f.severity), pill(f.divergence), pill(f.relationship), pill(f.owner), pill(f.state),
+    el("span", { class: "mono" }, short(f.subject_key)),
+  ]);
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) =>
+    el("button", { class: state.tab === id ? "active" : "", onclick: () => { state.tab = id; load(); } }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("div", { class: "ok" }, state.notice));
+  parts.push(SCREENS[state.tab]());
+  view.replaceChildren(...parts.filter(Boolean));
+}
+
+const SCREENS = {
+  posture: () => {
+    const p = state.data.posture || {};
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Do the books agree with each other?"),
+        el("div", { class: "big " + (p.is_clean ? "" : "") },
+          p.is_clean ? "clean" : `${p.critical || 0} critical \u00b7 ${p.error || 0} error`),
+        el("p", { class: "muted" },
+          "Counts, derived on every request. There is deliberately no monetary total here \u2014 " +
+          "a \u201ctotal divergent value\u201d would be a figure this engine computed, and the " +
+          "moment it exists somebody reports it beside figures the Ledger owns."),
+        kv([
+          ["runs recorded", String(p.runs || 0)],
+          ["open", String(p.findings_open || 0)],
+          ["acknowledged", String(p.findings_acknowledged || 0)],
+          ["repair requested", String(p.findings_repair_requested || 0)],
+          ["resolved", String(p.findings_resolved || 0)],
+          ["closed (accepted)", String(p.findings_closed || 0)],
+        ])),
+      el("div", { class: "card" },
+        el("h2", {}, "Unresolved, by owner"),
+        el("p", { class: "muted" },
+          "Reconciliation detects; the owning domain repairs. \u201coperator\u201d means no " +
+          "automatic repair is declared \u2014 a person must decide."),
+        table(["owner", "unresolved"],
+          Object.entries(p.by_owner || {}).map(([k, v]) => [pill(k), String(v)]))),
+      el("div", { class: "card" },
+        el("h2", {}, "Unresolved, by relationship"),
+        table(["relationship", "unresolved"],
+          Object.entries(p.by_relationship || {}).map(([k, v]) => [pill(k), String(v)]))));
+  },
+
+  findings: () => el("div", { class: "card" },
+    el("h2", {}, "Open findings \u2014 worst first"),
+    el("p", { class: "muted" },
+      "The read an external scheduler polls. Billing runs no scheduler of its own; whoever " +
+      "decides when to look lives outside this plane."),
+    table(["finding", "severity", "divergence", "relationship", "owner", "state", "subject"],
+      findingRows(state.data.findings))),
+
+  reconcile: () => el("div", {},
+    el("div", { class: "card" },
+      el("h2", {}, "Run a reconciliation"),
+      el("p", { class: "muted" },
+        "Each button asks the server to compare one declared pair. Re-running over unchanged " +
+        "evidence is a no-op \u2014 the run id is derived from what was looked at, so the same " +
+        "facts produce the same run and nothing is re-recorded."),
+      el("div", { class: "row" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/payment-ledger", { method: "POST", body: JSON.stringify({ account_id: acct() }) })) },
+          "payment \u2194 ledger"),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/payment-invoice", { method: "POST", body: JSON.stringify({ account_id: acct() }) })) },
+          "payment \u2194 invoice"),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/invoice-ledger", { method: "POST", body: JSON.stringify({ document_id: doc() }) })) },
+          "invoice \u2194 ledger"),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/invoice-tax", { method: "POST", body: JSON.stringify({ document_id: doc() }) })) },
+          "invoice \u2194 tax"),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/invoice-recognition", { method: "POST", body: JSON.stringify({ document_id: doc() }) })) },
+          "invoice \u2194 recognition"),
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/reconcile/recognition-ledger", { method: "POST", body: JSON.stringify({ schedule_id: sid() }) })) },
+          "recognition \u2194 ledger"))),
+    el("div", { class: "card" },
+      el("h2", {}, "What a run means"),
+      el("p", { class: "muted" },
+        "A reconciliation result is an observation, not permission to change anything. Nothing " +
+        "on this screen posts a ledger entry, moves money, issues a document or determines tax."))),
+
+  runs: () => el("div", { class: "card" },
+    el("h2", {}, "Reconciliation runs"),
+    table(["run", "relationship", "subject", "compared", "matched", "diverged", "worst", "when"],
+      (state.data.runs || []).map(r => [
+        el("button", { class: "ghost", onclick: () => openRun(r.id) }, short(r.id)),
+        pill(r.relationship), el("span", { class: "mono" }, short(r.subject_id)),
+        String(r.compared), String(r.matched), String(r.diverged),
+        pill(r.max_severity), when(r.started_at),
+      ]))),
+
+  run: () => {
+    const r = state.data.run, i = state.data.inspection;
+    if (!r) return el("div", { class: "card" }, el("p", { class: "muted" }, "pick a run"));
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Run " + short(r.id)),
+        kv([
+          ["relationship", pill(r.relationship)],
+          ["subject", el("span", { class: "mono" }, r.subject_id || "\u2014")],
+          ["evidence digest", el("span", { class: "digest" }, r.evidence_digest)],
+          ["compared / matched / diverged", `${r.compared} / ${r.matched} / ${r.diverged}`],
+          ["worst severity", pill(r.max_severity)],
+          ["state", pill(r.state)],
+          ["started", when(r.started_at)],
+        ]),
+        el("p", { class: "muted" },
+          "The evidence digest is what makes this run reproducible: recompute it from the facts " +
+          "and it either matches or the evidence changed.")),
+      i ? el("div", { class: "card" },
+        el("h2", {}, "Inspection"),
+        kv([
+          ["counts self-consistent", i.is_counted_correctly ? "yes" : "NO"],
+          ["org-scoped", i.is_scoped ? "yes" : "NO"],
+          ["complete", i.is_complete ? "yes" : "NO"],
+          ["findings recorded", String(i.findings_recorded)],
+          ["still unresolved", String(i.unresolved)],
+        ]),
+        (i.notes || []).length ? el("p", { class: "warn" }, (i.notes || []).join(" \u00b7 ")) : null) : null,
+      el("div", { class: "card" },
+        el("h2", {}, "What it found"),
+        table(["finding", "severity", "divergence", "relationship", "owner", "state", "subject"],
+          findingRows(state.data.runFindings))));
+  },
+
+  finding: () => {
+    const f = state.data.finding;
+    if (!f) return el("div", { class: "card" }, el("p", { class: "muted" }, "enter a finding id"));
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Finding " + short(f.id)),
+        kv([
+          ["severity", pill(f.severity)],
+          ["divergence", pill(f.divergence)],
+          ["relationship", pill(f.relationship)],
+          ["repair owner", pill(f.owner)],
+          ["state", pill(f.state)],
+          ["subject", el("span", { class: "mono" }, f.subject_key)],
+          ["expected", f.expected || "\u2014"],
+          ["observed", f.observed || "\u2014"],
+          ["detected", when(f.detected_at)],
+          ["run", el("button", { class: "ghost", onclick: () => openRun(f.run_id) }, short(f.run_id))],
+        ]),
+        el("p", { class: "muted" },
+          "Severity is written once at detection and never changes. Resolving a finding records " +
+          "that a critical divergence was fixed \u2014 it does not make it a warning."),
+        findingButtons(f)),
+      el("div", { class: "card" },
+        el("h2", {}, "The two facts"),
+        table(["side", "identity", "kind", "amount", "account", "period", "state"],
+          [["source", f.source], ["counterpart", f.counterpart]].map(([side, s]) => [
+            side,
+            el("span", { class: "mono" }, s ? short(s.identity) : "(absent)"),
+            s ? s.kind : "\u2014", s ? money(s.amount) : "\u2014",
+            s ? (s.account_id || "\u2014") : "\u2014",
+            s ? (s.period_key || "\u2014") : "\u2014",
+            s ? pill(s.state) : "\u2014",
+          ])),
+        el("p", { class: "muted" },
+          "Both figures are copies of what the owning domains decided. This screen does not " +
+          "subtract them \u2014 a difference computed here would be a number nobody owns.")));
+  },
+
+  explain: () => {
+    const e = state.data.explanation;
+    if (!e) return el("div", { class: "card" }, el("p", { class: "muted" }, "enter a finding id"));
+    return el("div", { class: "card" },
+      el("h2", {}, "Why does this finding exist?"),
+      el("p", { class: "muted" },
+        "Assembled by the server from stored evidence, with no domain re-read. By the time " +
+        "somebody opens a two-week-old finding the payment has settled and the ledger has " +
+        "closed \u2014 an explanation that asked them again would answer a different question."),
+      el("div", { class: "steps" }, (e.narrative || []).map(line =>
+        el("div", { class: "st" }, line))),
+      kv([
+        ["matched on", e.matching_identity],
+        ["authoritative side", e.authoritative_side],
+        ["evidence digest", el("span", { class: "digest" }, e.evidence_digest || "\u2014")],
+        ["resolution", e.resolution || "\u2014"],
+      ]));
+  },
+
+  evidence: () => el("div", {},
+    el("div", { class: "card" },
+      el("h2", {}, "Repair requests"),
+      el("p", { class: "muted" },
+        "A request, not a repair. Where an owning domain declares one, its own command runs in " +
+        "its own use case; otherwise the owner is named and that is all. Acceptance is not " +
+        "evidence the divergence is gone \u2014 only a later run is."),
+      table(["request", "owner", "action", "dispatched", "accepted", "when", "detail"],
+        (state.data.requests || []).map(r => [
+          el("span", { class: "mono" }, short(r.id)), pill(r.owner), r.action,
+          el("span", { class: "mono" }, r.dispatched_command || "\u2014"),
+          r.accepted ? "yes" : "no", when(r.requested_at), r.detail || "\u2014",
+        ]))),
+    el("div", { class: "card" },
+      el("h2", {}, "Resolution evidence"),
+      el("p", { class: "muted" },
+        "Append-only. A resolution is a new row pointing at a finding \u2014 never an edit that " +
+        "makes the finding look like it never happened."),
+      table(["resolution", "owner", "action", "evidence digest", "resolved by", "when"],
+        (state.data.resolutions || []).map(r => [
+          el("span", { class: "mono" }, short(r.id)), pill(r.owner), r.action,
+          el("span", { class: "digest" }, short(r.evidence_digest)),
+          r.resolved_by || "system", when(r.resolved_at),
+        ])))),
+
+  relationships: () => el("div", { class: "card" },
+    el("h2", {}, "What this engine compares"),
+    el("p", { class: "muted" },
+      "Fetched from the server rather than hard-coded, so this table is the engine\u2019s actual " +
+      "configuration. Payment \u2194 provider is deliberately absent: M9.16 owns it, and two " +
+      "owners for one pair is how a divergence gets resolved twice and reported once."),
+    table(["relationship", "source", "counterpart", "authoritative", "matched on", "compares", "owner"],
+      (state.data.relationships || []).map(r => [
+        pill(r.relationship), r.source_kind, r.counterpart_kind, r.authoritative,
+        el("span", { class: "muted" }, r.matching_identity),
+        (r.compares || []).join(", "), pill(r.owner),
+      ]))),
+
+  activity: () => el("div", { class: "card" },
+    el("h2", {}, "Audit trail"),
+    table(["when", "what", "summary", "actor", "finding"],
+      (state.data.activity || []).map(a => [
+        when(a.at), pill(a.kind), a.summary || "\u2014", a.actor_id || "system",
+        el("span", { class: "mono" }, short(a.finding_id)),
+      ]))),
+};
+
+for (const id of ["account", "document", "schedule", "finding", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

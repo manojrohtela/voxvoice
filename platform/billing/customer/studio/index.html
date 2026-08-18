@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Commercial Catalog</title>
+<!--
+  Catalog Studio (M9.6).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen here is a rendering of a response from
+  /v1/billing/catalog/*, and every action is a dispatch to it. There is deliberately no
+  pricing screen: the catalog says what is sold, not what it costs.
+
+  Self-contained by design: one file, no build step, no CDN, no external font. It is served
+  as a static asset by the Billing API and can be replaced wholesale without touching a layer
+  below it.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.published { color:var(--ok); border-color:var(--ok); }
+  .pill.draft { color:var(--draft); }
+  .pill.deprecated { color:var(--warn); border-color:var(--warn); }
+  .pill.archived, .pill.deleted { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .steps { display:flex; gap:.5rem; margin-bottom:.8rem; flex-wrap:wrap; }
+  .step { flex:1; min-width:150px; border:1px solid var(--line); border-radius:8px; padding:.6rem .8rem; }
+  .step.done { border-color:var(--ok); }
+  .step .n { color:var(--dim); font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Commercial Catalog</h1>
+  <span class="pill" id="version-pill">no version published</span>
+  <span class="grow"></span>
+  <input id="token" placeholder="Bearer token" style="width:280px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/catalog";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "products", data: {}, error: "", notice: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["products", "Products"], ["editions", "Editions"], ["plans", "Plans"],
+  ["bundles", "Bundles"], ["features", "Features"], ["versions", "Versions"],
+  ["publish", "Publish"], ["history", "History"], ["search", "Search"],
+];
+
+function pill(stateName) { return el("span", { class: "pill " + stateName }, stateName); }
+
+async function load() {
+  state.error = "";
+  try {
+    if (state.tab === "products") state.data.products = await api("/products?include_internal=true");
+    if (state.tab === "editions") state.data.editions = await api("/editions");
+    if (state.tab === "plans") state.data.plans = await api("/plans");
+    if (state.tab === "bundles") state.data.bundles = await api("/bundles");
+    if (state.tab === "features") state.data.groups = await api("/feature-groups");
+    if (state.tab === "versions" || state.tab === "publish") state.data.versions = await api("/versions");
+    if (state.tab === "history") state.data.activity = await api("/activity");
+    if (state.tab === "publish") state.data.products = await api("/products?include_internal=true");
+    const versions = state.data.versions || (await api("/versions").catch(() => []));
+    const pillEl = document.getElementById("version-pill");
+    pillEl.textContent = versions && versions.length
+      ? `catalog v${versions[0].version}${versions[0].rolled_back_from ? " (rollback)" : ""}`
+      : "no version published";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = "done"; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function productsView() {
+  const rows = (state.data.products || []).map(p =>
+    el("tr", {},
+      el("td", {}, el("code", {}, p.code)),
+      el("td", {}, p.display_name),
+      el("td", {}, p.kind),
+      el("td", {}, pill(p.state)),
+      el("td", {}, p.visibility),
+      el("td", {}, p.audience),
+      el("td", {}, (p.edition_codes || []).join(", ") || "—"),
+      el("td", {}, ...(p.allowed_triggers || []).map(t =>
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/products/${p.code}/${t === "deprecate" ? "deprecate" : t}`, {
+            method: "POST",
+            body: t === "deprecate" ? JSON.stringify({ replaced_by_code: "" }) : "{}",
+          })) }, t))),
+      el("td", {}, el("button", { class: "ghost", onclick: () => {
+        const code = prompt("New product code for the copy?");
+        if (code) act(() => api(`/products/${p.code}/duplicate`, {
+          method: "POST", body: JSON.stringify({ code, display_name: "" }) }));
+      } }, "duplicate")),
+    ));
+  const form = el("div", { class: "row" },
+    field("np-code", "Code"), field("np-name", "Display name"),
+    select("np-kind", "Kind", ["platform", "module", "add_on", "service"]),
+    select("np-vis", "Visibility", ["public", "partner", "private", "internal"]),
+    select("np-aud", "Audience", ["self_serve", "smb", "enterprise", "partner", "internal"]));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "New product"), form,
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/products", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("np-code"), display_name: val("np-name"), kind: val("np-kind"),
+            visibility: val("np-vis"), audience: val("np-aud"),
+          }),
+        })) }, "Create draft"))),
+    el("div", { class: "card" }, el("h2", {}, "Products"),
+      table(["Code", "Name", "Kind", "State", "Visibility", "Audience", "Editions", "Lifecycle", ""], rows)),
+  ];
+}
+
+function editionsView() {
+  const rows = (state.data.editions || []).map(e =>
+    el("tr", {}, el("td", {}, el("code", {}, e.code)), el("td", {}, e.display_name),
+      el("td", {}, el("code", {}, e.product_code)), el("td", {}, pill(e.state)),
+      el("td", {}, e.rank), el("td", {}, (e.plan_codes || []).join(", ") || "—")));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "New edition"),
+      el("div", { class: "row" }, field("ne-code", "Code"), field("ne-name", "Display name"),
+        field("ne-product", "Product code"), field("ne-rank", "Rank", "0")),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: () => act(() =>
+        api("/editions", { method: "POST", body: JSON.stringify({
+          code: val("ne-code"), display_name: val("ne-name"),
+          product_code: val("ne-product"), rank: Number(val("ne-rank") || 0) }) })) }, "Create edition"))),
+    el("div", { class: "card" }, el("h2", {}, "Editions"),
+      table(["Code", "Name", "Product", "State", "Rank", "Plans"], rows)),
+  ];
+}
+
+function plansView() {
+  const rows = (state.data.plans || []).map(p =>
+    el("tr", {}, el("td", {}, el("code", {}, p.code)), el("td", {}, p.version),
+      el("td", {}, p.display_name), el("td", {}, p.tier),
+      el("td", {}, p.published ? pill("published") : pill("draft")),
+      el("td", {}, (p.metered_codes || []).join(", ") || "—"),
+      el("td", {},
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/plans/${p.code}/versions/${p.version}/publish`, { method: "POST" })) }, "publish"),
+        " ",
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/plans/${p.code}/versions/${p.version}/archive`, { method: "POST" })) }, "archive"))));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "New plan (attached to an edition)"),
+      el("div", { class: "row" }, field("npl-edition", "Edition code"), field("npl-code", "Plan code"),
+        field("npl-name", "Display name"),
+        select("npl-tier", "Tier", ["free", "starter", "pro", "business", "enterprise"])),
+      el("p", { class: "muted", style: "font-size:12px;margin:.6rem 0 0" },
+        "A plan says what a customer gets. What they pay is a price book — a separate, separately-versioned thing."),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: () => act(() =>
+        api(`/editions/${val("npl-edition")}/plans`, { method: "POST", body: JSON.stringify({
+          code: val("npl-code"), display_name: val("npl-name"), tier: val("npl-tier") }) })) }, "Create plan"))),
+    el("div", { class: "card" }, el("h2", {}, "Plans"),
+      table(["Code", "Version", "Name", "Tier", "State", "Meters", ""], rows)),
+  ];
+}
+
+function bundlesView() {
+  const rows = (state.data.bundles || []).map(b =>
+    el("tr", {}, el("td", {}, el("code", {}, b.code)), el("td", {}, b.display_name),
+      el("td", {}, pill(b.state)), el("td", {}, (b.product_codes || []).join(", ") || "—"),
+      el("td", {}, (b.bundle_codes || []).join(", ") || "—"),
+      el("td", {}, (b.expanded_product_codes || []).join(", ") || "—")));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "New bundle"),
+      el("div", { class: "row" }, field("nb-code", "Code"), field("nb-name", "Display name"),
+        field("nb-products", "Product codes (comma separated)"),
+        field("nb-bundles", "Nested bundle codes (comma separated)")),
+      el("p", { class: "muted", style: "font-size:12px;margin:.6rem 0 0" },
+        "Nesting is allowed; a cycle is rejected with the offending path."),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: () => act(() =>
+        api("/bundles", { method: "POST", body: JSON.stringify({
+          code: val("nb-code"), display_name: val("nb-name"),
+          product_codes: csv(val("nb-products")), bundle_codes: csv(val("nb-bundles")) }) })) }, "Create bundle"))),
+    el("div", { class: "card" }, el("h2", {}, "Bundles"),
+      table(["Code", "Name", "State", "Products", "Nested", "Expands to"], rows)),
+  ];
+}
+
+function featuresView() {
+  const rows = (state.data.groups || []).map(g =>
+    el("tr", {}, el("td", {}, el("code", {}, g.code)), el("td", {}, g.display_name),
+      el("td", {}, g.rank), el("td", {}, (g.feature_codes || []).join(", ") || "—")));
+  return [
+    el("div", { class: "card" }, el("h2", {}, "New feature"),
+      el("div", { class: "row" }, field("nf-code", "Code"), field("nf-name", "Display name"),
+        select("nf-kind", "Kind", ["flag", "limit", "rate", "quota"]), field("nf-meter", "Meter code (optional)")),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: () => act(() =>
+        api("/features", { method: "POST", body: JSON.stringify({
+          code: val("nf-code"), display_name: val("nf-name"),
+          kind: val("nf-kind"), meter_code: val("nf-meter") }) })) }, "Create feature"))),
+    el("div", { class: "card" }, el("h2", {}, "New feature group"),
+      el("div", { class: "row" }, field("ng-code", "Code"), field("ng-name", "Display name"),
+        field("ng-features", "Feature codes (comma separated)"), field("ng-rank", "Rank", "0")),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: () => act(() =>
+        api("/feature-groups", { method: "POST", body: JSON.stringify({
+          code: val("ng-code"), display_name: val("ng-name"),
+          feature_codes: csv(val("ng-features")), rank: Number(val("ng-rank") || 0) }) })) }, "Create group"))),
+    el("div", { class: "card" }, el("h2", {}, "Feature groups"),
+      table(["Code", "Name", "Rank", "Features"], rows)),
+  ];
+}
+
+function versionsView() {
+  const rows = (state.data.versions || []).map(v =>
+    el("tr", {}, el("td", {}, "v" + v.version),
+      el("td", {}, new Date(v.published_at * 1000).toISOString().replace("T", " ").slice(0, 19)),
+      el("td", {}, v.published_by || "—"), el("td", {}, v.entity_count),
+      el("td", {}, v.rolled_back_from ? `rollback of v${v.rolled_back_from}` : "—"),
+      el("td", {}, v.notes || "—"),
+      el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+        api("/versions/rollback", { method: "POST",
+          body: JSON.stringify({ to_version: v.version, notes: "" }) })) }, "roll back to this"))));
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Catalog versions"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Every version is immutable and readable forever. Rolling back publishes a new version carrying older content — history is never rewritten."),
+      table(["Version", "Published", "By", "Entities", "Provenance", "Notes", ""], rows)),
+  ];
+}
+
+function publishView() {
+  const products = state.data.products || [];
+  const drafts = products.filter(p => p.state === "draft");
+  const published = products.filter(p => p.state === "published");
+  const versions = state.data.versions || [];
+  const step = (n, title, body, done) =>
+    el("div", { class: "step" + (done ? " done" : "") },
+      el("div", { class: "n" }, "Step " + n), el("strong", {}, title),
+      el("div", { class: "muted", style: "font-size:12px" }, body));
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Publish wizard"),
+      el("div", { class: "steps" },
+        step(1, "Define", `${products.length} product(s) in the catalog`, products.length > 0),
+        step(2, "Publish entities", `${published.length} published, ${drafts.length} still draft`, published.length > 0),
+        step(3, "Freeze a version", versions.length ? `latest is v${versions[0].version}` : "none yet", versions.length > 0)),
+      drafts.length
+        ? el("p", { class: "muted", style: "font-size:12px" },
+            "Drafts will be snapshotted as drafts: " + drafts.map(d => d.code).join(", "))
+        : null,
+      el("label", { for: "pub-notes" }, "Notes — why this version exists (kept forever)"),
+      el("input", { id: "pub-notes", placeholder: "Q3 packaging: adds the Enterprise edition" }),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api("/versions", { method: "POST", body: JSON.stringify({ notes: val("pub-notes") }) })) },
+          "Validate & publish immutable version"))),
+  ];
+}
+
+function historyView() {
+  const rows = (state.data.activity || []).map(a =>
+    el("tr", {}, el("td", {}, new Date(a.at * 1000).toISOString().replace("T", " ").slice(0, 19)),
+      el("td", {}, el("code", {}, a.action)), el("td", {}, a.subject_kind),
+      el("td", {}, el("code", {}, a.subject_code)), el("td", {}, a.actor_id || "—"),
+      el("td", {}, a.catalog_version ? "v" + a.catalog_version : "—"), el("td", {}, a.detail || "—")));
+  return [el("div", { class: "card" }, el("h2", {}, "Catalog activity"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only. Who changed what, when — and it survives a restart because it is stored, not remembered."),
+    table(["When", "Action", "Kind", "Subject", "Actor", "Version", "Detail"], rows))];
+}
+
+function searchView() {
+  const r = state.data.search;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Search"),
+      el("div", { class: "row" }, field("s-text", "Text (substring, case-insensitive)"),
+        select("s-state", "State", ["", "draft", "published", "deprecated", "archived", "deleted"]),
+        field("s-tag", "Tag"), field("s-feature", "Feature code")),
+      el("p", { class: "muted", style: "font-size:12px;margin:.6rem 0 0" },
+        "Deterministic filtering — the same catalog and query always return the same rows in the same order."),
+      el("div", { style: "margin-top:.8rem" }, el("button", { class: "act", onclick: async () => {
+        state.error = "";
+        try {
+          const q = new URLSearchParams();
+          if (val("s-text")) q.set("text", val("s-text"));
+          if (val("s-state")) q.append("states", val("s-state"));
+          if (val("s-tag")) q.append("tags", val("s-tag"));
+          if (val("s-feature")) q.set("feature_code", val("s-feature"));
+          state.data.search = await api("/search?" + q.toString());
+        } catch (e) { state.error = e.message; }
+        render();
+      } }, "Search"))),
+    r ? el("div", { class: "card" }, el("h2", {}, `Results (${r.total})`),
+      table(["Kind", "Code", "Name", "State"], [
+        ...r.products.map(p => el("tr", {}, el("td", {}, "product"), el("td", {}, el("code", {}, p.code)), el("td", {}, p.display_name), el("td", {}, pill(p.state)))),
+        ...r.editions.map(e => el("tr", {}, el("td", {}, "edition"), el("td", {}, el("code", {}, e.code)), el("td", {}, e.display_name), el("td", {}, pill(e.state)))),
+        ...r.bundles.map(b => el("tr", {}, el("td", {}, "bundle"), el("td", {}, el("code", {}, b.code)), el("td", {}, b.display_name), el("td", {}, pill(b.state)))),
+        ...r.plans.map(p => el("tr", {}, el("td", {}, "plan"), el("td", {}, el("code", {}, p.code)), el("td", {}, p.display_name), el("td", {}, p.published ? pill("published") : pill("draft")))),
+        ...r.features.map(f => el("tr", {}, el("td", {}, "feature"), el("td", {}, el("code", {}, f.code)), el("td", {}, f.display_name), el("td", {}, "—"))),
+        ...r.feature_groups.map(g => el("tr", {}, el("td", {}, "group"), el("td", {}, el("code", {}, g.code)), el("td", {}, g.display_name), el("td", {}, "—"))),
+      ])) : null,
+  ];
+}
+
+function table(headers, rows) {
+  return el("table", {}, el("thead", {}, el("tr", {}, ...headers.map(h => el("th", {}, h)))),
+    el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: headers.length, class: "muted" }, "nothing yet"))));
+}
+function field(id, label, value) {
+  return el("div", {}, el("label", { for: id }, label), el("input", { id, value: value || "" }));
+}
+function select(id, label, options) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("select", { id }, ...options.map(o => el("option", { value: o }, o || "(any)"))));
+}
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function csv(s) { return s ? s.split(",").map(x => x.trim()).filter(Boolean) : []; }
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([key, label]) =>
+    el("button", { class: state.tab === key ? "active" : "",
+      onclick: () => { state.tab = key; state.notice = ""; load(); } }, label)));
+  const views = { products: productsView, editions: editionsView, plans: plansView,
+    bundles: bundlesView, features: featuresView, versions: versionsView,
+    publish: publishView, history: historyView, search: searchView };
+  const view = document.getElementById("view");
+  view.replaceChildren(
+    ...(views[state.tab]() || []).filter(Boolean),
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice && !state.error ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+document.getElementById("token").addEventListener("change", load);
+render();
+load();
+</script>
+</body>
+</html>

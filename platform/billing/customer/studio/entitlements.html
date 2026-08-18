@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Entitlements</title>
+<!--
+  Entitlement Studio (M9.10).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen renders a response from
+  /v1/billing/capabilities/*, and every action dispatches to it. Precedence is not computed here;
+  the Why? screen draws the resolution the server returned, including the grants that lost.
+
+  There is no money on any screen: an allowance says how much is included, never what it costs.
+  There is no user, role, or scope either — entitlement is commercial capability, and this Studio
+  cannot express an authorization question because the API has no field for one.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.active, .pill.allow, .pill.fail_open { color:var(--ok); border-color:var(--ok); }
+  .pill.draft, .pill.pending { color:var(--draft); }
+  .pill.suspended, .pill.degrade { color:var(--warn); border-color:var(--warn); }
+  .pill.revoked, .pill.expired, .pill.archived, .pill.deny, .pill.fail_closed { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:220px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .path { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--dim); }
+  .won { border-left:3px solid var(--ok); }
+  .lost { border-left:3px solid var(--line); opacity:.75; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Entitlements</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="selected" placeholder="billing account id" style="width:210px" />
+  <input id="token" placeholder="Bearer token" style="width:250px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/capabilities";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "registry", data: {}, error: "", notice: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["registry", "Gate Registry"], ["bundles", "Bundles"], ["profile", "Profile"],
+  ["grants", "Grants"], ["snapshot", "Snapshot"], ["versions", "Version History"],
+  ["inspect", "Why?"], ["diagnostics", "Diagnostics"], ["staleness", "Staleness"],
+  ["schedule", "Scheduled Changes"], ["timeline", "Timeline"],
+];
+
+const KINDS = ["flag", "limit", "rate", "quota"];
+const CLASSIFICATIONS = ["fail_open", "fail_closed", "degrade"];
+const SOURCES = ["plan", "promotion", "credit", "purchase", "contract", "partner"];
+const CHANGE_KINDS = ["grant", "revoke", "adjust", "bundle_grant"];
+
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function num(id) { const v = val(id); return v === "" ? null : Number(v); }
+function checked(id) { const n = document.getElementById(id); return !!(n && n.checked); }
+function account() { return document.getElementById("selected").value.trim(); }
+function when(t) { return t == null ? "—" : String(t); }
+function allowance(v) { return v.allowance === null ? "unlimited" : String(v.allowance); }
+
+async function load() {
+  state.error = "";
+  try {
+    if (["registry", "grants", "inspect"].includes(state.tab))
+      state.data.definitions = await api("/definitions?include_retired=true");
+    if (state.tab === "bundles") state.data.bundles = await api("/bundles");
+    const id = account();
+    if (id && ["profile", "grants", "schedule", "inspect", "snapshot"].includes(state.tab))
+      state.data.profile = await api(`/profiles/${encodeURIComponent(id)}`);
+    if (id && state.tab === "snapshot")
+      state.data.snapshot = await api(`/profiles/${encodeURIComponent(id)}/snapshot`).catch(() => null);
+    if (id && state.tab === "versions")
+      state.data.versions = await api(`/profiles/${encodeURIComponent(id)}/versions`);
+    if (id && state.tab === "diagnostics")
+      state.data.diagnostics = await api(`/profiles/${encodeURIComponent(id)}/diagnostics`);
+    if (id && state.tab === "staleness")
+      state.data.staleness = await api(
+        `/profiles/${encodeURIComponent(id)}/staleness?at=${Date.now() / 1000}`).catch(() => null);
+    if (id && state.tab === "schedule")
+      state.data.changes = await api(`/profiles/${encodeURIComponent(id)}/scheduled-changes`);
+    if (id && state.tab === "timeline")
+      state.data.timeline = await api(`/profiles/${encodeURIComponent(id)}/timeline`);
+    if (state.tab === "grants") {
+      const found = await api(`/grants?limit=500${id ? "&account_id=" + encodeURIComponent(id) : ""}`);
+      state.data.grants = found.grants;
+      document.getElementById("count-pill").textContent = `${found.total} grant(s)`;
+    }
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsAccount() {
+  return el("div", { class: "card muted" },
+    "Enter a billing account id in the header to load this screen.");
+}
+
+// Grant lifecycle buttons come from the server's allowed_triggers, mapped to their endpoint.
+const TRIGGER_PATH = {
+  activate: "activate", suspend: "suspend", resume: "resume",
+  revoke: "revoke", expire: "expire", archive: "archive",
+};
+const TRIGGER_BODY = { suspend: { reason: "" }, revoke: { reason: "" } };
+
+function triggerButtons(accountId, g) {
+  return g.allowed_triggers.map(t => el("button", {
+    class: "ghost",
+    onclick: () => act(() => api(
+      `/profiles/${encodeURIComponent(accountId)}/grants/${g.id}/${TRIGGER_PATH[t]}`,
+      { method: "POST", body: JSON.stringify(TRIGGER_BODY[t] || {}) }),
+      `${g.entitlement_code}: ${t}`),
+  }, t));
+}
+
+// ── 1. Gate Registry ───────────────────────────────────────────────────────────
+function registryView() {
+  const defs = state.data.definitions || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Declare a capability"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "d-code" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "d-name" })),
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "d-kind" }, ...KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Classification"),
+          el("select", { id: "d-class" }, ...CLASSIFICATIONS.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Meter code (quota only)"), el("input", { id: "d-meter" })),
+        el("div", {}, el("label", {}, "Max staleness (s)"),
+          el("input", { id: "d-stale", type: "number", min: "1" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "The classification is what an enforcing plane falls back on when it cannot reach Billing: " +
+        "fail_open allows, fail_closed denies, degrade reduces. ADR-0023 E3 makes declaring it part " +
+        "of declaring the gate — a capability with no classification is an incomplete design."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/definitions", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("d-code"), display_name: val("d-name"), kind: val("d-kind"),
+            classification: val("d-class"), meter_code: val("d-meter"),
+            max_staleness_seconds: num("d-stale"),
+          }),
+        }), "capability declared") }, "Declare")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Declared capabilities (${defs.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Kind", "Classification", "Meter", "Default", "Staleness", "v", "State", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...defs.map(d => el("tr", {},
+          el("td", {}, el("code", {}, d.code)),
+          el("td", {}, d.kind),
+          el("td", {}, pill(d.classification)),
+          el("td", { class: "muted" }, d.meter_code || "—"),
+          el("td", {}, d.default.enabled ? allowance(d.default) : "off"),
+          el("td", { class: "num" }, d.max_staleness_seconds),
+          el("td", { class: "num" }, d.version),
+          el("td", {}, d.is_retired ? pill("archived") : pill("active")),
+          el("td", {}, d.is_retired ? null : el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(`/definitions/${encodeURIComponent(d.code)}/retire`, {
+              method: "POST", body: JSON.stringify({ reason: "" }),
+            }), `${d.code} retired`),
+          }, "retire")),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Retiring is not revoking: customers who hold the capability keep it. Withdrawing it is a " +
+        "per-grant act on the Grants screen."),
+    ),
+  ];
+}
+
+// ── 2. Bundles ─────────────────────────────────────────────────────────────────
+function bundlesView() {
+  const bundles = state.data.bundles || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Create a bundle"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "b-code" })),
+        el("div", {}, el("label", {}, "Display name"), el("input", { id: "b-name" })),
+        el("div", {}, el("label", {}, "Entry codes (comma separated)"), el("input", { id: "b-entries" })),
+        el("div", {}, el("label", {}, "Member bundles (comma separated)"), el("input", { id: "b-members" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Bundles may contain bundles — a partner tier including the enterprise pack. Cycles are " +
+        "rejected by the server with the path that closes them."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/bundles", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("b-code"), display_name: val("b-name"),
+            entries: val("b-entries").split(",").map(s => s.trim()).filter(Boolean)
+              .map(c => ({ code: c, value: { enabled: true } })),
+            member_bundles: val("b-members").split(",").map(s => s.trim()).filter(Boolean),
+          }),
+        }), "bundle created") }, "Create")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Bundles (${bundles.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Code", "Entries", "Members", "Expanded", "v"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...bundles.map(b => el("tr", {},
+          el("td", {}, el("code", {}, b.code), b.is_composite ? " " : null,
+            b.is_composite ? el("span", { class: "pill" }, "composite") : null),
+          el("td", {}, b.entries.map(e => e.code).join(", ") || "—"),
+          el("td", { class: "muted" }, b.member_bundles.join(", ") || "—"),
+          el("td", { class: "path" }, b.expanded_codes.join(", ") || "—"),
+          el("td", { class: "num" }, b.version),
+        )))),
+    ),
+  ];
+}
+
+// ── 3. Profile ─────────────────────────────────────────────────────────────────
+function profileView() {
+  const id = account();
+  const p = state.data.profile;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Open an entitlement position"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Billing account id"), el("input", { id: "p-account", value: id })),
+        el("div", {}, el("label", {}, "Subscription id (optional)"), el("input", { id: "p-sub" })),
+        el("div", {}, el("label", {}, "Max staleness (s)"),
+          el("input", { id: "p-stale", type: "number", min: "1" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/profiles", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: val("p-account"), subscription_id: val("p-sub"),
+            max_staleness_seconds: num("p-stale"),
+          }),
+        }), "profile opened") }, "Open")),
+    ),
+    p ? el("div", { class: "card" }, el("h2", {}, `Account ${p.account_id}`),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Profile id"), el("dd", {}, el("code", {}, p.id)),
+        el("dt", {}, "Subscription"), el("dd", {}, p.subscription_id || "—"),
+        el("dt", {}, "Published version"), el("dd", {}, p.has_published_snapshot ? "v" + p.version : "none yet"),
+        el("dt", {}, "Staleness budget"), el("dd", {}, p.max_staleness_seconds + "s"),
+        el("dt", {}, "Capabilities granted"), el("dd", { class: "path" }, p.codes.join(", ") || "—"),
+        el("dt", {}, "Grant sources"), el("dd", {}, p.sources.join(", ") || "—"),
+        el("dt", {}, "From bundles"), el("dd", {}, p.bundle_codes.join(", ") || "—"),
+        el("dt", {}, "Pending intentions"), el("dd", {}, String(p.scheduled_changes.filter(c => c.status === "pending").length)),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:.8rem" },
+        "A profile holds grants. Nothing is entitled until something is granted, and nothing is " +
+        "published until a snapshot is composed."),
+    ) : needsAccount(),
+  ];
+}
+
+// ── 4. Grants ──────────────────────────────────────────────────────────────────
+function grantsView() {
+  const id = account();
+  const grants = state.data.grants || [];
+  const defs = state.data.definitions || [];
+  return [
+    id ? el("div", { class: "card" }, el("h2", {}, "Confer a capability"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Capability"),
+          el("select", { id: "g-code" }, ...defs.filter(d => !d.is_retired).map(d => el("option", {}, d.code)))),
+        el("div", {}, el("label", {}, "Source"),
+          el("select", { id: "g-source" }, ...SOURCES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Source reference"), el("input", { id: "g-ref" })),
+        el("div", {}, el("label", {}, "Allowance (blank = unlimited)"),
+          el("input", { id: "g-allowance", type: "number", min: "0" })),
+        el("div", {}, el("label", {}, "Starts at (blank = on activation)"),
+          el("input", { id: "g-start", type: "number" })),
+        el("div", {}, el("label", {}, "Ends at (blank = open ended)"),
+          el("input", { id: "g-end", type: "number" })),
+      ),
+      el("label", {}, el("input", { id: "g-enabled", type: "checkbox", checked: "checked", style: "width:auto" }), " enabled"),
+      el("label", {}, el("input", { id: "g-overage", type: "checkbox", style: "width:auto" }), " allows overage"),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap" },
+        el("button", { class: "act", onclick: () => act(() => api(`/profiles/${encodeURIComponent(id)}/grants`, {
+          method: "POST",
+          body: JSON.stringify({
+            entitlement_code: val("g-code"), source: val("g-source"), source_ref: val("g-ref"),
+            value: { enabled: checked("g-enabled"), allowance: num("g-allowance"), allows_overage: checked("g-overage") },
+            window: { starts_at: num("g-start"), ends_at: num("g-end") },
+          }),
+        }), "granted (draft)") }, "Grant"),
+        el("input", { id: "g-bundle", placeholder: "bundle code", style: "width:180px" }),
+        el("button", { class: "ghost", onclick: () => act(() => api(`/profiles/${encodeURIComponent(id)}/bundle-grants`, {
+          method: "POST", body: JSON.stringify({ bundle_code: val("g-bundle"), source: val("g-source") }),
+        }), "bundle granted") }, "Grant bundle"),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A grant starts as a draft and confers nothing until it is activated. Windows are half-open " +
+        "[starts_at, ends_at) — a grant's end and the next one's start are never both in force."),
+    ) : needsAccount(),
+    el("div", { class: "card scroll" }, el("h2", {}, `Grants (${grants.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Capability", "Account", "Value", "Source", "Prec.", "Window", "Bundle", "State", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...grants.map(g => el("tr", {},
+          el("td", {}, el("code", {}, g.entitlement_code)),
+          el("td", { class: "muted" }, g.account_id),
+          el("td", {}, g.value.enabled ? allowance(g.value) : "denied",
+            g.value.allows_overage ? el("span", { class: "pill" }, "overage") : null),
+          el("td", {}, g.source),
+          el("td", { class: "num" }, g.precedence),
+          el("td", { class: "path" }, `[${when(g.window.starts_at)}, ${when(g.window.ends_at)})`),
+          el("td", { class: "muted" }, g.bundle_code || "—"),
+          el("td", {}, pill(g.state)),
+          el("td", {}, ...triggerButtons(g.account_id, g)),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Buttons come from the server's allowed_triggers — the UI cannot offer a move that would 409. " +
+        "There is no delete: a revoked grant is kept, because why a capability went away is itself a fact."),
+    ),
+  ];
+}
+
+// ── 5. Snapshot ────────────────────────────────────────────────────────────────
+function snapshotView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const s = state.data.snapshot;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Publish a snapshot"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Reason"), el("input", { id: "s-reason" })),
+      ),
+      el("label", {}, el("input", { id: "s-defaults", type: "checkbox", style: "width:auto" }),
+        " include declared defaults for ungranted codes"),
+      el("label", {}, el("input", { id: "s-identical", type: "checkbox", style: "width:auto" }),
+        " publish even if the decision is unchanged (audit boundary)"),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/profiles/${encodeURIComponent(id)}/snapshots`, {
+          method: "POST",
+          body: JSON.stringify({
+            reason: val("s-reason"), include_defaults: checked("s-defaults"),
+            allow_identical: checked("s-identical"),
+          }),
+        }), "snapshot published") }, "Publish"),
+        el("button", { class: "ghost", onclick: () => act(async () => {
+          state.data.snapshot = await api(`/profiles/${encodeURIComponent(id)}/preview`);
+        }, "previewed (nothing published)") }, "Preview"),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Preview composes without publishing — composition is pure, so it costs nothing and changes " +
+        "nothing. Publishing an unchanged decision is refused unless you ask for an audit boundary."),
+    ),
+    s ? el("div", { class: "card scroll" },
+      el("h2", {}, `Published decision v${s.version}`),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Issued at"), el("dd", { class: "path" }, String(s.issued_at)),
+        el("dt", {}, "Staleness budget"), el("dd", {}, s.max_staleness_seconds + "s"),
+        el("dt", {}, "Resolved from grants"), el("dd", { class: "path" }, s.resolved_from.join(", ") || "—"),
+        el("dt", {}, "Fail-closed gates"), el("dd", {}, s.fail_closed_codes.join(", ") || "—"),
+        el("dt", {}, "Unclassified"), el("dd", {},
+          s.unclassified_gates.length ? el("span", { class: "err" }, s.unclassified_gates.join(", ")) : "none"),
+      ),
+      el("table", { style: "margin-top:.8rem" }, el("thead", {}, el("tr", {},
+        ...["Capability", "Kind", "Value", "Source", "Classification", "Resolution"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...s.entitlements.map(e => el("tr", {},
+          el("td", {}, el("code", {}, e.code)),
+          el("td", {}, e.kind),
+          el("td", {}, e.enabled ? (e.allowance === null ? "unlimited" : String(e.allowance)) : "denied"),
+          el("td", {}, e.source),
+          el("td", {}, pill(e.classification)),
+          el("td", { class: "path" }, e.resolution_path.join(" · ")),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "This is the entire interface between Billing and enforcement. It names no user and no role: " +
+        "reading it tells you what the account is entitled to, never who may act."),
+    ) : el("div", { class: "card muted" }, "No snapshot published for this account yet."),
+  ];
+}
+
+// ── 6. Version History ─────────────────────────────────────────────────────────
+function versionsView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const versions = state.data.versions || [];
+  return [
+    el("div", { class: "card scroll" }, el("h2", {}, `Decisions (${versions.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["v", "Published", "By", "Reason", "Rolled back from", "Capabilities", "Grants", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...versions.map(v => el("tr", {},
+          el("td", { class: "num" }, v.version),
+          el("td", { class: "path" }, String(v.published_at)),
+          el("td", { class: "muted" }, v.published_by || "—"),
+          el("td", {}, v.reason || "—"),
+          el("td", { class: "num" }, v.rolled_back_from == null ? "—" : "v" + v.rolled_back_from),
+          el("td", { class: "num" }, v.entitlement_count),
+          el("td", { class: "num" }, v.grant_count),
+          el("td", {}, el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(`/profiles/${encodeURIComponent(id)}/rollback`, {
+              method: "POST", body: JSON.stringify({ to_version: v.version, reason: "" }),
+            }), `rolled forward to v${v.version}'s decision`),
+          }, "roll back to")),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Rollback publishes a new version carrying an earlier decision. Nothing is rewritten and " +
+        "nothing is deleted — an enforcing plane may have acted on any of these."),
+    ),
+  ];
+}
+
+// ── 7. Why? (inspection) ───────────────────────────────────────────────────────
+function inspectView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const defs = state.data.definitions || [];
+  const x = state.data.explanation;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Why does this account have — or not have — a capability?"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Capability"),
+          el("select", { id: "i-code" }, ...defs.map(d => el("option", {}, d.code)))),
+        el("div", {}, el("label", {}, "At (blank = last change)"), el("input", { id: "i-at", type: "number" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          const at = num("i-at");
+          state.data.explanation = await api(
+            `/profiles/${encodeURIComponent(id)}/inspect/${encodeURIComponent(val("i-code"))}` +
+            (at == null ? "" : `?at=${at}`));
+        }, "resolved") }, "Explain")),
+    ),
+    x ? el("div", { class: "card" },
+      el("h2", {}, `${x.code} — `, x.is_granted ? pill("active") : pill("revoked"),
+        x.contested ? el("span", { class: "pill" }, "contested") : null),
+      x.winner ? el("dl", { class: "kv" },
+        el("dt", {}, "Decided"), el("dd", {},
+          x.winner.enabled ? (x.winner.allowance === null ? "unlimited" : String(x.winner.allowance)) : "denied"),
+        el("dt", {}, "Winning source"), el("dd", {}, `${x.winner.source} (precedence ${x.winner.precedence})`),
+        el("dt", {}, "Resolution path"), el("dd", { class: "path" }, x.winner.resolution_path.join(" · ")),
+      ) : el("p", { class: "muted" }, "No grant was in force for this capability at that instant."),
+      el("h2", { style: "margin-top:1rem" }, `Grants weighed (${x.considered.length})`),
+      el("div", {}, ...x.considered.map(c => el("div", {
+        class: "card " + (c.won ? "won" : "lost"), style: "margin:.4rem 0;padding:.6rem",
+      },
+        el("div", {}, el("code", {}, c.grant_id), " ", pill(c.source), " ",
+          el("span", { class: "muted" }, `precedence ${c.precedence}`),
+          c.won ? el("span", { class: "pill active" }, "won") : null),
+        el("div", { class: "muted", style: "font-size:12px" },
+          (c.value.enabled ? (c.value.allowance === null ? "unlimited" : c.value.allowance) : "denied") +
+          (c.effective ? " · in force" : " · not in force" + (c.excluded_reason ? `: ${c.excluded_reason}` : ""))),
+      ))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Losing grants are shown too. \"Why does this account NOT have X?\" is asked at least as often " +
+        "as the opposite, and it is unanswerable from the winner alone."),
+    ) : null,
+  ];
+}
+
+// ── 8. Diagnostics ─────────────────────────────────────────────────────────────
+function diagnosticsView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const d = state.data.diagnostics;
+  if (!d) return [el("div", { class: "card muted" }, "No diagnostics available.")];
+  return [
+    el("div", { class: "card" }, el("h2", {},
+      `Diagnostics — ${d.error_count} error(s), ${d.warning_count} warning(s)`),
+      d.findings.length === 0
+        ? el("p", { class: "ok" }, "Nothing structurally wrong with this entitlement position.")
+        : el("table", {}, el("thead", {}, el("tr", {},
+            ...["Severity", "Path", "Code", "Message", "Remediation"].map(h => el("th", {}, h)))),
+            el("tbody", {}, ...d.findings.map(f => el("tr", {},
+              el("td", {}, pill(f.severity === "error" ? "revoked" : "suspended")),
+              el("td", { class: "path" }, f.path),
+              el("td", { class: "muted" }, f.code),
+              el("td", {}, f.message),
+              el("td", { class: "muted" }, f.remediation || "—"),
+            )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Every finding is reported, not just the first — a screen that shows one problem at a time " +
+        "turns one fix into five visits."),
+    ),
+  ];
+}
+
+// ── 9. Staleness ───────────────────────────────────────────────────────────────
+function stalenessView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const s = state.data.staleness;
+  if (!s) return [el("div", { class: "card muted" }, "No published snapshot to evaluate.")];
+  return [
+    el("div", { class: "card scroll" },
+      el("h2", {}, `Staleness at ${s.at} — `, s.stale ? pill("deny") : pill("allow")),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Snapshot version"), el("dd", {}, "v" + s.version),
+        el("dt", {}, "Age"), el("dd", {}, `${Math.round(s.age)}s of ${s.max_staleness_seconds}s budget`),
+        el("dt", {}, "Would be denied"), el("dd", {}, s.denied_codes.join(", ") || "none"),
+        el("dt", {}, "Would degrade"), el("dd", {}, s.degraded_codes.join(", ") || "none"),
+      ),
+      el("table", { style: "margin-top:.8rem" }, el("thead", {}, el("tr", {},
+        ...["Gate", "Classification", "Directive if stale"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...s.directives.map(g => el("tr", {},
+          el("td", {}, el("code", {}, g.code)),
+          el("td", {}, pill(g.classification)),
+          el("td", {}, pill(g.directive)),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "The directive comes from each gate's declared classification, so every enforcing plane gets " +
+        "the same answer instead of each doing its own subtraction. Bounded, measured revenue leakage " +
+        "is preferred — explicitly — to a customer-visible interruption."),
+    ),
+  ];
+}
+
+// ── 10. Scheduled Changes ──────────────────────────────────────────────────────
+function scheduleView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const changes = state.data.changes || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Record an intention"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "c-kind" }, ...CHANGE_KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Effective at"), el("input", { id: "c-at", type: "number" })),
+        el("div", {}, el("label", {}, "Capability code"), el("input", { id: "c-code" })),
+        el("div", {}, el("label", {}, "Bundle code"), el("input", { id: "c-bundle" })),
+        el("div", {}, el("label", {}, "Grant id (revoke / adjust)"), el("input", { id: "c-grant" })),
+        el("div", {}, el("label", {}, "Allowance"), el("input", { id: "c-allowance", type: "number", min: "0" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/profiles/${encodeURIComponent(id)}/scheduled-changes`, {
+          method: "POST",
+          body: JSON.stringify({
+            kind: val("c-kind"), effective_at: num("c-at"), entitlement_code: val("c-code"),
+            bundle_code: val("c-bundle"), grant_id: val("c-grant"),
+            value: { enabled: true, allowance: num("c-allowance") },
+          }),
+        }), "intention recorded") }, "Schedule")),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Nothing fires this. There is no scheduler in this domain — a caller dispatches the real " +
+        "command when the time comes, and it is validated then, exactly as if a human had asked."),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Pending intentions (${changes.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Kind", "Effective at", "Capability", "Bundle", "Grant", "Status", "Actions"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...changes.map(c => el("tr", {},
+          el("td", {}, c.kind),
+          el("td", { class: "path" }, String(c.effective_at)),
+          el("td", {}, c.entitlement_code || "—"),
+          el("td", {}, c.bundle_code || "—"),
+          el("td", { class: "muted" }, c.grant_id || "—"),
+          el("td", {}, pill(c.status)),
+          el("td", {}, c.status === "pending" ? el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(
+              `/profiles/${encodeURIComponent(id)}/scheduled-changes/${c.id}`, { method: "DELETE" }),
+              "intention cancelled"),
+          }, "cancel") : null),
+        )))),
+    ),
+  ];
+}
+
+// ── 11. Timeline ───────────────────────────────────────────────────────────────
+function timelineView() {
+  const id = account();
+  if (!id) return [needsAccount()];
+  const events = state.data.timeline || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, `Entitlement history (${events.length})`),
+      el("div", { class: "timeline" }, ...events.map(e => el("div", { class: "ev" },
+        el("code", {}, e.action), " ",
+        e.entitlement_code ? el("span", {}, e.entitlement_code + " ") : null,
+        e.from_state ? el("span", { class: "muted" }, `${e.from_state} → ${e.to_state} `) : null,
+        el("span", { class: "muted path" }, `${e.at} ${e.actor_id || "system"}`),
+        e.detail ? el("div", { class: "muted", style: "font-size:12px" }, e.detail) : null,
+      ))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Append-only. Nothing here is edited or removed."),
+    ),
+  ];
+}
+
+const VIEWS = {
+  registry: registryView, bundles: bundlesView, profile: profileView, grants: grantsView,
+  snapshot: snapshotView, versions: versionsView, inspect: inspectView,
+  diagnostics: diagnosticsView, staleness: stalenessView, schedule: scheduleView,
+  timeline: timelineView,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; load(); },
+  }, label)));
+  const main = document.getElementById("view");
+  main.replaceChildren(
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice ? el("div", { class: "card" }, el("div", { class: "ok" }, state.notice)) : null,
+    ...(VIEWS[state.tab] || registryView)(),
+  );
+}
+
+document.getElementById("selected").addEventListener("change", load);
+document.getElementById("token").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>

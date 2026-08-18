@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Invoices</title>
+<!--
+  Invoice Engine Studio (M9.14).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no document rule, and knows
+  nothing the API does not tell it — every screen renders a response from
+  /v1/billing/documents/*, and every action dispatches to it.
+
+  It never computes a total. Not once. Every figure on the Document screen is the server's sealed
+  snapshot total; the amount due is the server's; the gapless verdict on the Numbering screen is the
+  server's. There is no arithmetic on any monetary value anywhere in this file, and a test asserts
+  it — a client that adds up its own column on an *invoice* is a client that will eventually print a
+  figure the customer is asked to pay and the ledger has never seen.
+
+  It also renders no document. The HTML and PDF shown on the Rendering screen come from the server
+  as prepared artefacts carrying the snapshot digest they were produced from; the Studio displays
+  them and adds nothing, so what a customer sees in the browser is byte-identical to what was
+  issued.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.issued, .pill.paid, .pill.invoice { color:var(--ok); border-color:var(--ok); }
+  .pill.pending_approval, .pill.overdue, .pill.debit_note { color:var(--warn); border-color:var(--warn); }
+  .pill.in_collection, .pill.voided, .pill.credit_note { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.credited { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .paper { background:#fff; color:#111; border-radius:6px; padding:0; overflow:hidden; }
+  .paper iframe { width:100%; height:640px; border:0; background:#fff; }
+  pre.plain { white-space:pre-wrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+              font-size:11px; background:var(--bg); border:1px solid var(--line);
+              border-radius:6px; padding:.8rem; max-height:640px; overflow:auto; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Invoices</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:150px" />
+  <input id="period" placeholder="accounting period key" style="width:190px" />
+  <input id="document" placeholder="document id" style="width:170px" />
+  <input id="token" placeholder="Bearer token" style="width:160px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/documents";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "documents", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["documents", "Documents"], ["prepare", "Prepare"], ["document", "Document"],
+  ["rendering", "Rendering"], ["corrections", "Corrections"], ["relations", "Relations"],
+  ["revisions", "Revisions"], ["numbering", "Numbering"], ["reconcile", "Reconcile"],
+  ["delivery", "Delivery"], ["activity", "Activity"],
+];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+function amount(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function pkey() { return val("period"); }
+function docId() { return val("document"); }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function when(t) {
+  return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "—";
+}
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "documents" || t === "prepare") {
+      state.data.documents = await api(q({ account_id: acct(), accounting_period_key: "" }));
+    }
+    if (t === "prepare" && acct() && pkey()) {
+      state.data.preview = await api("/preview" + q({ account_id: acct(), accounting_period_key: pkey() }));
+    }
+    if (t === "document" && docId()) {
+      state.data.document = await api(`/${docId()}/document`);
+      state.data.header = await api(`/${docId()}`);
+      state.data.inspection = await api(`/${docId()}/inspect`);
+    }
+    if (t === "rendering" && docId()) {
+      state.data.html = await api(`/${docId()}/rendered` + q({ format: "html" }));
+      state.data.pdf = await api(`/${docId()}/rendered` + q({ format: "pdf" }));
+    }
+    if (t === "corrections" && docId()) {
+      state.data.header = await api(`/${docId()}`);
+      state.data.relations = await api(`/${docId()}/relations`);
+    }
+    if (t === "relations" && docId()) state.data.relations = await api(`/${docId()}/relations`);
+    if (t === "revisions" && docId()) state.data.revisions = await api(`/${docId()}/revisions`);
+    if (t === "reconcile" && docId()) {
+      state.data.reconciliation = await api(`/${docId()}/reconciliation`);
+      state.data.diagnostics = await api(`/${docId()}/diagnostics`);
+    }
+    if (t === "delivery" && docId()) state.data.header = await api(`/${docId()}`);
+    if (t === "activity") state.data.activity = await api("/activity" + q({ account_id: acct() }));
+    const all = state.data.documents || [];
+    document.getElementById("count-pill").textContent =
+      all.length ? `${all.length} document(s)` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try { const r = await fn(); state.notice = "done"; if (r && r.id) document.getElementById("document").value = r.id; }
+  catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...headers.map(h =>
+      el("th", { class: String(h).startsWith("#") ? "num" : "" }, String(h).replace(/^#/, ""))))),
+    el("tbody", {}, rows.length ? rows
+      : el("tr", {}, el("td", { colspan: headers.length, class: "muted" }, "nothing yet")))));
+}
+function field(id, label, value, placeholder) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("input", { id, value: value || "", placeholder: placeholder || "" }));
+}
+function select(id, label, options, value) {
+  return el("div", {}, el("label", { for: id }, label),
+    el("select", { id }, ...options.map(o =>
+      el("option", { value: o, ...(o === value ? { selected: "selected" } : {}) }, o || "(any)"))));
+}
+
+// ── 1. Documents ───────────────────────────────────────────────────────────────
+function documentsScreen() {
+  const rows = (state.data.documents || []).map(d =>
+    el("tr", {},
+      el("td", {}, el("code", {}, d.number || "—")),
+      el("td", {}, pill(d.kind)),
+      el("td", {}, pill(d.state)),
+      el("td", { class: "num" }, amount(d.total)),
+      el("td", { class: "num" }, amount(d.amount_due)),
+      el("td", {}, d.accounting_period_key || "—"),
+      el("td", {}, when(d.issued_at)),
+      el("td", {}, el("span", { class: "digest" }, short(d.snapshot_digest))),
+      el("td", {}, ...(d.allowed_triggers || []).map(t =>
+        el("button", { class: "ghost", onclick: () => act(() => trigger(d, t)) }, t))),
+      el("td", {}, el("button", { class: "ghost",
+        onclick: () => { document.getElementById("document").value = d.id; state.tab = "document"; load(); } }, "open"))));
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Documents"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Invoices, credit notes and debit notes. The lifecycle buttons are the server's " +
+        "allowed_triggers — the Studio never decides what may happen next, so it can never offer a " +
+        "transition the state machine would refuse. There is no delete and no edit: an issued " +
+        "document is corrected by a credit or debit note."),
+      table(["Number", "Kind", "State", "#Total", "#Due", "Period", "Issued", "Digest", "Lifecycle", ""], rows)),
+  ];
+}
+
+// The one place a lifecycle action is sent. Which actions exist came from the server.
+function trigger(d, t) {
+  const path = {
+    submit_for_approval: "submit", issue: "issue", approve: "issue", void: "void",
+    mark_paid: "paid", mark_overdue: "overdue", send_to_collection: "collection",
+  }[t];
+  const body = t === "approve" ? { approve: true } : {};
+  return api(`/${d.id}/${path}`, { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── 2. Prepare ─────────────────────────────────────────────────────────────────
+function prepareScreen() {
+  const p = state.data.preview;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Prepare a document from a closed accounting period"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "An open period is refused: a document states a figure that has stopped moving. " +
+        "Preparing twice returns the same draft — the id is derived from what it documents."),
+      el("div", { class: "row" },
+        field("p-entity", "Legal entity code", "VOX"),
+        field("p-juris", "Jurisdiction", ""),
+        field("p-supplier", "Supplier legal name", ""),
+        field("p-terms", "Payment terms (days)", "30")),
+      el("div", { class: "row" },
+        field("p-po", "Purchase order reference", ""),
+        field("p-template", "Template code", "standard"),
+        field("p-locale", "Locale", "en-IN")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: acct(),
+            accounting_period_key: pkey(),
+            entity_code: val("p-entity"),
+            jurisdiction: val("p-juris"),
+            supplier: val("p-supplier") ? { legal_name: val("p-supplier") } : null,
+            presentation: { template_code: val("p-template") || "standard", locale: val("p-locale") || "en-IN" },
+            purchase_order_ref: val("p-po"),
+            payment_terms_days: Number(val("p-terms") || 0),
+          }),
+        })) }, "Prepare draft"))),
+    p ? el("div", { class: "card" },
+      el("h2", {}, "Preview — what the document would say"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "A pure read. Nothing is persisted and no number is allocated, so you can look before a " +
+        "one-way door opens."),
+      linesTable(p), totalsList(p)) : null,
+  ];
+}
+
+// ── 3. Document ────────────────────────────────────────────────────────────────
+function linesTable(doc) {
+  const rows = (doc.lines || []).map(l =>
+    el("tr", {},
+      el("td", { class: "num" }, l.sequence),
+      el("td", {}, l.description),
+      el("td", {}, pill(l.kind)),
+      el("td", {}, l.tax_rate_basis_points ? l.tax_rate_basis_points + " bp" : "—"),
+      el("td", { class: "num" }, amount(l.amount)),
+      el("td", {}, el("span", { class: "digest" }, short(l.journal_entry_id) || "—"))));
+  return table(["##", "Description", "Kind", "Tax rate", "#Amount", "Ledger entry"], rows);
+}
+
+function totalsList(doc) {
+  const t = doc.totals;
+  if (!t) return null;
+  // Every figure below is the server's. Nothing here is added, subtracted, or re-derived.
+  return el("dl", { class: "kv", style: "margin-top:.8rem" },
+    el("dt", {}, "Subtotal"), el("dd", { class: "mono" }, amount(t.subtotal)),
+    el("dt", {}, "Discounts"), el("dd", { class: "mono" }, amount(t.discount_total)),
+    el("dt", {}, "Tax"), el("dd", { class: "mono" }, amount(t.tax_total)),
+    el("dt", {}, "Credit applied"), el("dd", { class: "mono" }, amount(t.credit_applied)),
+    el("dt", {}, "Total"), el("dd", { class: "mono big" }, amount(t.total)),
+    el("dt", {}, "Amount due"), el("dd", { class: "mono big" }, amount(t.amount_due)));
+}
+
+function documentScreen() {
+  const d = state.data.document, h = state.data.header, i = state.data.inspection;
+  if (!d) return [el("div", { class: "card" }, el("p", { class: "muted" }, "Enter a document id."))];
+  const party = (p) => el("dd", {}, p.legal_name,
+    el("div", { class: "muted", style: "font-size:12px" },
+      [p.line1, p.city, p.region, p.postal_code, p.country].filter(Boolean).join(", ")),
+    ...(p.registrations || []).map(r => el("div", { class: "mono" }, r[0] + ": " + r[1])));
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, (d.number || "DRAFT") + " · " + d.kind.replace("_", " ")),
+      el("dl", { class: "kv" },
+        el("dt", {}, "From"), party(d.supplier),
+        el("dt", {}, "Bill to"), party(d.customer),
+        el("dt", {}, "Issue date"), el("dd", {}, when(d.issue_date)),
+        el("dt", {}, "Due date"), el("dd", {}, when(d.due_date)),
+        el("dt", {}, "Accounting period"), el("dd", { class: "mono" }, d.accounting_period_key || "—"),
+        el("dt", {}, "Tax treatment"), el("dd", {}, d.tax_treatment),
+        el("dt", {}, "Place of supply"), el("dd", {}, d.place_of_supply || "—"),
+        el("dt", {}, "Purchase order"), el("dd", {}, d.purchase_order_ref || "—"),
+        el("dt", {}, "Payment terms"), el("dd", {}, d.payment_terms || "—"),
+        el("dt", {}, "Template"), el("dd", {}, d.template_code + " v" + d.template_version),
+        el("dt", {}, "Revision"), el("dd", {}, d.revision),
+        el("dt", {}, "Content digest"), el("dd", { class: "digest" }, d.digest))),
+    el("div", { class: "card" }, el("h2", {}, "Lines"), linesTable(d), totalsList(d)),
+    i ? el("div", { class: "card" },
+      el("h2", {}, "Inspection"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Sound"), el("dd", {}, i.is_sound ? "yes" : "no"),
+        el("dt", {}, "Sealed"), el("dd", {}, i.is_sealed ? "yes" : "no"),
+        el("dt", {}, "Every line traced to a ledger entry"), el("dd", {}, i.is_traced ? "yes" : "no"),
+        el("dt", {}, "Header agrees with its lines"), el("dd", {}, i.totals_agree ? "yes" : "no")),
+      (i.notes || []).length ? el("p", { class: "muted", style: "font-size:12px" }, i.notes.join(" · ")) : null) : null,
+    h ? el("div", { class: "card" }, el("h2", {}, "State"),
+      el("p", {}, pill(h.state), " ", h.is_editable ? el("span", { class: "muted" }, "editable")
+        : el("span", { class: "muted" }, "immutable — corrections are credit or debit notes"))) : null,
+  ];
+}
+
+// ── 4. Rendering ───────────────────────────────────────────────────────────────
+function renderingScreen() {
+  const h = state.data.html, p = state.data.pdf;
+  if (!docId()) return [el("div", { class: "card" }, el("p", { class: "muted" }, "Enter a document id."))];
+  const frame = (r) => {
+    const f = el("iframe", { sandbox: "", title: "rendered invoice" });
+    // The server produced this markup from the sealed snapshot. The Studio hands it straight to a
+    // sandboxed frame and adds nothing — what is displayed is what was issued.
+    f.setAttribute("srcdoc", r.content);
+    return el("div", { class: "paper" }, f);
+  };
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Rendering"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Rendered by the server from the sealed snapshot, never in the browser. Each artefact " +
+        "carries the digest of the content it came from, so 'is this the document we issued?' is a " +
+        "comparison rather than an argument."),
+      el("div", { style: "margin-bottom:.8rem" },
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${docId()}/render`, { method: "POST", body: JSON.stringify({ format: "html" }) })) }, "render html"),
+        " ",
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${docId()}/render`, { method: "POST", body: JSON.stringify({ format: "pdf" }) })) }, "render pdf"))),
+    h ? el("div", { class: "card" },
+      el("h2", {}, "HTML"),
+      el("p", { class: "digest" }, h.snapshot_digest + " · " + h.template_code + " v" + h.template_version + " · " + h.byte_size + " bytes"),
+      frame(h)) : null,
+    p ? el("div", { class: "card" },
+      el("h2", {}, "PDF document model"),
+      el("p", { class: "digest" }, p.snapshot_digest + " · " + p.byte_size + " bytes"),
+      el("pre", { class: "plain" }, p.content)) : null,
+  ];
+}
+
+// ── 5. Corrections ─────────────────────────────────────────────────────────────
+function correctionsScreen() {
+  const h = state.data.header;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Corrections"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "An issued document is never edited. A credit note reduces it, a debit note adds to it, " +
+        "and a full credit note is the legal form of cancellation. Both are numbered, issued, " +
+        "immutable documents in their own right, and both reference the original."),
+      h ? el("p", {}, "Correcting ", el("code", {}, h.number || h.id), " ", pill(h.state)) : null,
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api(`/${docId()}/credit-notes`, { method: "POST",
+            body: JSON.stringify({ cancel: true, reason: prompt("Reason for the full credit note?") || "" }) })) },
+          "Credit in full (cancel)"))),
+    el("div", { class: "card" },
+      el("h2", {}, "Partial credit note"),
+      el("div", { class: "row" },
+        field("c-desc", "Description", ""),
+        field("c-minor", "Amount (minor units)", ""),
+        field("c-cur", "Currency", "INR"),
+        field("c-reason", "Reason", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api(`/${docId()}/credit-notes`, { method: "POST", body: JSON.stringify({
+            reason: val("c-reason"),
+            lines: [{ description: val("c-desc"),
+                      amount: { minor: Number(val("c-minor") || 0), currency: val("c-cur") || "INR" } }],
+          }) })) }, "Issue credit note"))),
+    el("div", { class: "card" },
+      el("h2", {}, "Debit note"),
+      el("div", { class: "row" },
+        field("dn-desc", "Description", ""),
+        field("dn-minor", "Amount (minor units)", ""),
+        field("dn-cur", "Currency", "INR"),
+        field("dn-reason", "Reason", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api(`/${docId()}/debit-notes`, { method: "POST", body: JSON.stringify({
+            reason: val("dn-reason"),
+            lines: [{ description: val("dn-desc"),
+                      amount: { minor: Number(val("dn-minor") || 0), currency: val("dn-cur") || "INR" } }],
+          }) })) }, "Issue debit note"))),
+  ];
+}
+
+// ── 6. Relations ───────────────────────────────────────────────────────────────
+function relationsScreen() {
+  const rows = (state.data.relations || []).map(d =>
+    el("tr", {},
+      el("td", {}, el("code", {}, d.number || "—")),
+      el("td", {}, pill(d.kind)),
+      el("td", {}, pill(d.state)),
+      el("td", { class: "num" }, amount(d.total)),
+      el("td", {}, (d.relations || []).map(r => r.kind).join(", ") || "—"),
+      el("td", {}, when(d.issued_at))));
+  return [el("div", { class: "card" },
+    el("h2", {}, "Document relationships"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Every document that credits, debits, cancels or replaces this one — and the back-reference " +
+      "recorded on the original, so a reader who starts at the invoice finds the correction."),
+    table(["Number", "Kind", "State", "#Total", "Relation", "Issued"], rows))];
+}
+
+// ── 7. Revisions ───────────────────────────────────────────────────────────────
+function revisionsScreen() {
+  const rows = (state.data.revisions || []).map(r =>
+    el("tr", {},
+      el("td", { class: "num" }, r.revision),
+      el("td", {}, r.issued ? pill("issued") : pill("draft")),
+      el("td", {}, when(r.at)),
+      el("td", {}, r.actor_id || "—"),
+      el("td", {}, r.reason || "—"),
+      el("td", {}, el("span", { class: "digest" }, r.snapshot_digest))));
+  return [el("div", { class: "card" },
+    el("h2", {}, "Revision history"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only, and it survives issuance. Exactly one revision is ever issued; the document " +
+      "pins that revision's digest, so a later revision could not become the issued document by " +
+      "being newer."),
+    table(["#Rev", "Issued", "When", "Actor", "Reason", "Digest"], rows))];
+}
+
+// ── 8. Numbering ───────────────────────────────────────────────────────────────
+function numberingScreen() {
+  const a = state.data.series;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Number series audit"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Gapless where the jurisdiction requires it. Read from the allocation ledger rather than " +
+        "from the numbers printed on documents — a sequence allocated to an issue that then failed " +
+        "is a real hole, and auditing the documents alone would hide it."),
+      el("div", { class: "row" }, field("s-key", "Series key", "", "VOX:KA:invoice")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: async () => {
+          state.error = "";
+          try { state.data.series = await api("/number-series/" + encodeURIComponent(val("s-key"))); }
+          catch (e) { state.error = e.message; }
+          render();
+        } }, "Audit series"))),
+    a ? el("div", { class: "card" },
+      el("h2", {}, a.series_key),
+      el("p", { class: "big" }, a.is_gapless ? "gapless" : "GAPS FOUND"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Allocated"), el("dd", { class: "mono" }, a.allocated),
+        el("dt", {}, "Lowest"), el("dd", { class: "mono" }, a.lowest),
+        el("dt", {}, "Highest"), el("dd", { class: "mono" }, a.highest),
+        el("dt", {}, "Missing"), el("dd", { class: "mono" }, (a.missing || []).join(", ") || "none"),
+        el("dt", {}, "Duplicated"), el("dd", { class: "mono" }, (a.duplicated || []).join(", ") || "none"))) : null,
+  ];
+}
+
+// ── 9. Reconcile ───────────────────────────────────────────────────────────────
+function reconcileScreen() {
+  const r = state.data.reconciliation, d = state.data.diagnostics;
+  const rows = ((r && r.discrepancies) || []).map(x =>
+    el("tr", {}, el("td", {}, pill(x.kind)),
+      el("td", {}, el("span", { class: "digest" }, short(x.journal_entry_id) || "—")),
+      el("td", { class: "num" }, x.expected_minor),
+      el("td", { class: "num" }, x.actual_minor),
+      el("td", { class: "muted" }, x.detail || "—")));
+  const findings = ((d && d.findings) || []).map(f =>
+    el("tr", {}, el("td", {}, f.severity), el("td", {}, el("code", {}, f.code)),
+      el("td", {}, f.path), el("td", {}, f.message)));
+  return [
+    r ? el("div", { class: "card" },
+      el("h2", {}, "Reconciliation against the ledger"),
+      el("p", { class: "big" }, r.is_clean ? "clean" : `${r.discrepancies.length} discrepancy(ies)`),
+      el("p", { class: "muted", style: "font-size:12px" },
+        `${r.entries_examined} ledger entry(ies) · ${r.lines_examined} document line(s)`),
+      table(["Kind", "Ledger entry", "#Expected", "#Actual", "Detail"], rows)) : null,
+    d ? el("div", { class: "card" },
+      el("h2", {}, "Diagnostics"),
+      el("p", {}, d.is_valid ? "valid" : "findings present"),
+      table(["Severity", "Code", "Path", "Message"], findings)) : null,
+  ];
+}
+
+// ── 10. Delivery ───────────────────────────────────────────────────────────────
+function deliveryScreen() {
+  const h = state.data.header, dv = h && h.delivery;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Delivery"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "The Invoice Engine sends nothing. A delivery agent outside this boundary reports what " +
+        "happened and this records it — which is what stops an invoice domain growing a mailer."),
+      dv ? el("dl", { class: "kv" },
+        el("dt", {}, "Channel"), el("dd", {}, dv.channel),
+        el("dt", {}, "Recipient"), el("dd", {}, dv.recipient || "—"),
+        el("dt", {}, "State"), el("dd", {}, pill(dv.state)),
+        el("dt", {}, "Attempts"), el("dd", { class: "mono" }, dv.attempts),
+        el("dt", {}, "Delivered"), el("dd", {}, when(dv.delivered_at)),
+        el("dt", {}, "Failure"), el("dd", {}, dv.failure_reason || "—")) : null,
+      el("div", { class: "row", style: "margin-top:.8rem" },
+        select("d-channel", "Channel", ["email", "portal", "api", "post", "none"]),
+        field("d-recipient", "Recipient", ""),
+        select("d-state", "Reported state", ["sent", "delivered", "failed", "suppressed", "pending"]),
+        field("d-fail", "Failure reason", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api(`/${docId()}/delivery`, { method: "POST", body: JSON.stringify({
+            channel: val("d-channel"), recipient: val("d-recipient"),
+            state: val("d-state"), failure_reason: val("d-fail") }) })) }, "Record delivery"))),
+    el("div", { class: "card" },
+      el("h2", {}, "Attachments"),
+      el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+        "Metadata only — no bytes cross this boundary. The Invoice records that an attachment " +
+        "exists, what it is, and its content digest; storing the object belongs elsewhere."),
+      el("div", { class: "row" },
+        field("a-file", "Filename", ""),
+        field("a-media", "Media type", "application/pdf"),
+        select("a-purpose", "Purpose", ["usage_detail", "purchase_order", "tax_certificate", "contract", "other"]),
+        field("a-digest", "Content digest", "")),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() =>
+          api(`/${docId()}/attachments`, { method: "POST", body: JSON.stringify({
+            filename: val("a-file"), media_type: val("a-media"),
+            purpose: val("a-purpose"), content_digest: val("a-digest") }) })) }, "Record attachment"))),
+  ];
+}
+
+// ── 11. Activity ───────────────────────────────────────────────────────────────
+function activityScreen() {
+  const events = (state.data.activity || []).map(a =>
+    el("div", { class: "ev" },
+      el("code", {}, a.action), " ",
+      el("span", { class: "muted" }, when(a.at)), " ",
+      a.document_number ? el("strong", {}, a.document_number) : null, " ",
+      a.revision ? el("span", { class: "muted" }, "rev " + a.revision) : null, " ",
+      a.actor_id ? el("span", { class: "muted" }, "by " + a.actor_id) : null,
+      a.detail ? el("div", { class: "muted", style: "font-size:12px" }, a.detail) : null));
+  return [el("div", { class: "card" },
+    el("h2", {}, "Invoice activity"),
+    el("p", { class: "muted", style: "font-size:12px;margin:0 0 .8rem" },
+      "Append-only. Every preparation, revision, issuance, correction, rendering and delivery " +
+      "report — and it survives a restart, because it is stored rather than remembered."),
+    el("div", { class: "timeline" }, ...(events.length ? events
+      : [el("p", { class: "muted" }, "nothing yet")])))];
+}
+
+const SCREENS = {
+  documents: documentsScreen, prepare: prepareScreen, document: documentScreen,
+  rendering: renderingScreen, corrections: correctionsScreen, relations: relationsScreen,
+  revisions: revisionsScreen, numbering: numberingScreen, reconcile: reconcileScreen,
+  delivery: deliveryScreen, activity: activityScreen,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; state.notice = ""; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const screen = SCREENS[state.tab]();
+  view.replaceChildren(
+    ...(Array.isArray(screen) ? screen.filter(Boolean) : [screen]),
+    state.error ? el("div", { class: "err" }, state.error) : null,
+    state.notice ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+for (const id of ["account", "period", "document"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

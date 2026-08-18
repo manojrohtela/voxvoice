@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Ledger</title>
+<!--
+  Credit & Revenue Ledger Studio (M9.13).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no accounting rule, and knows
+  nothing the API does not tell it — every screen renders a response from
+  /v1/billing/accounting/*, and every action dispatches to it.
+
+  It never computes a balance. Not once. The balance shown on the Balance screen is the server's
+  derived figure; the trial balance totals are the server's; the replay verdict is the server's.
+  There is no arithmetic on any monetary value anywhere in this file, and a test asserts it — in a
+  ledger, a client that adds up its own column is a client that will eventually disagree with the
+  books and be believed.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.posted, .pill.open, .pill.active, .pill.debit { color:var(--ok); border-color:var(--ok); }
+  .pill.duplicate, .pill.closing, .pill.deferred { color:var(--warn); border-color:var(--warn); }
+  .pill.rejected, .pill.revoked, .pill.credit { color:var(--bad); border-color:var(--bad); }
+  .pill.closed, .pill.expired, .pill.consumed { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Ledger</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:170px" />
+  <input id="period" placeholder="period key" style="width:170px" />
+  <input id="currency" placeholder="INR" value="INR" style="width:70px" />
+  <input id="token" placeholder="Bearer token" style="width:180px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/accounting";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "balance", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["balance", "Balance"], ["entries", "Entries"], ["post", "Post"], ["periods", "Periods"],
+  ["trial", "Trial Balance"], ["credits", "Credits"], ["replay", "Replay"],
+  ["reconcile", "Reconcile"], ["inspect", "Inspection"], ["search", "Search"],
+  ["timeline", "Timeline"],
+];
+
+const ENTRY_TYPES = ["charge","discount","tax","credit_applied","payment","refund",
+                     "chargeback","adjustment","write_off","payable"];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing.
+function amount(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency || ""}`.trim();
+}
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function pkey() { return val("period"); }
+function cur() { return val("currency") || "INR"; }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    if (!acct()) { render(); return; }
+    if (state.tab === "balance")
+      state.data.balance = await api("/balance" + q({ account_id: acct(), currency: cur() }));
+    if (state.tab === "entries" || state.tab === "post")
+      state.data.entries = await api("/entries" + q({ account_id: acct(), period_key: pkey() }));
+    if (state.tab === "periods")
+      state.data.periods = await api("/periods" + q({ account_id: acct() }));
+    if (state.tab === "trial" && pkey())
+      state.data.trial = await api("/trial-balance" + q({ account_id: acct(), period_key: pkey(), currency: cur() }));
+    if (state.tab === "credits") {
+      state.data.credits = await api("/credits" + q({ account_id: acct() }));
+      state.data.position = await api("/credits/position" + q({ account_id: acct(), currency: cur() }));
+    }
+    if (state.tab === "replay" && pkey())
+      state.data.replay = await api("/replay" + q({ account_id: acct(), period_key: pkey(), currency: cur() }));
+    if (state.tab === "inspect" && pkey())
+      state.data.inspect = await api("/inspect" + q({ account_id: acct(), period_key: pkey(), currency: cur() }));
+    if (state.tab === "search")
+      state.data.search = await api("/search" + q({ account_id: acct(), limit: 100 }));
+    if (state.tab === "timeline")
+      state.data.timeline = await api("/timeline" + q({ account_id: acct(), limit: 200 }));
+    const n = (state.data.entries || []).length;
+    document.getElementById("count-pill").textContent = n ? `${n} entr(ies)` : "—";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsAccount() {
+  return el("div", { class: "card muted" }, "Enter an account id (and a period key) in the header.");
+}
+
+// ── 1. Balance ─────────────────────────────────────────────────────────────────
+function balanceScreen() {
+  const b = state.data.balance;
+  if (!b) return needsAccount();
+  return el("div", { class: "card" },
+    el("h2", {}, "Outstanding — derived on every read, never stored"),
+    el("div", { class: "big" }, amount(b.outstanding)),
+    el("p", { class: "muted" },
+      b.is_in_credit ? "The customer is in credit — we owe them."
+        : b.is_settled ? "Settled." : "Owed by the customer."),
+    el("dl", { class: "kv", style: "margin-top:.8rem" },
+      el("dt", {}, "Debits"), el("dd", {}, amount(b.debits)),
+      el("dt", {}, "Credits"), el("dd", {}, amount(b.credits)),
+      el("dt", {}, "Entries folded"), el("dd", {}, String(b.entry_count)),
+      el("dt", {}, "Through sequence"), el("dd", {}, String(b.through_sequence)),
+      el("dt", {}, "Balance digest"), el("dd", { class: "digest" }, short(b.digest)),
+    ),
+  );
+}
+
+// ── 2. Entries ─────────────────────────────────────────────────────────────────
+function entriesScreen() {
+  const entries = state.data.entries || [];
+  return el("div", { class: "card scroll" },
+    el("h2", {}, "Journal entries"),
+    el("table", {},
+      el("thead", {}, el("tr", {},
+        ["#", "Entry", "Type", "Dir", "Amount", "Source", "Period", "Traced", ""].map(h =>
+          el("th", { class: h === "Amount" || h === "#" ? "num" : "" }, h)))),
+      el("tbody", {}, entries.map(e => el("tr", {},
+        el("td", { class: "num" }, e.sequence),
+        el("td", { class: "mono" }, e.id.slice(0, 12)),
+        el("td", {}, pill(e.entry_type)),
+        el("td", {}, pill(e.direction)),
+        el("td", { class: "num" }, amount(e.amount)),
+        el("td", { class: "muted" }, e.source + (e.was_late ? ` (${e.disposition})` : "")),
+        el("td", { class: "mono" }, e.period_key),
+        el("td", {}, e.references.is_traced ? "yes" : el("span", { class: "err" }, "no")),
+        el("td", {},
+          e.is_correction ? el("span", { class: "muted" }, "correction") : [
+            el("button", { class: "ghost", onclick: () => act(() => api(`/entries/${e.id}/reverse`, {
+              method: "POST", body: JSON.stringify({ reason: "" }),
+            }), `${e.id.slice(0,12)} reversed`) }, "reverse"),
+            el("button", { class: "ghost", onclick: () => act(() => api(`/entries/${e.id}/adjust`, {
+              method: "POST", body: JSON.stringify({ delta_minor: Number(prompt("delta in minor units", "-1000") || 0), reason: "" }),
+            }), `${e.id.slice(0,12)} adjusted`) }, "adjust"),
+          ]),
+      ))),
+    ),
+  );
+}
+
+// ── 3. Post ────────────────────────────────────────────────────────────────────
+function postScreen() {
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Record a finalized rating run"),
+      el("p", { class: "muted" },
+        "The only path from a commercial fact to a financial one. A provisional run is refused, and re-posting records nothing."),
+      el("label", { for: "run" }, "Rating run id"),
+      el("input", { id: "run", placeholder: "rat_…" }),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          const r = await api("/postings/rating-run", {
+            method: "POST", body: JSON.stringify({ rating_run_id: val("run") }),
+          });
+          state.notice = `posted ${r.posted}, duplicates ${r.duplicates}, deferred ${r.deferred}`;
+        }, "run posted") }, "Post run"),
+      ),
+    ),
+    el("div", { class: "card" },
+      el("h2", {}, "Operator posting"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { for: "p-type" }, "Entry type"),
+          el("select", { id: "p-type" }, ENTRY_TYPES.map(t => el("option", { value: t }, t)))),
+        el("div", {}, el("label", { for: "p-dir" }, "Direction"),
+          el("select", { id: "p-dir" }, ["debit", "credit"].map(d => el("option", { value: d }, d)))),
+        el("div", {}, el("label", { for: "p-minor" }, "Amount (minor units)"),
+          el("input", { id: "p-minor", type: "number" })),
+        el("div", {}, el("label", { for: "p-desc" }, "Description"), el("input", { id: "p-desc" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/postings", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: acct(), entry_type: val("p-type"), direction: val("p-dir"),
+            amount: { minor: Number(val("p-minor") || 0), currency: cur() },
+            description: val("p-desc"),
+          }),
+        }), "entry posted") }, "Post entry"),
+      ),
+    ),
+  ];
+}
+
+// ── 4. Periods ─────────────────────────────────────────────────────────────────
+function periodsScreen() {
+  const periods = state.data.periods || [];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Open an accounting period"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { for: "ps" }, "Start"), el("input", { id: "ps" })),
+        el("div", {}, el("label", { for: "pe" }, "End"), el("input", { id: "pe" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/periods", {
+          method: "POST",
+          body: JSON.stringify({ account_id: acct(), period_start: Number(val("ps")),
+                                 period_end: Number(val("pe")), currency: cur() }),
+        }), "period opened") }, "Open"),
+      ),
+    ),
+    el("div", { class: "card scroll" },
+      el("h2", {}, "Accounting periods"),
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          ["Period", "State", "Entries", "Debits", "Credits", "Closing", "Close digest", ""].map(h =>
+            el("th", { class: ["Entries","Debits","Credits","Closing"].includes(h) ? "num" : "" }, h)))),
+        el("tbody", {}, periods.map(p => el("tr", {},
+          el("td", { class: "mono" }, p.period_key),
+          el("td", {}, pill(p.state)),
+          el("td", { class: "num" }, p.entry_count),
+          el("td", { class: "num" }, amount(p.debits)),
+          el("td", { class: "num" }, amount(p.credits)),
+          el("td", { class: "num" }, amount(p.closing_balance)),
+          el("td", { class: "digest" }, short(p.close_digest)),
+          // Buttons come from `allowed_triggers` — the server decides which moves exist, and a
+          // closed period returns none, so the UI cannot offer to reopen one.
+          el("td", {}, p.allowed_triggers.map(t => el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(t === "close" ? "/periods/close" : "/periods/close/begin", {
+              method: "POST",
+              body: JSON.stringify({ account_id: acct(), period_key: p.period_key }),
+            }), `${p.period_key}: ${t}`),
+          }, t))),
+        ))),
+      ),
+    ),
+  ];
+}
+
+// ── 5. Trial balance ───────────────────────────────────────────────────────────
+function trialScreen() {
+  const t = state.data.trial;
+  if (!t) return needsAccount();
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Trial balance — ${t.period_key}`),
+    el("p", { class: t.reconciles ? "ok" : "err" },
+      t.reconciles ? "Opening + movement = closing." : "This period does not reconcile."),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Entry type", "Debits", "Credits", "Net", "Count"].map(h =>
+        el("th", { class: h === "Entry type" ? "" : "num" }, h)))),
+      el("tbody", {}, t.lines.map(l => el("tr", {},
+        el("td", {}, pill(l.entry_type)),
+        el("td", { class: "num" }, amount(l.debits)),
+        el("td", { class: "num" }, amount(l.credits)),
+        el("td", { class: "num" }, amount(l.net)),
+        el("td", { class: "num" }, l.entry_count),
+      ))),
+      el("tfoot", {}, el("tr", {},
+        el("td", {}, el("strong", {}, "Total")),
+        el("td", { class: "num" }, el("strong", {}, amount(t.total_debits))),
+        el("td", { class: "num" }, el("strong", {}, amount(t.total_credits))),
+        el("td", { class: "num" }, el("strong", {}, amount(t.movement))),
+        el("td", {}),
+      )),
+    ),
+    el("dl", { class: "kv", style: "margin-top:.8rem" },
+      el("dt", {}, "Opening balance"), el("dd", {}, amount(t.opening_balance)),
+      el("dt", {}, "Closing balance"), el("dd", {}, amount(t.closing_balance)),
+    ),
+  );
+}
+
+// ── 6. Credits ─────────────────────────────────────────────────────────────────
+function creditsScreen() {
+  const credits = state.data.credits || [];
+  const pos = state.data.position;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Grant a credit"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { for: "c-code" }, "Code"), el("input", { id: "c-code" })),
+        el("div", {}, el("label", { for: "c-kind" }, "Kind"),
+          el("select", { id: "c-kind" }, ["prepaid","promotional","goodwill","contract_drawdown"]
+            .map(k => el("option", { value: k }, k)))),
+        el("div", {}, el("label", { for: "c-minor" }, "Amount (minor)"),
+          el("input", { id: "c-minor", type: "number" })),
+        el("div", {}, el("label", { for: "c-exp" }, "Expires at (epoch, optional)"),
+          el("input", { id: "c-exp" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/credits", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: acct(), code: val("c-code"), kind: val("c-kind"),
+            amount: { minor: Number(val("c-minor") || 0), currency: cur() },
+            expires_at: val("c-exp") ? Number(val("c-exp")) : null,
+          }),
+        }), "credit granted") }, "Grant"),
+        el("button", { class: "ghost", style: "margin-left:.5rem",
+          onclick: () => act(async () => {
+            const r = await api("/credits/apply", {
+              method: "POST",
+              body: JSON.stringify({ account_id: acct(),
+                amount: { minor: Number(prompt("amount in minor units", "1000") || 0), currency: cur() } }),
+            });
+            state.notice = `covered ${amount(r.covered)}, shortfall ${amount(r.shortfall)} across ${r.applications.length}`;
+          }, "credit applied") }, "Apply credit (earliest-expiring first)"),
+      ),
+      pos ? el("dl", { class: "kv", style: "margin-top:.8rem" },
+        el("dt", {}, "Available"), el("dd", {}, amount(pos.available)),
+        el("dt", {}, "Granted"), el("dd", {}, amount(pos.granted)),
+        el("dt", {}, "Applied"), el("dd", {}, amount(pos.applied)),
+      ) : null,
+    ),
+    el("div", { class: "card scroll" },
+      el("h2", {}, "Credits"),
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          ["Code", "Kind", "Granted", "Remaining", "State", "Expires", ""].map(h =>
+            el("th", { class: ["Granted","Remaining"].includes(h) ? "num" : "" }, h)))),
+        el("tbody", {}, credits.map(c => {
+          const p = (pos ? pos.positions : []).find(x => x.credit_id === c.id);
+          return el("tr", {},
+            el("td", { class: "mono" }, c.code),
+            el("td", {}, c.kind),
+            el("td", { class: "num" }, amount(c.amount)),
+            el("td", { class: "num" }, p ? amount(p.remaining) : "—"),
+            el("td", {}, pill(c.state)),
+            el("td", { class: "mono" }, c.expires_at || "never"),
+            el("td", {}, c.allowed_triggers.filter(t => t !== "consume").map(t => el("button", {
+              class: "ghost",
+              onclick: () => act(() => api(`/credits/${c.id}/${t}`, {
+                method: "POST", body: JSON.stringify({ reason: "" }),
+              }), `${c.code}: ${t}`),
+            }, t))),
+          );
+        })),
+      ),
+    ),
+  ];
+}
+
+// ── 7. Replay ──────────────────────────────────────────────────────────────────
+function replayScreen() {
+  const r = state.data.replay;
+  if (!r) return needsAccount();
+  return el("div", { class: "card" },
+    el("h2", {}, "Replay — reconstruct and prove"),
+    el("p", { class: r.is_clean ? "ok" : "err" },
+      r.is_clean ? "The rebuilt state matches what this period sealed."
+                 : "The rebuild does NOT match what was sealed — a financial integrity incident."),
+    el("dl", { class: "kv" },
+      el("dt", {}, "Entries replayed"), el("dd", {}, String(r.entries_replayed)),
+      el("dt", {}, "Rebuilt balance"), el("dd", {}, amount(r.rebuilt_balance)),
+      el("dt", {}, "Recorded balance"), el("dd", {}, amount(r.recorded_balance)),
+      el("dt", {}, "Balances agree"), el("dd", {}, String(r.balances_agree)),
+      el("dt", {}, "Replay digest"), el("dd", { class: "digest" }, short(r.replay_digest)),
+      el("dt", {}, "Close digest"), el("dd", { class: "digest" }, short(r.close_digest) || "not closed"),
+      el("dt", {}, "Digests match"), el("dd", {}, String(r.matches_close_digest)),
+    ),
+  );
+}
+
+// ── 8. Reconcile ───────────────────────────────────────────────────────────────
+function reconcileScreen() {
+  const r = state.data.reconcile;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Reconcile against a rating run"),
+      el("label", { for: "rr" }, "Rating run id"),
+      el("input", { id: "rr", placeholder: "rat_…" }),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          state.data.reconcile = await api("/reconcile" + q({
+            account_id: acct(), period_key: pkey(), rating_run_id: val("rr") }));
+        }, "reconciled") }, "Reconcile"),
+      ),
+    ),
+    r ? el("div", { class: "card scroll" },
+      el("h2", {}, r.is_clean ? "Clean" : `${r.discrepancies.length} discrepanc(ies)`),
+      el("p", { class: "muted" },
+        `${r.charges_examined} charge(s) examined against ${r.entries_examined} entr(ies); ${r.unposted_count} unposted.`),
+      r.discrepancies.length ? el("table", {},
+        el("thead", {}, el("tr", {}, ["Kind", "Charge", "Entry", "Expected", "Actual", "Detail"].map(h =>
+          el("th", { class: ["Expected","Actual"].includes(h) ? "num" : "" }, h)))),
+        el("tbody", {}, r.discrepancies.map(d => el("tr", {},
+          el("td", {}, pill(d.kind)),
+          el("td", { class: "mono" }, d.charge_id || "—"),
+          el("td", { class: "mono" }, d.entry_id ? d.entry_id.slice(0, 12) : "—"),
+          el("td", { class: "num" }, d.expected_minor),
+          el("td", { class: "num" }, d.actual_minor),
+          el("td", { class: "muted" }, d.detail),
+        ))),
+      ) : null,
+    ) : null,
+  ];
+}
+
+// ── 9. Inspection ──────────────────────────────────────────────────────────────
+function inspectScreen() {
+  const i = state.data.inspect;
+  if (!i) return needsAccount();
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Inspection — ${i.is_sound ? "sound" : "NOT sound"}`),
+    el("dl", { class: "kv" },
+      el("dt", {}, "Period state"), el("dd", {}, pill(i.state)),
+      el("dt", {}, "Sequence gaps"), el("dd", {}, i.sequence_gaps.join(", ") || "none"),
+      el("dt", {}, "Checkpoint consistent"), el("dd", {}, String(i.checkpoint_consistent)),
+      el("dt", {}, "Untraced entries"), el("dd", {}, i.untraced.length || "none"),
+    ),
+    i.notes.length ? el("ul", {}, i.notes.map(n => el("li", { class: "muted" }, n))) : null,
+    el("table", { style: "margin-top:.8rem" },
+      el("thead", {}, el("tr", {}, ["#", "Entry", "Type", "Amount", "Traced", "Corrected", "Notes"].map(h =>
+        el("th", { class: ["#","Amount"].includes(h) ? "num" : "" }, h)))),
+      el("tbody", {}, i.entries.map(e => el("tr", {},
+        el("td", { class: "num" }, e.sequence),
+        el("td", { class: "mono" }, e.entry_id.slice(0, 12)),
+        el("td", {}, pill(e.entry_type)),
+        el("td", { class: "num" }, amount(e.amount)),
+        el("td", {}, String(e.is_traced)),
+        el("td", { class: "muted" }, e.corrected_by.map(x => x.slice(0, 10)).join(", ") || "—"),
+        el("td", { class: "muted" }, e.notes.join("; ") || "—"),
+      ))),
+    ),
+    el("div", { style: "margin-top:.8rem" },
+      el("button", { class: "ghost", onclick: () => act(() => api("/checkpoints/rebuild", {
+        method: "POST", body: JSON.stringify({ account_id: acct(), period_key: pkey() }),
+      }), "checkpoint rebuilt") }, "Rebuild balance checkpoint"),
+    ),
+  );
+}
+
+// ── 10. Search ─────────────────────────────────────────────────────────────────
+function searchScreen() {
+  const s = state.data.search;
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Search — ${s ? s.total : 0} entr(ies)`),
+    el("table", {},
+      el("thead", {}, el("tr", {},
+        ["#", "Entry", "Type", "Dir", "Amount", "Source", "Period"].map(h =>
+          el("th", { class: ["#","Amount"].includes(h) ? "num" : "" }, h)))),
+      el("tbody", {}, (s ? s.entries : []).map(e => el("tr", {},
+        el("td", { class: "num" }, e.sequence),
+        el("td", { class: "mono" }, e.id.slice(0, 12)),
+        el("td", {}, pill(e.entry_type)),
+        el("td", {}, pill(e.direction)),
+        el("td", { class: "num" }, amount(e.amount)),
+        el("td", { class: "muted" }, e.source),
+        el("td", { class: "mono" }, e.period_key),
+      ))),
+    ),
+  );
+}
+
+// ── 11. Timeline ───────────────────────────────────────────────────────────────
+function timelineScreen() {
+  const t = state.data.timeline || [];
+  return el("div", { class: "card" },
+    el("h2", {}, "Ledger history"),
+    el("p", { class: "muted" },
+      "Includes the postings that recorded nothing — a duplicate here is the evidence exactly-once posting worked."),
+    el("div", { class: "timeline" }, t.map(a => el("div", { class: "ev" },
+      el("span", { class: "mono" }, a.action), " ",
+      a.amount ? el("span", {}, amount(a.amount)) : null, " ",
+      el("span", { class: "muted" }, a.period_key || a.credit_id || ""), " ",
+      el("span", { class: "digest" }, a.journal_entry_id ? a.journal_entry_id.slice(0, 12) : ""),
+    ))),
+  );
+}
+
+const SCREENS = {
+  balance: balanceScreen, entries: entriesScreen, post: postScreen, periods: periodsScreen,
+  trial: trialScreen, credits: creditsScreen, replay: replayScreen, reconcile: reconcileScreen,
+  inspect: inspectScreen, search: searchScreen, timeline: timelineScreen,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const screen = SCREENS[state.tab]();
+  view.replaceChildren(
+    ...(Array.isArray(screen) ? screen.filter(Boolean) : [screen]),
+    state.error ? el("div", { class: "err" }, state.error) : null,
+    state.notice ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+for (const id of ["account", "period", "currency"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

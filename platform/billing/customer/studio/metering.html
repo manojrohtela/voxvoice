@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Metering</title>
+<!--
+  Metering Studio (M9.11).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen renders a response from
+  /v1/billing/usage/*, and every action dispatches to it. It normalizes nothing, aggregates
+  nothing, and computes no digest; the Replay screen displays the server's verdict rather than
+  reaching one.
+
+  There is no money on any screen: a quantity is a count in a meter's unit, and what it costs is
+  rating's. There is no runtime telemetry either — this Studio can only see what Billing recorded
+  commercially.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.active, .pill.open, .pill.recorded, .pill.resolved { color:var(--ok); border-color:var(--ok); }
+  .pill.draft, .pill.pending { color:var(--draft); }
+  .pill.closing, .pill.deprecated, .pill.adjustment { color:var(--warn); border-color:var(--warn); }
+  .pill.sealed, .pill.retired, .pill.quarantined, .pill.discarded { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:220px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.6rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Metering</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="billing account id" style="width:190px" />
+  <input id="pstart" placeholder="period start" style="width:110px" />
+  <input id="pend" placeholder="period end" style="width:110px" />
+  <input id="token" placeholder="Bearer token" style="width:210px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/usage";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "meters", data: {}, error: "", notice: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["meters", "Meters"], ["ingest", "Ingest"], ["records", "Usage Records"],
+  ["snapshot", "Snapshot"], ["periods", "Periods"], ["quarantine", "Quarantine"],
+  ["replay", "Replay"], ["reconcile", "Reconciliation"], ["diagnostics", "Diagnostics"],
+  ["export", "Export"], ["timeline", "Timeline"],
+];
+
+const SOURCES = ["runtime.session", "provider.stt", "provider.tts", "provider.llm",
+                 "knowledge", "tool", "workflow", "deployment", "control_plane.api"];
+const AGGREGATIONS = ["sum", "max", "time_weighted", "unique_count"];
+const ROUNDINGS = ["half_up", "half_even", "floor", "ceiling"];
+const GRANULARITIES = ["period", "day", "hour"];
+
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function num(id) { const v = val(id); return v === "" ? null : Number(v); }
+function acct() { return document.getElementById("account").value.trim(); }
+function pstart() { return Number(document.getElementById("pstart").value.trim() || 0); }
+function pend() { return Number(document.getElementById("pend").value.trim() || 0); }
+function periodBody() { return { account_id: acct(), period_start: pstart(), period_end: pend() }; }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+
+async function load() {
+  state.error = "";
+  try {
+    if (["meters", "ingest"].includes(state.tab)) state.data.meters = await api("/meters?include_retired=true");
+    if (state.tab === "records") {
+      const found = await api("/records?limit=200" + (acct() ? "&account_id=" + encodeURIComponent(acct()) : ""));
+      state.data.records = found.usage;
+      document.getElementById("count-pill").textContent = `${found.total} record(s)`;
+    }
+    if (state.tab === "quarantine") state.data.quarantine = await api("/quarantine?pending_only=false");
+    if (acct() && state.tab === "periods") state.data.periods = await api(`/periods/${encodeURIComponent(acct())}`);
+    if (acct() && pend() && state.tab === "snapshot")
+      state.data.snapshot = await api(`/snapshot/${encodeURIComponent(acct())}?period_start=${pstart()}&period_end=${pend()}`);
+    if (acct() && pend() && state.tab === "reconcile")
+      state.data.reconcile = await api(`/reconcile/${encodeURIComponent(acct())}?period_start=${pstart()}&period_end=${pend()}`);
+    if (acct() && pend() && state.tab === "diagnostics")
+      state.data.diagnostics = await api(`/diagnostics/${encodeURIComponent(acct())}?period_start=${pstart()}&period_end=${pend()}`).catch(() => null);
+    if (acct() && pend() && state.tab === "export")
+      state.data.export = await api(`/export/${encodeURIComponent(acct())}?period_start=${pstart()}&period_end=${pend()}`);
+    if (state.tab === "timeline")
+      state.data.timeline = await api("/timeline?limit=200" + (acct() ? "&account_id=" + encodeURIComponent(acct()) : ""));
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsAccount() {
+  return el("div", { class: "card muted" },
+    "Enter a billing account id and a period in the header to load this screen.");
+}
+
+// ── 1. Meters ──────────────────────────────────────────────────────────────────
+const METER_TRIGGER_PATH = { activate: "activate", deprecate: "deprecate", reinstate: "reinstate", retire: "retire" };
+
+function meterButtons(m) {
+  return m.allowed_triggers.map(t => el("button", {
+    class: "ghost",
+    onclick: () => act(() => api(`/meters/${encodeURIComponent(m.code)}/${METER_TRIGGER_PATH[t]}`, {
+      method: "POST", body: JSON.stringify({ reason: "" }),
+    }), `${m.code}: ${t}`),
+  }, t));
+}
+
+function metersView() {
+  const meters = state.data.meters || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Declare a meter"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Code"), el("input", { id: "m-code" })),
+        el("div", {}, el("label", {}, "Unit"), el("input", { id: "m-unit", value: "unit" })),
+        el("div", {}, el("label", {}, "Authoritative source"),
+          el("select", { id: "m-source" }, ...SOURCES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Aggregation"),
+          el("select", { id: "m-agg" }, ...AGGREGATIONS.map(a => el("option", {}, a)))),
+        el("div", {}, el("label", {}, "Accepted event types (comma separated)"), el("input", { id: "m-types" })),
+        el("div", {}, el("label", {}, "Normalize ÷"), el("input", { id: "m-denom", type: "number", min: "1", value: "1" })),
+        el("div", {}, el("label", {}, "Rounding"),
+          el("select", { id: "m-round" }, ...ROUNDINGS.map(r => el("option", {}, r)))),
+        el("div", {}, el("label", {}, "Late-arrival window (s)"),
+          el("input", { id: "m-late", type: "number", min: "0", value: "172800" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "A meter has exactly ONE authoritative source. If two planes emit an overlapping signal, " +
+        "one is designated here and the other is quarantined — that single field is what prevents " +
+        "the same usage being billed twice. Normalization is an exact integer ratio: no float ever " +
+        "touches a quantity."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/meters", {
+          method: "POST",
+          body: JSON.stringify({
+            code: val("m-code"), unit: val("m-unit"), source: val("m-source"),
+            aggregation: val("m-agg"),
+            accepted_event_types: val("m-types").split(",").map(s => s.trim()).filter(Boolean),
+            normalization: { numerator: 1, denominator: num("m-denom") || 1, rounding: val("m-round") },
+            late_arrival_window_seconds: num("m-late") || 0,
+          }),
+        }), "meter declared") }, "Declare")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Meters (${meters.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Pin", "Unit", "Source", "Aggregation", "Normalization", "Late window", "State", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...meters.map(m => el("tr", {},
+          el("td", {}, el("code", {}, m.pin)),
+          el("td", {}, m.unit),
+          el("td", { class: "muted" }, m.source),
+          el("td", {}, m.aggregation),
+          el("td", { class: "mono" },
+            m.normalization.is_identity ? "1:1" :
+              `${m.normalization.numerator}/${m.normalization.denominator} ${m.normalization.rounding}`),
+          el("td", { class: "num" }, m.late_arrival_window_seconds),
+          el("td", {}, pill(m.state)),
+          el("td", {}, ...meterButtons(m)),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Buttons come from the server's allowed_triggers. A deprecated meter still counts what " +
+        "customers already send; only a retired one stops, and its events are quarantined, never dropped."),
+    ),
+  ];
+}
+
+// ── 2. Ingest ──────────────────────────────────────────────────────────────────
+function ingestView() {
+  const r = state.data.receipt;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Ingest one metric signal"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Event id (the exactly-once key)"), el("input", { id: "i-event" })),
+        el("div", {}, el("label", {}, "Event type"), el("input", { id: "i-type" })),
+        el("div", {}, el("label", {}, "Source"),
+          el("select", { id: "i-source" }, ...SOURCES.map(s => el("option", {}, s)))),
+        el("div", {}, el("label", {}, "Observed at"), el("input", { id: "i-observed", type: "number" })),
+        el("div", {}, el("label", {}, "Raw units"), el("input", { id: "i-raw", type: "number", min: "0" })),
+        el("div", {}, el("label", {}, "Raw unit"), el("input", { id: "i-rawunit" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Billing never measures. This posts a signal an authoritative producer already measured. " +
+        "Re-sending the same event id returns 200 with duplicate:true — a success, not an error, " +
+        "because at-least-once delivery makes replays normal."),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          state.data.receipt = await api("/events", {
+            method: "POST",
+            body: JSON.stringify({
+              signal: {
+                event_id: val("i-event"), event_type: val("i-type"), source: val("i-source"),
+                observed_at: num("i-observed"), raw_units: num("i-raw") || 0,
+                raw_unit: val("i-rawunit"),
+              },
+              period_start: pstart(), period_end: pend(),
+            }),
+          });
+        }, "ingested") }, "Ingest"),
+        el("button", { class: "ghost", onclick: () => act(async () => {
+          state.data.drain = await api("/drain", {
+            method: "POST", body: JSON.stringify({ period_start: pstart(), period_end: pend(), limit: 500 }),
+          });
+        }, "drained the platform buffer") }, "Drain stream"),
+      ),
+    ),
+    r ? el("div", { class: "card" }, el("h2", {}, "Receipt"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Outcome"), el("dd", {}, pill(r.outcome)),
+        el("dt", {}, "Usage id (derived)"), el("dd", {}, el("code", {}, r.usage_id || "—")),
+        el("dt", {}, "Units recorded"), el("dd", { class: "mono" }, String(r.units)),
+        el("dt", {}, "Disposition"), el("dd", {}, r.disposition),
+        el("dt", {}, "Reason"), el("dd", { class: "muted" }, r.reason || "—"),
+        el("dt", {}, "Detail"), el("dd", { class: "muted" }, r.detail || "—"),
+      )) : null,
+    state.data.drain ? el("div", { class: "card" }, el("h2", {}, "Drain receipt"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Signals seen"), el("dd", { class: "mono" }, String(state.data.drain.signals_seen)),
+        el("dt", {}, "Recorded"), el("dd", { class: "mono" }, String(state.data.drain.recorded)),
+        el("dt", {}, "Adjusted"), el("dd", { class: "mono" }, String(state.data.drain.adjusted)),
+        el("dt", {}, "Duplicates ignored"), el("dd", { class: "mono" }, String(state.data.drain.duplicates)),
+        el("dt", {}, "Quarantined"), el("dd", { class: "mono" }, String(state.data.drain.quarantined)),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Draining reads the platform's own decoded buffer through the metric-stream port. " +
+        "Billing never polls Runtime and never reaches into runtime state.")) : null,
+  ];
+}
+
+// ── 3. Usage Records ───────────────────────────────────────────────────────────
+function recordsView() {
+  const records = state.data.records || [];
+  const detail = state.data.inspection;
+  return [
+    el("div", { class: "card scroll" }, el("h2", {}, `Commercial usage (${records.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Usage id", "Meter", "Units", "Status", "Observed", "Period", "Late?", "Actions"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...records.map(u => el("tr", {},
+          el("td", {}, el("code", {}, u.id.slice(0, 14))),
+          el("td", {}, u.meter_pin),
+          el("td", { class: "num" }, `${u.units} ${u.unit}`),
+          el("td", {}, pill(u.status)),
+          el("td", { class: "mono" }, String(u.source.observed_at)),
+          el("td", { class: "mono" }, `${u.period_start}–${u.period_end}`),
+          el("td", {}, u.provenance.was_late ? pill(u.provenance.disposition) : "—"),
+          el("td", {}, el("button", {
+            class: "ghost",
+            onclick: () => act(async () => { state.data.inspection = await api(`/records/${u.id}`); }, "inspected"),
+          }, "why?")),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Append-only. There is no edit and no delete: a correction is a NEW record pointing at the " +
+        "one it corrects, so the original figure, the change, and the reason all stay readable."),
+    ),
+    detail ? el("div", { class: "card" }, el("h2", {}, "Provenance"),
+      el("div", { class: "timeline" }, ...detail.explanation.map(line => el("div", { class: "ev" }, line))),
+      detail.corrections.length ? el("div", {},
+        el("h2", { style: "margin-top:1rem" }, "Corrections"),
+        ...detail.corrections.map(c => el("div", { class: "muted" }, c))) : null,
+      el("dl", { class: "kv", style: "margin-top:.8rem" },
+        el("dt", {}, "Content digest"), el("dd", { class: "digest" }, detail.usage.digest),
+        el("dt", {}, "Ingest run"), el("dd", { class: "mono" }, detail.usage.provenance.ingest_run_id || "—"),
+        el("dt", {}, "Produced by replay"), el("dd", {}, detail.usage.provenance.replayed ? "yes" : "no"),
+      )) : null,
+  ];
+}
+
+// ── 4. Snapshot ────────────────────────────────────────────────────────────────
+function snapshotView() {
+  if (!acct() || !pend()) return [needsAccount()];
+  const s = state.data.snapshot;
+  if (!s) return [el("div", { class: "card muted" }, "No snapshot.")];
+  return [
+    el("div", { class: "card" }, el("h2", {}, `Usage ${s.period_start}–${s.period_end} `, pill(s.state)),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Granularity"),
+          el("select", { id: "s-gran" }, ...GRANULARITIES.map(g => el("option", {}, g)))),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/aggregates/rebuild", {
+          method: "POST", body: JSON.stringify({ ...periodBody(), granularity: val("s-gran") }),
+        }), "aggregates rebuilt") }, "Rebuild aggregates")),
+      el("dl", { class: "kv", style: "margin-top:.8rem" },
+        el("dt", {}, "Billable records"), el("dd", { class: "mono" }, String(s.record_count)),
+        el("dt", {}, "Adjustments"), el("dd", { class: "mono" }, String(s.adjustment_count)),
+        el("dt", {}, "Quarantined in window"), el("dd", { class: "mono" }, String(s.quarantined_count)),
+        el("dt", {}, "Content digest"), el("dd", { class: "digest" }, s.digest),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Rebuilding is deterministic: the same records always fold to the same total and the same " +
+        "digest, so an aggregate rebuilt after a restart equals the one maintained continuously."),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Aggregates (${s.aggregates.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Meter", "Window", "Units", "Records", "Adjustments", "Digest", "Sealed"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...s.aggregates.map(a => el("tr", {},
+          el("td", {}, el("code", {}, a.meter_code)),
+          el("td", { class: "mono" }, `${a.granularity} ${a.window_start}–${a.window_end}`),
+          el("td", { class: "num" }, `${a.units} ${a.unit}`),
+          el("td", { class: "num" }, a.record_count),
+          el("td", { class: "num" }, a.adjustment_count),
+          el("td", { class: "digest" }, short(a.source_digest)),
+          el("td", {}, a.sealed ? pill("sealed") : "—"),
+        )))),
+    ),
+  ];
+}
+
+// ── 5. Periods ─────────────────────────────────────────────────────────────────
+function periodsView() {
+  if (!acct()) return [needsAccount()];
+  const periods = state.data.periods || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Period control"),
+      el("div", { style: "display:flex;gap:.5rem;flex-wrap:wrap" },
+        el("button", { class: "act", onclick: () => act(() => api("/periods", {
+          method: "POST", body: JSON.stringify(periodBody()) }), "period opened") }, "Open"),
+        el("button", { class: "ghost", onclick: () => act(() => api("/periods/close", {
+          method: "POST", body: JSON.stringify(periodBody()) }), "closing") }, "Begin close"),
+        el("button", { class: "ghost", onclick: () => act(() => api("/periods/seal", {
+          method: "POST", body: JSON.stringify(periodBody()) }), "sealed") }, "Seal"),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Sealing is a ONE-WAY DOOR. After it, a correction is an adjustment in a later period or a " +
+        "credit note — never a retroactive mutation. The seal digest recorded here is what lets a " +
+        "replay months later prove it reproduced the same commercial usage."),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Periods (${periods.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Window", "State", "Records", "Adjustments", "Seal digest", "Sealed at", "By"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...periods.map(p => el("tr", {},
+          el("td", { class: "mono" }, `${p.period_start}–${p.period_end}`),
+          el("td", {}, pill(p.state)),
+          el("td", { class: "num" }, p.record_count),
+          el("td", { class: "num" }, p.adjustment_count),
+          el("td", { class: "digest" }, short(p.seal_digest)),
+          el("td", { class: "mono" }, p.sealed_at == null ? "—" : String(p.sealed_at)),
+          el("td", { class: "muted" }, p.sealed_by || "—"),
+        )))),
+    ),
+  ];
+}
+
+// ── 6. Quarantine ──────────────────────────────────────────────────────────────
+function quarantineView() {
+  const entries = state.data.quarantine || [];
+  return [
+    el("div", { class: "card scroll" }, el("h2", {}, `Quarantined events (${entries.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Event", "Type", "Meter", "Reason", "Raw", "State", "Actions"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...entries.map(q => el("tr", {},
+          el("td", {}, el("code", {}, q.event_id)),
+          el("td", { class: "muted" }, q.event_type),
+          el("td", {}, q.meter_code || "—"),
+          el("td", {}, pill(q.reason.replace(/_/g, "-"))," ", el("span", { class: "muted" }, q.detail)),
+          el("td", { class: "num" }, `${q.raw_units} ${q.raw_unit}`),
+          el("td", {}, pill(q.state)),
+          el("td", {}, ...q.allowed_triggers.map(t => el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(`/quarantine/${q.id}/${t}`, {
+              method: "POST",
+              body: JSON.stringify(t === "resolve" ? { meter_code: q.meter_code, note: "" } : { reason: "" }),
+            }), `${q.event_id}: ${t}`),
+          }, t))),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Never billed, never dropped. Resolving re-ingests the event and produces exactly the record " +
+        "the original ingestion would have — including the same derived id — so resolving twice is " +
+        "idempotent for the same reason ingestion is."),
+    ),
+  ];
+}
+
+// ── 7. Replay ──────────────────────────────────────────────────────────────────
+function replayView() {
+  if (!acct() || !pend()) return [needsAccount()];
+  const r = state.data.replayResult;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Deterministic replay"),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Re-derives the period from the authoritative log using the SAME pure ingestion decision the " +
+        "live path uses — not a second implementation that could drift from it. A match against the " +
+        "seal digest proves the commercial outcome is identical."),
+      el("button", { class: "act", onclick: () => act(async () => {
+        state.data.replayResult = await api("/replay", { method: "POST", body: JSON.stringify(periodBody()) });
+      }, "replayed") }, "Replay period"),
+    ),
+    r ? el("div", { class: "card" },
+      el("h2", {}, "Result ", r.matches_seal ? pill("resolved") : pill("quarantined")),
+      el("div", { class: "big" }, r.matches_seal ? "Identical to the seal" : "DIVERGED from the seal"),
+      el("dl", { class: "kv", style: "margin-top:.8rem" },
+        el("dt", {}, "Events replayed"), el("dd", { class: "mono" }, String(r.events_replayed)),
+        el("dt", {}, "New usage produced"), el("dd", { class: "mono" }, String(r.usage_produced)),
+        el("dt", {}, "Duplicates skipped"), el("dd", { class: "mono" }, String(r.duplicates_skipped)),
+        el("dt", {}, "Quarantined"), el("dd", { class: "mono" }, String(r.quarantined)),
+        el("dt", {}, "Replay digest"), el("dd", { class: "digest" }, r.replay_digest),
+        el("dt", {}, "Seal digest"), el("dd", { class: "digest" }, r.seal_digest || "— period not sealed"),
+      ),
+      r.matches_seal ? null : el("p", { class: "err" },
+        "A divergence is a financial-integrity signal, not a display quirk: the log and the sealed " +
+        "period no longer say the same thing. The Reconciliation screen names each difference."),
+    ) : null,
+  ];
+}
+
+// ── 8. Reconciliation ──────────────────────────────────────────────────────────
+function reconcileView() {
+  if (!acct() || !pend()) return [needsAccount()];
+  const r = state.data.reconcile;
+  if (!r) return [el("div", { class: "card muted" }, "No reconciliation report.")];
+  return [
+    el("div", { class: "card scroll" },
+      el("h2", {}, "Reconciliation ", r.is_clean ? pill("resolved") : pill("quarantined")),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Events in the log"), el("dd", { class: "mono" }, String(r.events_examined)),
+        el("dt", {}, "Usage recorded"), el("dd", { class: "mono" }, String(r.usage_examined)),
+        el("dt", {}, "Duplicate usage"), el("dd", { class: r.duplicate_count ? "err" : "ok" }, String(r.duplicate_count)),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Duplicate usage must always be zero. It is the one metering failure that re-running cannot " +
+        "fix — a double-billed event needs a credit note and a conversation."),
+      r.discrepancies.length ? el("table", { style: "margin-top:.8rem" },
+        el("thead", {}, el("tr", {}, ...["Kind", "Event", "Meter", "Expected", "Actual", "Detail"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...r.discrepancies.map(d => el("tr", {},
+          el("td", {}, pill(d.kind.replace(/_/g, "-"))),
+          el("td", {}, el("code", {}, d.event_id)),
+          el("td", {}, d.meter_code || "—"),
+          el("td", { class: "num" }, d.expected || "—"),
+          el("td", { class: "num" }, d.actual || "—"),
+          el("td", { class: "muted" }, d.detail),
+        )))) : el("p", { class: "ok" }, "The event log and recorded usage agree exactly."),
+    ),
+  ];
+}
+
+// ── 9. Diagnostics ─────────────────────────────────────────────────────────────
+function diagnosticsView() {
+  if (!acct() || !pend()) return [needsAccount()];
+  const d = state.data.diagnostics;
+  if (!d) return [el("div", { class: "card muted" }, "No usage period for that window.")];
+  return [
+    el("div", { class: "card scroll" }, el("h2", {},
+      `Diagnostics — ${d.error_count} error(s), ${d.warning_count} warning(s)`),
+      d.findings.length === 0
+        ? el("p", { class: "ok" }, "Nothing structurally wrong with this period's metering.")
+        : el("table", {}, el("thead", {}, el("tr", {},
+            ...["Severity", "Path", "Code", "Message", "Remediation"].map(h => el("th", {}, h)))),
+            el("tbody", {}, ...d.findings.map(f => el("tr", {},
+              el("td", {}, pill(f.severity === "error" ? "quarantined" : "closing")),
+              el("td", { class: "mono" }, f.path),
+              el("td", { class: "muted" }, f.code),
+              el("td", {}, f.message),
+              el("td", { class: "muted" }, f.remediation || "—"),
+            )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Every finding is reported, not just the first — including a seal-digest mismatch, which is " +
+        "the financial-integrity incident the digest exists to make detectable."),
+    ),
+  ];
+}
+
+// ── 10. Export ─────────────────────────────────────────────────────────────────
+function exportView() {
+  if (!acct() || !pend()) return [needsAccount()];
+  const e = state.data.export;
+  if (!e) return [el("div", { class: "card muted" }, "No export.")];
+  return [
+    el("div", { class: "card scroll" },
+      el("h2", {}, `Export ${e.period_start}–${e.period_end} `, e.sealed ? pill("sealed") : pill("open")),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Rows"), el("dd", { class: "mono" }, String(e.row_count)),
+        el("dt", {}, "Total units"), el("dd", { class: "mono" }, String(e.total_units)),
+        el("dt", {}, "Export digest"), el("dd", { class: "digest" }, e.digest),
+      ),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Deterministically ordered and digested: two exports of an unchanged sealed period are " +
+        "byte-identical, which is what lets finance diff one month against the next and trust the difference."),
+      el("table", { style: "margin-top:.8rem" }, el("thead", {}, el("tr", {},
+        ...["Usage id", "Meter", "Units", "Status", "Observed", "Event", "Disposition"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...e.lines.map(r => el("tr", {},
+          el("td", {}, el("code", {}, r.usage_id.slice(0, 14))),
+          el("td", {}, r.meter_pin),
+          el("td", { class: "num" }, `${r.units} ${r.unit}`),
+          el("td", {}, pill(r.status)),
+          el("td", { class: "mono" }, String(r.observed_at)),
+          el("td", { class: "mono" }, r.event_id),
+          el("td", { class: "muted" }, r.disposition),
+        )))),
+    ),
+  ];
+}
+
+// ── 11. Timeline ───────────────────────────────────────────────────────────────
+function timelineView() {
+  const events = state.data.timeline || [];
+  return [
+    el("div", { class: "card" }, el("h2", {}, `Metering history (${events.length})`),
+      el("div", { class: "timeline" }, ...events.map(a => el("div", { class: "ev" },
+        el("code", {}, a.action), " ",
+        a.meter_code ? el("span", {}, a.meter_code + " ") : null,
+        a.event_id ? el("span", { class: "mono muted" }, a.event_id + " ") : null,
+        el("span", { class: "muted mono" }, `${a.at} ${a.actor_id || "system"}`),
+        a.detail ? el("div", { class: "muted", style: "font-size:12px" }, a.detail) : null,
+      ))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Append-only, duplicate ingestions included — \"we saw this event again and did nothing\" is " +
+        "itself a fact, and it is the evidence that idempotency worked."),
+    ),
+  ];
+}
+
+const VIEWS = {
+  meters: metersView, ingest: ingestView, records: recordsView, snapshot: snapshotView,
+  periods: periodsView, quarantine: quarantineView, replay: replayView,
+  reconcile: reconcileView, diagnostics: diagnosticsView, export: exportView,
+  timeline: timelineView,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; load(); },
+  }, label)));
+  const main = document.getElementById("view");
+  main.replaceChildren(
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice ? el("div", { class: "card" }, el("div", { class: "ok" }, state.notice)) : null,
+    ...(VIEWS[state.tab] || metersView)(),
+  );
+}
+
+for (const id of ["account", "pstart", "pend", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

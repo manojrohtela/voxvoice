@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice &mdash; Recovery</title>
+<!--
+  Collections Studio (M9.17).
+
+  ADR-0021: the Studio is a Consumer. It owns no state, holds no collection rule, and knows nothing
+  the API does not tell it — every screen renders a response from /v1/billing/recovery/*, and every
+  action dispatches to it.
+
+  It calculates no next retry. The due time on screen is `next_action_at` from the server, computed
+  from an immutable policy version the client has never seen the arithmetic for.
+
+  It calculates no grace. `grace_until` is a server field. A client that added a grace period to a
+  due date would be a second implementation of the strategy, and it would be the one that drifted.
+
+  It chooses no stage. The stage index and the planned action kind both arrive on the response.
+
+  It computes no money — and there is no money here at all. No amount, no balance, no outstanding.
+  Collections does not own a figure; what a customer owes is on the Payments and Invoices screens,
+  where the server computes it from facts each time it is asked.
+
+  It respects the server's allowed transitions. Buttons come from `allowed_triggers`; the client
+  decides nothing about what is legal, which is why a recovered case shows no escalate button and
+  a blocked one shows no retry.
+
+  It never calls a provider or a notifier, and it cannot: there is no such endpoint in this file.
+
+  Nothing is stored: no localStorage, no sessionStorage, no cookie. Reloading re-reads the API.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --dim:#9aa4b8;
+    --accent:#6ea8fe; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --muted:#8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                  border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.recovered, .pill.executed, .pill.new,
+  .pill.paid, .pill.succeeded, .pill.applied, .pill.matched, .pill.refunded, .pill.resolved,
+  .pill.completed { color:var(--ok); border-color:var(--ok); }
+  .pill.scheduled, .pill.action_due, .pill.in_progress, .pill.claimed, .pill.planned,
+  .pill.deferred, .pill.pending, .pill.requires_action, .pill.authorized, .pill.sending,
+  .pill.stale, .pill.duplicate, .pill.acknowledged { color:var(--warn); border-color:var(--warn); }
+  .pill.exhausted, .pill.blocked, .pill.escalated, .pill.rejected, .pill.not_sent,
+  .pill.failed, .pill.cancelled, .pill.expired, .pill.ambiguous, .pill.conflicting,
+  .pill.unverified, .pill.uncorrelated, .pill.open { color:var(--bad); border-color:var(--bad); }
+  .pill.draft, .pill.abandoned, .pill.unsupported, .pill.obsolete, .pill.skipped,
+  .pill.none { color:var(--muted); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  .warn { color:var(--warn); font-size:12px; margin-top:.5rem; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:230px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.8rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .steps { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .steps .st { position:relative; padding:.5rem 0; font-size:13px; }
+  .steps .st::before { content:""; position:absolute; left:-1.35rem; top:1rem;
+                       width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .stage { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .alert { border:1px solid var(--bad); border-radius:8px; padding:.7rem .9rem; margin-bottom:1rem;
+           color:var(--bad); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice &middot; Recovery</h1>
+  <span class="pill" id="count-pill">&mdash;</span>
+  <span class="grow"></span>
+  <input id="account" placeholder="account id" style="width:140px" />
+  <input id="case" placeholder="case id" style="width:150px" />
+  <input id="action" placeholder="action id" style="width:150px" />
+  <input id="token" placeholder="Bearer token" style="width:140px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/recovery";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "cases", data: {}, error: "", notice: "" };
+
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  \u2022 ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} \u2014 ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["cases", "Cases"], ["open", "Open a case"], ["case", "Case"], ["actions", "Actions"],
+  ["attempts", "Evidence"], ["decisions", "Decisions"], ["explain", "Why?"],
+  ["due", "Due now"], ["policies", "Strategies"], ["activity", "Audit trail"],
+];
+
+function pill(name) { return el("span", { class: "pill " + (name || "") }, name || "\u2014"); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function acct() { return val("account"); }
+function cid() { return val("case"); }
+function actid() { return val("action"); }
+function short(d) { return d ? d.slice(0, 16) : "\u2014"; }
+function when(t) { return t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) : "\u2014"; }
+function q(params) {
+  return "?" + Object.entries(params).filter(([, v]) => v !== "" && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+async function load() {
+  state.error = "";
+  try {
+    const t = state.tab;
+    if (t === "cases") state.data.cases = await api("/cases" + q({ account_id: acct() }));
+    if (t === "case" && cid()) {
+      state.data.case = await api(`/cases/${cid()}`);
+      state.data.inspection = await api(`/cases/${cid()}/inspect`);
+    }
+    if (t === "actions" && cid()) state.data.actions = await api(`/cases/${cid()}/actions`);
+    if (t === "attempts" && cid()) {
+      state.data.attempts = await api(`/cases/${cid()}/attempts` + q({ action_id: actid() }));
+    }
+    if (t === "decisions" && cid()) state.data.decisions = await api(`/cases/${cid()}/decisions`);
+    if (t === "explain" && cid()) state.data.explanation = await api(`/cases/${cid()}/explain`);
+    if (t === "due") {
+      state.data.dueCases = await api("/cases/due");
+      state.data.dueActions = await api("/actions/due");
+    }
+    if (t === "policies") state.data.policies = await api("/policies" + q({ include_inactive: true }));
+    if (t === "activity" && cid()) state.data.activity = await api(`/cases/${cid()}/timeline`);
+    const all = state.data.cases || [];
+    document.getElementById("count-pill").textContent = all.length ? `${all.length} case(s)` : "\u2014";
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn) {
+  state.error = ""; state.notice = "";
+  try {
+    const r = await fn();
+    // The server's disposition says what actually happened. `duplicate` is not `new`, and a client
+    // that reported both as success would count chases that never took place.
+    state.notice = r && r.disposition ? `disposition: ${r.disposition}` : "done";
+    if (r && r.note) state.notice += ` \u2014 ${r.note}`;
+    if (r && r.case && r.case.id) document.getElementById("case").value = r.case.id;
+    if (r && r.action && r.action.id) document.getElementById("action").value = r.action.id;
+    else if (r && r.id && r.kind !== undefined) document.getElementById("action").value = r.id;
+  } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table",
+    {},
+    el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, h)))),
+    el("tbody", {}, rows.length
+      ? rows.map(r => el("tr", {}, r.map(c => el("td", {}, c))))
+      : [el("tr", {}, el("td", { colspan: String(headers.length), class: "muted" }, "nothing yet"))])
+  ));
+}
+
+function kv(pairs) {
+  return el("dl", { class: "kv" }, pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+// Every button here is gated by the server's `allowed_triggers`. The client never decides what a
+// case may do next — it renders what the server said is possible.
+function caseButtons(c) {
+  const allowed = new Set(c.allowed_triggers || []);
+  const out = [];
+  out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/cases/${c.id}/evaluate`, { method: "POST", body: JSON.stringify({}) })) },
+    "evaluate"));
+  if (allowed.has("block")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/cases/${c.id}/block`, { method: "POST", body: JSON.stringify({ reason: "operator hold" }) })) },
+    "block"));
+  if (allowed.has("escalate")) out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/cases/${c.id}/escalate`, { method: "POST", body: JSON.stringify({ reason: "operator escalation" }) })) },
+    "escalate"));
+  if (allowed.has("cancel")) out.push(el("button", { class: "ghost danger", onclick: () =>
+    act(() => api(`/cases/${c.id}/cancel`, { method: "POST", body: JSON.stringify({ reason: "obligation withdrawn" }) })) },
+    "cancel"));
+  if (c.state === "exhausted") out.push(el("button", { class: "ghost", onclick: () =>
+    act(() => api(`/cases/${c.id}/cycles`, { method: "POST", body: JSON.stringify({ reason: "new cycle" }) })) },
+    "new cycle"));
+  return el("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap" }, out);
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([id, label]) =>
+    el("button", { class: state.tab === id ? "active" : "", onclick: () => { state.tab = id; load(); } }, label)));
+  const view = document.getElementById("view");
+  const parts = [];
+  if (state.error) parts.push(el("div", { class: "alert" }, state.error));
+  if (state.notice) parts.push(el("div", { class: "ok" }, state.notice));
+  parts.push(SCREENS[state.tab]());
+  view.replaceChildren(...parts.filter(Boolean));
+}
+
+const SCREENS = {
+  cases: () => el("div", { class: "card" },
+    el("h2", {}, "Collection cases"),
+    el("p", { class: "muted" },
+      "One obligation, one case. What is owed is not shown here \u2014 Collections does not own it."),
+    table(["case", "account", "obligation", "state", "signal", "stage", "cycle", "next action", ""],
+      (state.data.cases || []).map(c => [
+        el("span", { class: "mono" }, short(c.id)), c.account_id,
+        el("span", { class: "mono" }, `${c.obligation_kind}:${short(c.obligation_id)}`),
+        pill(c.state), pill(c.signal), String(c.stage_index), String(c.cycle),
+        when(c.next_action_at), caseButtons(c),
+      ]))),
+
+  open: () => {
+    const f = {};
+    const input = (id, ph) => el("input", { id: "f-" + id, placeholder: ph });
+    return el("div", { class: "card" },
+      el("h2", {}, "Open a recovery"),
+      el("p", { class: "muted" },
+        "Idempotent on the obligation. Asking twice returns the same case with disposition=duplicate."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "account id"), input("acct", "acc_...")),
+        el("div", {}, el("label", {}, "obligation id"), input("obl", "inv_...")),
+        el("div", {}, el("label", {}, "policy code"), input("pol", "standard")),
+        el("div", {}, el("label", {}, "payment intent id (optional)"), input("pin", "pin_...")),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/cases", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: val("f-acct"), obligation_id: val("f-obl"),
+            obligation_kind: "invoice", policy_code: val("f-pol"),
+            payment_intent_id: val("f-pin"),
+          }),
+        })) }, "open case")));
+  },
+
+  case: () => {
+    const c = state.data.case, i = state.data.inspection;
+    if (!c) return el("div", { class: "card muted" }, "enter a case id above");
+    return el("div", {},
+      el("div", { class: "card" },
+        el("h2", {}, "Case"),
+        kv([
+          ["state", pill(c.state)], ["payment signal", pill(c.signal)],
+          ["failure class", pill(c.failure_class)],
+          ["obligation", el("span", { class: "mono" }, `${c.obligation_kind}:${c.obligation_id}`)],
+          ["account", c.account_id],
+          ["strategy", `${c.policy_code} v${c.policy_version}`],
+          ["cycle", String(c.cycle)], ["stage", String(c.stage_index)],
+          ["next action at", when(c.next_action_at)],
+          ["grace until", when(c.grace_until)],
+          ["blocked because", c.blocked_reason || "\u2014"],
+          ["closed", c.closed_at ? `${when(c.closed_at)} \u2014 ${c.closed_reason}` : "\u2014"],
+          ["concurrency version", String(c.version)],
+        ]),
+        caseButtons(c)),
+      i ? el("div", { class: "card" }, el("h2", {}, "Counts"), kv([
+        ["actions", String(i.actions)], ["open actions", String(i.open_actions)],
+        ["executed", String(i.executed_actions)], ["evidence rows", String(i.attempts)],
+        ["decisions", String(i.decisions)], ["strategy stages", String(i.stage_count)],
+        ["due now", i.is_due ? "yes" : "no"],
+      ])) : null);
+  },
+
+  actions: () => el("div", { class: "card" },
+    el("h2", {}, "Actions"),
+    el("p", { class: "muted" },
+      "Durable before anything leaves. A payment retry is requested through the Payment Engine \u2014 " +
+      "this screen reaches no provider."),
+    table(["action", "kind", "state", "stage", "due", "claimed by", "result", ""],
+      (state.data.actions || []).map(a => [
+        el("span", { class: "mono" }, short(a.id)), pill(a.kind), pill(a.state),
+        String(a.stage_index), when(a.due_at), a.claimed_by || "\u2014",
+        el("span", { class: "mono" }, short(a.result_ref)),
+        el("div", { style: "display:flex;gap:.4rem" },
+          a.is_closed ? null : el("button", { class: "ghost", onclick: () =>
+            act(() => api(`/actions/${a.id}/execute`, { method: "POST", body: JSON.stringify({}) })) }, "execute"),
+          a.is_closed ? null : el("button", { class: "ghost danger", onclick: () =>
+            act(() => api(`/actions/${a.id}/obsolete`, { method: "POST", body: JSON.stringify({ reason: "no longer needed" }) })) }, "obsolete")),
+      ]))),
+
+  attempts: () => el("div", { class: "card" },
+    el("h2", {}, "Execution evidence"),
+    el("p", { class: "muted" },
+      "Append-only. A deferred outcome is not a failure and is never repeated blindly."),
+    table(["attempt", "action", "kind", "outcome", "channel", "reference", "when"],
+      (state.data.attempts || []).map(a => [
+        el("span", { class: "mono" }, short(a.id)), el("span", { class: "mono" }, short(a.action_id)),
+        pill(a.kind), pill(a.outcome), a.channel || "\u2014",
+        el("span", { class: "mono" }, short(a.reference)), when(a.executed_at),
+      ]))),
+
+  decisions: () => el("div", { class: "card" },
+    el("h2", {}, "Decision trail"),
+    el("p", { class: "muted" },
+      "Every input beside every choice, naming the immutable strategy version it applied \u2014 so a " +
+      "decision taken in March still replays after the strategy is rewritten in April."),
+    table(["decision", "stage", "signal", "failure", "selected", "strategy", "reason", "when"],
+      (state.data.decisions || []).map(d => [
+        el("span", { class: "mono" }, short(d.id)), String(d.stage_index),
+        pill(d.signal), pill(d.failure_class), pill(d.selected || "none"),
+        `${d.policy_code} v${d.policy_version}`,
+        el("span", { class: "muted" }, d.reason), when(d.decided_at),
+      ]))),
+
+  explain: () => {
+    const e = state.data.explanation;
+    if (!e) return el("div", { class: "card muted" }, "enter a case id above");
+    return el("div", { class: "card" },
+      el("h2", {}, "Why is this case here?"),
+      el("p", {}, e.reason),
+      kv([
+        ["state", pill(e.state)], ["signal", pill(e.signal)],
+        ["stage", String(e.stage_index)],
+        ["strategy", `${e.policy_code} v${e.policy_version}`],
+        ["next action", pill(e.next_kind || "none")],
+        ["next action at", when(e.next_action_at)],
+        ["grace until", when(e.grace_until)],
+        ["blocked because", e.blocked_reason || "\u2014"],
+      ]),
+      el("div", { class: "steps" },
+        (e.path || []).map(p => el("div", { class: "st" }, p))));
+  },
+
+  due: () => el("div", {},
+    el("div", { class: "card" },
+      el("h2", {}, "Due now"),
+      el("p", { class: "muted" },
+        "A read. Billing runs no scheduler \u2014 whoever polls this lives outside the plane."),
+      table(["case", "obligation", "state", "stage", "due at"],
+        (state.data.dueCases || []).map(c => [
+          el("span", { class: "mono" }, short(c.id)),
+          el("span", { class: "mono" }, short(c.obligation_id)),
+          pill(c.state), String(c.stage_index), when(c.next_action_at),
+        ]))),
+    el("div", { class: "card" },
+      el("h2", {}, "Actions due"),
+      table(["action", "case", "kind", "due at", ""],
+        (state.data.dueActions || []).map(a => [
+          el("span", { class: "mono" }, short(a.id)),
+          el("span", { class: "mono" }, short(a.case_id)), pill(a.kind), when(a.due_at),
+          el("button", { class: "ghost", onclick: () =>
+            act(() => api(`/actions/${a.id}/execute`, { method: "POST", body: JSON.stringify({}) })) }, "execute"),
+        ])))),
+
+  policies: () => el("div", { class: "card" },
+    el("h2", {}, "Strategies"),
+    el("p", { class: "muted" },
+      "Immutable versions. There is no edit \u2014 changing a strategy publishes the next version, and " +
+      "cases decided under the old one keep naming it."),
+    (state.data.policies || []).map(p => el("div", { class: "card" },
+      el("h2", {}, `${p.code} v${p.version} ${p.is_active ? "" : "(withdrawn)"}`),
+      table(["stage", "kind", "wait (s)", "grace (s)", "label", "terminal"],
+        (p.stages || []).map(s => [
+          String(s.sequence), pill(s.kind), String(s.wait_seconds), String(s.grace_seconds),
+          s.label || "\u2014", s.is_terminal ? "yes" : "no",
+        ]))))),
+
+  activity: () => el("div", { class: "card" },
+    el("h2", {}, "Audit trail"),
+    table(["when", "what", "summary", "actor", "action"],
+      (state.data.activity || []).map(a => [
+        when(a.at), pill(a.kind), a.summary || "\u2014", a.actor_id || "system",
+        el("span", { class: "mono" }, short(a.action_id)),
+      ]))),
+};
+
+for (const id of ["account", "case", "action", "token"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Subscriptions</title>
+<!--
+  Subscription Studio (M9.9).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen renders a response from
+  /v1/billing/agreements/*, and every action dispatches to it. The Timeline draws the history
+  the server returned; the Schedule screen records intent and fires nothing.
+
+  There is no money on any screen: a subscription says what was agreed, and what that costs is
+  resolved against the pinned pricing version by the Pricing Studio.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.active, .pill.applied { color:var(--ok); border-color:var(--ok); }
+  .pill.draft, .pill.pending { color:var(--draft); }
+  .pill.trialing, .pill.paused, .pill.past_due { color:var(--warn); border-color:var(--warn); }
+  .pill.suspended, .pill.cancelled, .pill.expired, .pill.archived { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:200px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .pins { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Subscriptions</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="selected" placeholder="subscription id or number" style="width:210px" />
+  <input id="token" placeholder="Bearer token" style="width:250px" />
+</header>
+
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/agreements";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "dashboard", data: {}, error: "", notice: "" };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["dashboard", "Dashboard"], ["details", "Details"], ["items", "Items"],
+  ["timeline", "Timeline"], ["versions", "Version History"], ["schedule", "Schedule Changes"],
+  ["trial", "Trial"], ["renewal", "Renewal"], ["lifecycle", "Pause / Cancel"],
+  ["activity", "Activity"],
+];
+
+const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"];
+const STATES = ["draft", "trialing", "active", "past_due", "suspended", "paused",
+                "cancelled", "expired", "archived"];
+const INTERVALS = ["monthly", "yearly"];
+const ITEM_KINDS = ["flat", "seat", "usage", "tiered", "volume", "hybrid"];
+const CHANGE_KINDS = ["upgrade", "downgrade", "cancellation", "renewal", "pricing_switch"];
+const TIMINGS = ["immediate", "period_end", "scheduled"];
+const RENEWAL_MODES = ["auto", "manual", "none"];
+
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function num(id) { const v = val(id); return v === "" ? null : Number(v); }
+function selected() { return document.getElementById("selected").value.trim(); }
+function when(t) { return t == null ? "—" : String(t); }
+
+async function load() {
+  state.error = "";
+  try {
+    if (["dashboard", "activity"].includes(state.tab)) {
+      const found = await api("?limit=500");
+      state.data.subscriptions = found.subscriptions;
+      document.getElementById("count-pill").textContent = `${found.total} agreement(s)`;
+    }
+    const id = selected();
+    if (id && ["details", "items", "schedule", "trial", "renewal", "lifecycle"].includes(state.tab))
+      state.data.subscription = await api(`/${encodeURIComponent(id)}`);
+    if (id && state.tab === "timeline") {
+      state.data.subscription = await api(`/${encodeURIComponent(id)}`);
+      state.data.timeline = await api(`/${encodeURIComponent(id)}/timeline`);
+    }
+    if (id && state.tab === "versions")
+      state.data.versions = await api(`/${encodeURIComponent(id)}/versions`);
+    if (id && state.tab === "schedule")
+      state.data.changes = await api(`/${encodeURIComponent(id)}/scheduled-changes`);
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsSelection() {
+  return el("div", { class: "card muted" },
+    "Enter a subscription id or number in the header to load this screen.");
+}
+
+// Lifecycle buttons come from the server's allowed_triggers, mapped to their endpoint.
+const TRIGGER_PATH = {
+  activate: "activate", start_trial: "trial/start", convert_trial: "trial/convert",
+  expire_trial: "trial/expire", payment_failed: "past-due", payment_recovered: "recover",
+  suspend: "suspend", reactivate: "reactivate", pause: "pause", resume: "resume",
+  cancel: "cancel", expire: "expire", archive: "archive",
+};
+const TRIGGER_BODY = {
+  start_trial: { length_days: 0 }, past_due: { reason: "" }, payment_failed: { reason: "" },
+  suspend: { reason: "" }, pause: { reason: "" },
+  cancel: { timing: "period_end", reason: "", reason_code: "" },
+};
+
+function triggerButtons(s) {
+  return s.allowed_triggers.map(t => el("button", {
+    class: "ghost",
+    onclick: () => act(() => api(`/${s.id}/${TRIGGER_PATH[t]}`, {
+      method: "POST",
+      body: JSON.stringify(TRIGGER_BODY[t] || {}),
+    }), `${s.subscription_number}: ${t}`),
+  }, t));
+}
+
+// ── 1. Dashboard ───────────────────────────────────────────────────────────────
+function dashboardView() {
+  const subs = state.data.subscriptions || [];
+  const byState = {};
+  for (const s of subs) byState[s.state] = (byState[s.state] || 0) + 1;
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Create a subscription"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Billing account id"), el("input", { id: "s-account" })),
+        el("div", {}, el("label", {}, "Catalog version (published)"),
+          el("input", { id: "s-catalog", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Pricing version (published)"),
+          el("input", { id: "s-pricing", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Currency"),
+          el("select", { id: "s-currency" }, ...CURRENCIES.map(c => el("option", {}, c)))),
+        el("div", {}, el("label", {}, "Plan code"), el("input", { id: "s-plan" })),
+        el("div", {}, el("label", {}, "Interval"),
+          el("select", { id: "s-interval" }, ...INTERVALS.map(i => el("option", {}, i)))),
+        el("div", {}, el("label", {}, "Anchor day (1–28)"),
+          el("input", { id: "s-anchor", type: "number", min: "1", max: "28", value: "1" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "The three references — account, catalog version, pricing version — are fixed at creation " +
+        "and never change. Publishing a new catalog or new pricing cannot reach backwards into " +
+        "this agreement; moving onto newer terms publishes a new subscription version."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: val("s-account"), catalog_version: num("s-catalog"),
+            pricing_version: num("s-pricing"), currency: val("s-currency"),
+            plan_code: val("s-plan"), interval: val("s-interval"),
+            anchor_day: num("s-anchor") || 1, items: [],
+          }),
+        }), "subscription created") }, "Create draft")),
+    ),
+    el("div", { class: "card" }, el("h2", {}, "By state"),
+      el("div", {}, ...STATES.filter(s => byState[s]).map(s =>
+        el("span", { style: "margin-right:.8rem" }, pill(s), " ", String(byState[s])))),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Agreements (${subs.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Number", "Account", "State", "Plan", "Pins (cat/price)", "v", "Items", "Seats", "Cycle", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...subs.map(s => el("tr", {},
+          el("td", {}, el("code", {}, s.subscription_number)),
+          el("td", { class: "muted" }, s.account_id),
+          el("td", {}, pill(s.state)),
+          el("td", {}, s.plan_code || "—"),
+          el("td", { class: "pins" }, `${s.catalog_version} / ${s.pricing_version}`),
+          el("td", { class: "num" }, s.version),
+          el("td", { class: "num" }, s.items.length),
+          el("td", { class: "num" }, s.seat_count),
+          el("td", { class: "num" }, s.cycle.cycle_number),
+          el("td", {},
+            el("button", { class: "ghost", onclick: () => {
+              document.getElementById("selected").value = s.id;
+              state.tab = "details"; load();
+            } }, "open"),
+            ...triggerButtons(s)),
+        )))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Buttons come from the server's allowed_triggers — the UI cannot offer a move that would 409."),
+    ),
+  ];
+}
+
+// ── 2. Details ─────────────────────────────────────────────────────────────────
+function detailsView() {
+  const s = state.data.subscription;
+  if (!s) return [needsSelection()];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, `${s.subscription_number} `, pill(s.state), s.is_hybrid ? el("span", { class: "pill" }, "hybrid") : null),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Subscription id"), el("dd", {}, el("code", {}, s.id)),
+        el("dt", {}, "Billing account"), el("dd", {}, el("code", {}, s.account_id)),
+        el("dt", {}, "Catalog version"), el("dd", { class: "pins" }, "v" + s.catalog_version + "  (immutable pin)"),
+        el("dt", {}, "Pricing version"), el("dd", { class: "pins" }, "v" + s.pricing_version + "  (immutable pin)"),
+        el("dt", {}, "Plan code"), el("dd", {}, s.plan_code || "—"),
+        el("dt", {}, "Currency"), el("dd", {}, s.currency),
+        el("dt", {}, "Terms version"), el("dd", {}, "v" + s.version),
+        el("dt", {}, "Billing cycle"), el("dd", {},
+          `${s.cycle.interval}, anchor day ${s.cycle.anchor_day}, cycle ${s.cycle.cycle_number}`),
+        el("dt", {}, "Current period"), el("dd", { class: "pins" },
+          s.cycle.current_period ? `${s.cycle.current_period.start} → ${s.cycle.current_period.end}` : "—"),
+        el("dt", {}, "Seats"), el("dd", {}, String(s.seat_count)),
+        el("dt", {}, "Metered codes"), el("dd", {}, s.metered_codes.join(", ") || "—"),
+        el("dt", {}, "Price pins"), el("dd", { class: "pins" }, s.price_pins.join(", ") || "—"),
+        el("dt", {}, "Contract"), el("dd", {}, s.contract_id || "—"),
+        el("dt", {}, "Editable"), el("dd", {}, s.is_editable ? "yes" : "no — closed agreements are a record"),
+      ),
+      el("div", { style: "margin-top:.9rem;display:flex;gap:.4rem;flex-wrap:wrap" }, ...triggerButtons(s)),
+      el("p", { class: "muted", style: "font-size:12px;margin-top:.8rem" },
+        "No amount appears on this screen. A subscription says what was agreed; what it costs is " +
+        "resolved against pricing v" + s.pricing_version + ", and what it bills is rating's."),
+    ),
+  ];
+}
+
+// ── 3. Items ───────────────────────────────────────────────────────────────────
+function itemsView() {
+  const s = state.data.subscription;
+  if (!s) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Add an item"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Price code"), el("input", { id: "i-code" })),
+        el("div", {}, el("label", {}, "Price version (the pin)"),
+          el("input", { id: "i-version", type: "number", min: "1", value: "1" })),
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "i-kind" }, ...ITEM_KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Quantity / seats"),
+          el("input", { id: "i-qty", type: "number", min: "0", value: "1" })),
+        el("div", {}, el("label", {}, "Meter code (metered kinds)"), el("input", { id: "i-meter" })),
+        el("div", {}, el("label", {}, "Included units"),
+          el("input", { id: "i-included", type: "number", min: "0", value: "0" })),
+        el("div", {}, el("label", {}, "Label"), el("input", { id: "i-label" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Several items on one agreement is how hybrid commerce is expressed — a platform fee " +
+        "and seats and usage together — rather than several subscriptions per customer."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/items`, {
+          method: "POST",
+          body: JSON.stringify({
+            price_code: val("i-code"), price_version: num("i-version") || 1,
+            kind: val("i-kind"), quantity: num("i-qty") || 0, meter_code: val("i-meter"),
+            included_units: num("i-included") || 0, label: val("i-label"),
+          }),
+        }), "item added") }, "Add item")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Items (${s.items.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Pin", "Kind", "Quantity", "Meter", "Included", "Label", "Actions"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...s.items.map(i => el("tr", {},
+          el("td", { class: "pins" }, i.pin),
+          el("td", {}, i.kind),
+          el("td", { class: "num" }, i.quantity),
+          el("td", {}, i.meter_code || "—"),
+          el("td", { class: "num" }, i.included_units),
+          el("td", {}, i.label || "—"),
+          el("td", {},
+            el("button", { class: "ghost", onclick: () => {
+              const q = prompt("New quantity", String(i.quantity));
+              if (q === null) return;
+              act(() => api(`/${s.id}/items/${i.id}`, {
+                method: "PATCH", body: JSON.stringify({ quantity: Number(q) }) }), "item updated");
+            } }, "quantity"),
+            el("button", { class: "ghost", onclick: () => act(() =>
+              api(`/${s.id}/items/${i.id}`, { method: "DELETE" }), "item removed") }, "remove")),
+        )))),
+    ),
+  ];
+}
+
+// ── 4. Timeline ────────────────────────────────────────────────────────────────
+function timelineView() {
+  const events = state.data.timeline;
+  const s = state.data.subscription;
+  if (!events || !s) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, `Timeline · ${s.subscription_number} (${events.length})`),
+      el("div", { class: "timeline" }, ...events.map(e => el("div", { class: "ev" },
+        el("code", {}, e.action), " ",
+        e.from_state && e.to_state ? el("span", { class: "muted" }, `${e.from_state} → ${e.to_state}  `) : null,
+        el("span", { class: "muted" }, `v${e.version} · ${when(e.at)} · ${e.actor_id || "system"}`),
+        e.detail ? el("div", { class: "muted", style: "font-size:12px" }, e.detail) : null,
+      ))),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Written inside the same transaction as the change it describes — the history and the " +
+        "agreement commit or vanish together. A rejected command leaves nothing behind."),
+    ),
+  ];
+}
+
+// ── 5. Version History ─────────────────────────────────────────────────────────
+function versionsView() {
+  const versions = state.data.versions;
+  if (!versions) return [needsSelection()];
+  const id = selected();
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Freeze the current terms"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Reason"), el("input", { id: "v-reason" })),
+        el("div", {}, el("label", {}, "Roll back to version"),
+          el("input", { id: "v-rollback", type: "number", min: "1" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Rollback publishes a new version carrying earlier terms; the versions in between remain " +
+        "readable forever. With a commercial agreement, 'never rewrite history' is the difference " +
+        "between a contract and a wiki page."),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${id}/versions`, {
+          method: "POST", body: JSON.stringify({ reason: val("v-reason") }) }), "version published") }, "Publish version"),
+        el("button", { class: "ghost", onclick: () => act(() => api(`/${id}/versions/rollback`, {
+          method: "POST", body: JSON.stringify({ to_version: num("v-rollback"), reason: "" }) }),
+          "rolled forward with earlier terms") }, "Roll back")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Versions (${versions.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["v", "Published", "By", "State", "Pins", "Items", "Rolled back from", "Reason"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...versions.map(v => el("tr", {},
+          el("td", {}, "v" + v.version),
+          el("td", { class: "num" }, when(v.published_at)),
+          el("td", {}, v.published_by || "—"),
+          el("td", {}, v.state ? pill(v.state) : "—"),
+          el("td", { class: "pins" }, `${v.catalog_version ?? "—"} / ${v.pricing_version ?? "—"}`),
+          el("td", { class: "num" }, v.item_count),
+          el("td", {}, v.rolled_back_from == null ? "—" : "v" + v.rolled_back_from),
+          el("td", { class: "muted" }, v.reason || "—"),
+        )))),
+    ),
+  ];
+}
+
+// ── 6. Schedule Changes ────────────────────────────────────────────────────────
+function scheduleView() {
+  const s = state.data.subscription;
+  const changes = state.data.changes;
+  if (!s || !changes) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Schedule a future change"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", {}, "Kind"),
+          el("select", { id: "c-kind" }, ...CHANGE_KINDS.map(k => el("option", {}, k)))),
+        el("div", {}, el("label", {}, "Effective at (epoch s)"),
+          el("input", { id: "c-at", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Target catalog version"),
+          el("input", { id: "c-catalog", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Target pricing version"),
+          el("input", { id: "c-pricing", type: "number", min: "1" })),
+        el("div", {}, el("label", {}, "Target plan code"), el("input", { id: "c-plan" })),
+        el("div", {}, el("label", {}, "Timing"),
+          el("select", { id: "c-timing" }, el("option", {}, "period_end"), el("option", {}, "immediate"))),
+        el("div", {}, el("label", {}, "Reason"), el("input", { id: "c-reason" })),
+      ),
+      el("p", { class: "muted", style: "font-size:12px;margin:.7rem 0 0" },
+        "Intent only. There is no scheduler in this plane — a caller dispatches the real command " +
+        "when the time comes, and the state machine validates it then, exactly as if a human had " +
+        "asked. That is what keeps 'what we agreed' separable from 'what the system ran'."),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/scheduled-changes`, {
+          method: "POST",
+          body: JSON.stringify({
+            kind: val("c-kind"), effective_at: num("c-at"),
+            target_catalog_version: num("c-catalog"), target_pricing_version: num("c-pricing"),
+            target_plan_code: val("c-plan"), timing: val("c-timing"), reason: val("c-reason"),
+            items: [],
+          }),
+        }), "change scheduled") }, "Schedule")),
+    ),
+    el("div", { class: "card scroll" }, el("h2", {}, `Pending changes (${changes.length})`),
+      el("table", {}, el("thead", {}, el("tr", {},
+        ...["Kind", "Status", "Effective at", "Target pins", "Plan", "Reason", "Actions"]
+          .map(h => el("th", {}, h)))),
+        el("tbody", {}, ...changes.map(c => el("tr", {},
+          el("td", {}, c.kind),
+          el("td", {}, pill(c.status)),
+          el("td", { class: "num" }, when(c.effective_at)),
+          el("td", { class: "pins" },
+            `${c.target_catalog_version ?? "—"} / ${c.target_pricing_version ?? "—"}`),
+          el("td", {}, c.target_plan_code || "—"),
+          el("td", { class: "muted" }, c.reason || "—"),
+          el("td", {}, el("button", { class: "ghost", onclick: () => act(() =>
+            api(`/${s.id}/scheduled-changes/${c.id}`, { method: "DELETE" }), "change cancelled") },
+            "cancel")),
+        )))),
+    ),
+  ];
+}
+
+// ── 7. Trial ───────────────────────────────────────────────────────────────────
+function trialView() {
+  const s = state.data.subscription;
+  if (!s) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Trial"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Enabled"), el("dd", {}, s.trial.enabled ? "yes" : "no"),
+        el("dt", {}, "Length (days)"), el("dd", {}, String(s.trial.length_days)),
+        el("dt", {}, "Ends at"), el("dd", { class: "pins" }, when(s.trial.ends_at)),
+        el("dt", {}, "Converts automatically"), el("dd", {}, s.trial.converts_automatically ? "yes" : "no"),
+        el("dt", {}, "Requires payment method"), el("dd", {}, s.trial.requires_payment_method ? "yes" : "no"),
+      ),
+      el("div", { class: "row", style: "margin-top:.8rem" },
+        el("div", {}, el("label", {}, "Length in days (0 = use policy)"),
+          el("input", { id: "t-days", type: "number", min: "0", value: "0" }))),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/trial/start`, {
+          method: "POST", body: JSON.stringify({ length_days: num("t-days") || 0 }) }), "trial started") }, "Start"),
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${s.id}/trial/convert`, { method: "POST" }), "trial converted") }, "Convert"),
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${s.id}/trial/expire`, { method: "POST" }), "trial expired") }, "Expire")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "One deterministic policy. 'Requires payment method' is a declared requirement a " +
+        "consuming surface enforces at conversion — Billing talks to no payment provider here."),
+    ),
+  ];
+}
+
+// ── 8. Renewal ─────────────────────────────────────────────────────────────────
+function renewalView() {
+  const s = state.data.subscription;
+  if (!s) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Renewal"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Mode"), el("dd", {}, s.renewal.mode),
+        el("dt", {}, "Terms agreed"), el("dd", {}, s.renewal.terms == null ? "perpetual" : String(s.renewal.terms)),
+        el("dt", {}, "Terms used"), el("dd", {}, String(s.renewal.terms_used)),
+        el("dt", {}, "Still renews"), el("dd", {}, s.renewal.renews ? "yes" : "no"),
+        el("dt", {}, "Automatic"), el("dd", {}, s.renewal.is_automatic ? "yes" : "no"),
+        el("dt", {}, "Next renewal at"), el("dd", { class: "pins" }, when(s.renewal.next_renewal_at)),
+        el("dt", {}, "Current cycle"), el("dd", {}, String(s.cycle.cycle_number)),
+      ),
+      el("div", { class: "row", style: "margin-top:.8rem" },
+        el("div", {}, el("label", {}, "Mode"),
+          el("select", { id: "r-mode" }, ...RENEWAL_MODES.map(m =>
+            el("option", { selected: m === s.renewal.mode ? "" : null }, m)))),
+        el("div", {}, el("label", {}, "Notice days"),
+          el("input", { id: "r-notice", type: "number", min: "0", value: String(s.renewal.notice_days) })),
+        el("div", {}, el("label", {}, "Terms (blank = perpetual)"),
+          el("input", { id: "r-terms", type: "number", min: "1",
+                        value: s.renewal.terms == null ? "" : String(s.renewal.terms) })),
+      ),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/renewal`, {
+          method: "PATCH",
+          body: JSON.stringify({ mode: val("r-mode"), notice_days: num("r-notice") || 0,
+                                 terms: num("r-terms") }),
+        }), "renewal policy updated") }, "Save policy"),
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${s.id}/renew`, { method: "POST" }), "cycle advanced") }, "Renew now")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Renewal advances the billing cycle; it is not a state change and not a scheduler. " +
+        "Renewing beyond the agreed terms is refused — that is a commercial decision, not a " +
+        "computation."),
+    ),
+  ];
+}
+
+// ── 9. Pause / Cancel ──────────────────────────────────────────────────────────
+function lifecycleView() {
+  const s = state.data.subscription;
+  if (!s) return [needsSelection()];
+  return [
+    el("div", { class: "card" }, el("h2", {}, "Pause"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Pauses agreed per term"), el("dd", {}, String(s.pause.pauses_per_term)),
+        el("dt", {}, "Used / remaining"), el("dd", {}, `${s.pause.pauses_used} / ${s.pause.pauses_remaining}`),
+        el("dt", {}, "Max pause days"), el("dd", {}, String(s.pause.max_pause_days)),
+        el("dt", {}, "Entitlements retained"), el("dd", {}, s.pause.entitlements_retained ? "yes" : "no"),
+        el("dt", {}, "Paused at"), el("dd", { class: "pins" }, when(s.pause.paused_at)),
+      ),
+      el("div", { class: "row", style: "margin-top:.8rem" },
+        el("div", {}, el("label", {}, "Reason"), el("input", { id: "p-reason" }))),
+      el("div", { style: "margin-top:.8rem;display:flex;gap:.5rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/pause`, {
+          method: "POST", body: JSON.stringify({ reason: val("p-reason") }) }), "paused") }, "Pause"),
+        el("button", { class: "ghost", onclick: () => act(() =>
+          api(`/${s.id}/resume`, { method: "POST" }), "resumed") }, "Resume")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Pausing does not by itself alter entitlements — the Entitlement domain decides, and this " +
+        "records what was agreed so that decision has an input rather than an assumption."),
+    ),
+    el("div", { class: "card" }, el("h2", {}, "Cancellation"),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Default timing"), el("dd", {}, s.cancellation.default_timing),
+        el("dt", {}, "Requested at"), el("dd", { class: "pins" }, when(s.cancellation.requested_at)),
+        el("dt", {}, "Effective at"), el("dd", { class: "pins" }, when(s.cancellation.effective_at)),
+        el("dt", {}, "Reason"), el("dd", {}, s.cancellation.reason || "—"),
+        el("dt", {}, "Refund eligible (declared)"), el("dd", {}, s.cancellation.refund_eligible ? "yes" : "no"),
+      ),
+      el("div", { class: "row", style: "margin-top:.8rem" },
+        el("div", {}, el("label", {}, "Timing"),
+          el("select", { id: "x-timing" }, ...TIMINGS.map(t => el("option", {}, t)))),
+        el("div", {}, el("label", {}, "Reason"), el("input", { id: "x-reason" })),
+        el("div", {}, el("label", {}, "Reason code"), el("input", { id: "x-code" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api(`/${s.id}/cancel`, {
+          method: "POST",
+          body: JSON.stringify({ timing: val("x-timing"), reason: val("x-reason"),
+                                 reason_code: val("x-code") }),
+        }), "cancellation recorded") }, "Cancel subscription")),
+      el("p", { class: "muted", style: "font-size:12px" },
+        "Period-end is the default: a customer who has paid for a period keeps it. " +
+        "There is no DELETE on a subscription in any state — the agreement's record is permanent."),
+    ),
+  ];
+}
+
+// ── 10. Activity ───────────────────────────────────────────────────────────────
+function activityView() {
+  const subs = state.data.subscriptions || [];
+  const withChanges = subs.filter(s => s.scheduled_changes.some(c => c.status === "pending"));
+  const trialing = subs.filter(s => s.state === "trialing");
+  const impaired = subs.filter(s => s.is_impaired);
+  const section = (title, rows, render) => el("div", { class: "card scroll" },
+    el("h2", {}, `${title} (${rows.length})`),
+    rows.length
+      ? el("table", {}, el("tbody", {}, ...rows.map(render)))
+      : el("p", { class: "muted", style: "font-size:12px" }, "nothing here"));
+  return [
+    section("Trialing", trialing, s => el("tr", {},
+      el("td", {}, el("code", {}, s.subscription_number)),
+      el("td", {}, pill(s.state)),
+      el("td", { class: "pins" }, "ends " + when(s.trial.ends_at)))),
+    section("Impaired (past due, suspended, paused)", impaired, s => el("tr", {},
+      el("td", {}, el("code", {}, s.subscription_number)),
+      el("td", {}, pill(s.state)),
+      el("td", { class: "muted" }, s.cancellation.reason || ""))),
+    section("With pending scheduled changes", withChanges, s => el("tr", {},
+      el("td", {}, el("code", {}, s.subscription_number)),
+      el("td", {}, String(s.scheduled_changes.filter(c => c.status === "pending").length) + " pending"),
+      el("td", { class: "muted" },
+        s.scheduled_changes.filter(c => c.status === "pending").map(c => c.kind).join(", ")))),
+  ];
+}
+
+function render() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map(([key, label]) =>
+    el("button", { class: state.tab === key ? "active" : "",
+      onclick: () => { state.tab = key; state.notice = ""; load(); } }, label)));
+  const views = { dashboard: dashboardView, details: detailsView, items: itemsView,
+    timeline: timelineView, versions: versionsView, schedule: scheduleView,
+    trial: trialView, renewal: renewalView, lifecycle: lifecycleView, activity: activityView };
+  const view = document.getElementById("view");
+  view.replaceChildren(
+    ...(views[state.tab]() || []).filter(Boolean),
+    state.error ? el("div", { class: "card" }, el("div", { class: "err" }, state.error)) : null,
+    state.notice && !state.error ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+document.getElementById("token").addEventListener("change", load);
+document.getElementById("selected").addEventListener("change", load);
+render();
+load();
+</script>
+</body>
+</html>

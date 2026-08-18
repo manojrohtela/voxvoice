@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxVoice — Rating</title>
+<!--
+  Rating Studio (M9.12).
+
+  ADR-0021: the Studio is a **Consumer**. It owns no state, holds no business rule, and knows
+  nothing that the API does not tell it — every screen renders a response from
+  /v1/billing/charges/*, and every action dispatches to it. It multiplies nothing, folds no tier,
+  rounds no package, and computes no digest; the Verdict screen displays the server's answer
+  rather than reaching one, and the Compare screen renders the server's delta rather than
+  subtracting two totals.
+
+  It *displays* money, because money is what rating produces — but it never computes any. Every
+  amount arrives as {minor, currency} and is rendered, not derived: there is no arithmetic on a
+  monetary value anywhere in this file, and a test asserts it.
+
+  Self-contained by design: one file, no build step, no CDN, no external font.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --dim: #9aa4b8;
+    --accent: #6ea8fe; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --draft: #8b949e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --text:#1c2028; --dim:#5b6472; --accent:#0b62d6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:1rem; padding:.9rem 1.2rem;
+           border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.2px; }
+  .grow { flex:1; }
+  nav { display:flex; gap:.25rem; padding:.6rem 1.2rem; border-bottom:1px solid var(--line);
+        background:var(--panel); overflow-x:auto; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:.4rem .8rem; border-radius:6px; cursor:pointer; font:inherit; white-space:nowrap; }
+  nav button.active { background:var(--bg); color:var(--text); border-color:var(--line); }
+  main { padding:1.2rem; max-width:1200px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .8rem; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  td.num, th.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  input, select, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                            border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  label { display:block; font-size:12px; color:var(--dim); margin:.6rem 0 .2rem; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:.45rem .9rem; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line);
+                 border-radius:6px; padding:.3rem .6rem; cursor:pointer; font:inherit; font-size:12px; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.rated, .pill.finalized, .pill.increased { color:var(--ok); border-color:var(--ok); }
+  .pill.draft, .pill.unchanged { color:var(--draft); }
+  .pill.superseded, .pill.rerated { color:var(--warn); border-color:var(--warn); }
+  .pill.discarded, .pill.removed, .pill.decreased { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--dim); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:.5rem; }
+  .ok { color:var(--ok); font-size:12px; margin-top:.5rem; }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:240px 1fr; gap:.3rem .8rem; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; }
+  .timeline { border-left:2px solid var(--line); margin-left:.6rem; padding-left:1rem; }
+  .timeline .ev { position:relative; padding:.35rem 0; font-size:13px; }
+  .timeline .ev::before { content:""; position:absolute; left:-1.35rem; top:.9rem;
+                          width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); }
+  .digest { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); }
+  .big { font-size:1.6rem; font-weight:650; }
+  .scroll { overflow-x:auto; }
+  .indent { padding-left:1.4rem; color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxVoice · Rating</h1>
+  <span class="pill" id="count-pill">—</span>
+  <span class="grow"></span>
+  <input id="subscription" placeholder="subscription id" style="width:180px" />
+  <input id="account" placeholder="account id" style="width:150px" />
+  <input id="pstart" placeholder="period start" style="width:110px" />
+  <input id="pend" placeholder="period end" style="width:110px" />
+  <input id="token" placeholder="Bearer token" style="width:190px" />
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+const API = "/v1/billing/charges";
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : String(kid));
+  return n;
+};
+const state = { tab: "runs", data: {}, error: "", notice: "", run: null };
+
+// The Studio holds no truth: every call goes to the API, and every screen re-reads it.
+async function api(path, options = {}) {
+  const token = document.getElementById("token").value.trim();
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = body && body.error;
+    const diags = e && e.diagnostics
+      ? "\n" + e.diagnostics.map(d => `  • ${d.path}: ${d.message}`).join("\n") : "";
+    throw new Error(`${res.status} ${(e && e.type) || ""} — ${(e && e.message) || "request failed"}${diags}`);
+  }
+  return body;
+}
+
+const TABS = [
+  ["runs", "Runs"], ["preview", "Preview"], ["breakdown", "Breakdown"],
+  ["explain", "Explain"], ["rerate", "Rerate"], ["compare", "Compare"],
+  ["commitments", "Commitments"], ["inspect", "Inspection"], ["diagnostics", "Diagnostics"],
+  ["search", "Search"], ["timeline", "Timeline"],
+];
+
+const REASONS = ["late_usage", "usage_correction", "pricing_correction", "entitlement_change",
+                 "agreement_amendment", "commitment_true_up", "manual_review"];
+
+// Display only. The server sent {minor, currency}; this renders it and derives nothing —
+// no total is summed here, no difference is taken, no percentage is applied.
+function amount(m) {
+  if (!m) return "—";
+  const sign = m.minor < 0 ? "-" : "";
+  const s = String(Math.abs(m.minor)).padStart(3, "0");
+  return `${sign}${s.slice(0, -2)}.${s.slice(-2)} ${m.currency}`;
+}
+function pill(name) { return el("span", { class: "pill " + name }, name); }
+function val(id) { const n = document.getElementById(id); return n ? n.value.trim() : ""; }
+function sub() { return val("subscription"); }
+function acct() { return val("account"); }
+function pstart() { return Number(val("pstart") || 0); }
+function pend() { return Number(val("pend") || 0); }
+function periodBody() { return { subscription_id: sub(), period_start: pstart(), period_end: pend() }; }
+function short(d) { return d ? d.slice(0, 16) : "—"; }
+
+async function load() {
+  state.error = "";
+  try {
+    if (state.tab === "runs" || state.tab === "breakdown" || state.tab === "explain"
+        || state.tab === "inspect" || state.tab === "diagnostics" || state.tab === "compare") {
+      const q = sub() ? `?subscription_id=${encodeURIComponent(sub())}`
+                      : (acct() ? `?account_id=${encodeURIComponent(acct())}` : "");
+      state.data.runs = await api("/runs" + q);
+      document.getElementById("count-pill").textContent = `${state.data.runs.length} run(s)`;
+      if (state.run && !state.data.runs.some(r => r.id === state.run)) state.run = null;
+      if (!state.run && state.data.runs.length) state.run = state.data.runs[0].id;
+    }
+    if (state.run && state.tab === "explain") state.data.explain = await api(`/runs/${state.run}/explain`);
+    if (state.run && state.tab === "inspect") state.data.inspect = await api(`/runs/${state.run}/inspect`);
+    if (state.run && state.tab === "diagnostics") state.data.diagnostics = await api(`/runs/${state.run}/diagnostics`);
+    if (state.tab === "commitments")
+      state.data.commitments = await api("/commitments" + (acct() ? "?account_id=" + encodeURIComponent(acct()) : ""));
+    if (state.tab === "search") state.data.search = await api("/search?limit=100");
+    if (state.tab === "timeline")
+      state.data.timeline = await api("/timeline?limit=200" + (sub() ? "&subscription_id=" + encodeURIComponent(sub()) : ""));
+  } catch (e) { state.error = e.message; }
+  render();
+}
+
+async function act(fn, message) {
+  state.error = ""; state.notice = "";
+  try { await fn(); state.notice = message; } catch (e) { state.error = e.message; }
+  await load();
+}
+
+function needsPeriod() {
+  return el("div", { class: "card muted" },
+    "Enter a subscription id and a period in the header to load this screen.");
+}
+
+// ── 1. Runs ────────────────────────────────────────────────────────────────────
+// Lifecycle buttons come from `allowed_triggers` — the server decides which moves exist.
+const TRIGGER_PATH = { finalize: "finalize", discard: "discard" };
+
+function runButtons(r) {
+  return r.allowed_triggers.filter(t => TRIGGER_PATH[t]).map(t => el("button", {
+    class: "ghost",
+    onclick: () => act(() => api(`/runs/${r.id}/${TRIGGER_PATH[t]}`, {
+      method: "POST", body: JSON.stringify({ reason: "" }),
+    }), `${r.id}: ${t}`),
+  }, t));
+}
+
+function runsScreen() {
+  const runs = state.data.runs || [];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Rate a period"),
+      el("div", { class: "row" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          const receipt = await api("/runs", { method: "POST", body: JSON.stringify(periodBody()) });
+          state.run = receipt.rating_run_id;
+        }, "rated") }, "Rate this period"),
+        el("button", { class: "act", onclick: () => act(() => api("/runs/account", {
+          method: "POST",
+          body: JSON.stringify({ account_id: acct(), period_start: pstart(), period_end: pend() }),
+        }), "account rated") }, "Rate whole account"),
+        el("button", { class: "ghost", onclick: () => act(async () => {
+          state.data.verdict = await api("/verdict", { method: "POST", body: JSON.stringify(periodBody()) });
+        }, "verdict fetched") }, "Does it need rating again?"),
+      ),
+      state.data.verdict ? el("dl", { class: "kv", style: "margin-top:.8rem" },
+        el("dt", {}, "Rerate required"), el("dd", {}, String(state.data.verdict.required)),
+        el("dt", {}, "Would adjust a finalized run"), el("dd", {}, String(state.data.verdict.would_adjust_finalized)),
+        el("dt", {}, "Current basis digest"), el("dd", { class: "digest" }, short(state.data.verdict.current_basis_digest)),
+        el("dt", {}, "Proposed basis digest"), el("dd", { class: "digest" }, short(state.data.verdict.proposed_basis_digest)),
+        el("dt", {}, "Server's reasoning"), el("dd", { class: "muted" }, state.data.verdict.detail),
+      ) : null,
+    ),
+    el("div", { class: "card scroll" },
+      el("h2", {}, "Rating runs"),
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          ["Run", "Period", "State", "Seq", "Charges", "Total", "Basis digest", "Links", ""].map(h =>
+            el("th", { class: h === "Total" || h === "Charges" ? "num" : "" }, h)))),
+        el("tbody", {}, runs.map(r => el("tr", {},
+          el("td", {}, el("button", { class: "ghost", onclick: () => { state.run = r.id; load(); } }, r.id.slice(0, 12))),
+          el("td", { class: "mono" }, `${r.period_start} – ${r.period_end}`),
+          el("td", {}, pill(r.state)),
+          el("td", { class: "num" }, r.sequence),
+          el("td", { class: "num" }, r.charge_count),
+          el("td", { class: "num" }, amount(r.total)),
+          el("td", { class: "digest" }, short(r.basis_digest)),
+          el("td", { class: "muted" },
+            r.supersedes ? `supersedes ${r.supersedes.slice(0, 10)}` :
+            r.adjusts ? `adjusts ${r.adjusts.slice(0, 10)}` : "—"),
+          el("td", {}, runButtons(r)),
+        ))),
+      ),
+    ),
+  ];
+}
+
+// ── 2. Preview ─────────────────────────────────────────────────────────────────
+function previewScreen() {
+  const r = state.data.preview;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Preview — writes nothing"),
+      el("p", { class: "muted" },
+        "A preview is a question, not a figure. Nothing is stored, so it can never become the billed amount."),
+      el("button", { class: "act", onclick: () => act(async () => {
+        state.data.preview = await api("/preview", { method: "POST", body: JSON.stringify(periodBody()) });
+      }, "previewed") }, "Preview this period"),
+    ),
+    r ? resultCard(r) : null,
+  ];
+}
+
+function resultCard(r) {
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Result — ${r.mode}`),
+    el("div", { class: "big" }, amount(r.total)),
+    el("dl", { class: "kv", style: "margin:.8rem 0" },
+      el("dt", {}, "Subtotal (list)"), el("dd", {}, amount(r.subtotal)),
+      el("dt", {}, "Reductions"), el("dd", {}, amount(r.discount_total)),
+      el("dt", {}, "Shapes"), el("dd", {}, r.kinds.join(", ") + (r.is_hybrid ? " (hybrid)" : "")),
+      el("dt", {}, "Breakdown adds up"), el("dd", {}, String(r.breaks_down_correctly)),
+      el("dt", {}, "Result digest"), el("dd", { class: "digest" }, short(r.digest)),
+      el("dt", {}, "Basis digest"), el("dd", { class: "digest" }, short(r.basis.digest)),
+    ),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Charge", "Kind", "Qty", "List", "Reductions", "Net"].map(h =>
+        el("th", { class: ["Qty", "List", "Reductions", "Net"].includes(h) ? "num" : "" }, h)))),
+      el("tbody", {}, r.charges.map(c => el("tr", {},
+        el("td", {}, c.description),
+        el("td", {}, pill(c.kind)),
+        el("td", { class: "num" }, `${c.quantity} ${c.unit}`),
+        el("td", { class: "num" }, amount(c.list_amount)),
+        el("td", { class: "num" }, amount(c.discount_amount)),
+        el("td", { class: "num" }, amount(c.net_amount)),
+      ))),
+    ),
+  );
+}
+
+// ── 3. Breakdown ───────────────────────────────────────────────────────────────
+function breakdownScreen() {
+  const run = (state.data.runs || []).find(r => r.id === state.run);
+  if (!run || !run.result) return needsPeriod();
+  return run.result.charges.map(c => el("div", { class: "card scroll" },
+    el("h2", {}, `${c.description} — ${amount(c.net_amount)}`),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Step", "Label", "Units", "Rate", "Amount", "Detail"].map(h =>
+        el("th", { class: ["Units", "Rate", "Amount"].includes(h) ? "num" : "" }, h)))),
+      el("tbody", {}, c.components.map(k => el("tr", {},
+        el("td", {}, pill(k.kind)),
+        el("td", {}, k.label),
+        el("td", { class: "num" }, k.units || "—"),
+        el("td", { class: "num" }, amount(k.unit_amount)),
+        el("td", { class: "num" }, amount(k.amount)),
+        el("td", { class: "muted" }, k.detail || "—"),
+      ))),
+    ),
+    el("p", { class: c.breaks_down_correctly ? "ok" : "err" },
+      c.breaks_down_correctly ? "The breakdown sums exactly to the charge."
+                              : "The breakdown does not sum to the charge — this run cannot be finalized."),
+    el("h2", { style: "margin-top:1rem" }, "Provenance"),
+    el("dl", { class: "kv" },
+      el("dt", {}, "Price"), el("dd", { class: "mono" }, c.provenance.price_pin),
+      el("dt", {}, "Price book"), el("dd", { class: "mono" }, c.provenance.book_pin),
+      el("dt", {}, "Catalog version"), el("dd", {}, String(c.provenance.catalog_version)),
+      el("dt", {}, "Pricing version"), el("dd", {}, String(c.provenance.pricing_version)),
+      el("dt", {}, "Agreement"), el("dd", { class: "mono" },
+        `${c.provenance.subscription_id} v${c.provenance.subscription_version}`),
+      el("dt", {}, "Meter"), el("dd", { class: "mono" }, c.provenance.meter_code || "—"),
+      el("dt", {}, "Usage records"), el("dd", {}, String(c.provenance.usage_record_count)),
+      el("dt", {}, "Included units declared by"), el("dd", {}, c.provenance.included_units_source),
+      el("dt", {}, "Negotiated override"), el("dd", {}, String(c.provenance.override_applied)),
+      el("dt", {}, "Charge digest"), el("dd", { class: "digest" }, short(c.digest)),
+    ),
+    c.discounts.length ? el("table", { style: "margin-top:.8rem" },
+      el("thead", {}, el("tr", {}, ["Reduction", "Kind", "Source", "Amount"].map(h =>
+        el("th", { class: h === "Amount" ? "num" : "" }, h)))),
+      el("tbody", {}, c.discounts.map(d => el("tr", {},
+        el("td", {}, d.display_name || d.code),
+        el("td", {}, d.kind),
+        el("td", {}, d.source),
+        el("td", { class: "num" }, amount(d.reduction)),
+      ))),
+    ) : null,
+  ));
+}
+
+// ── 4. Explain ─────────────────────────────────────────────────────────────────
+function explainScreen() {
+  const e = state.data.explain;
+  if (!e) return needsPeriod();
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "What this run rated"),
+      el("ul", {}, e.basis_lines.map(l => el("li", { class: "muted" }, l))),
+    ),
+    ...e.charges.map(c => el("div", { class: "card" },
+      el("h2", {}, `${c.description} — ${amount(c.amount)}`),
+      el("ul", {}, c.lines.map(l => el("li", {}, l))),
+      el("ul", { class: "indent" }, c.provenance_lines.map(l => el("li", { class: "muted" }, l))),
+    )),
+  ];
+}
+
+// ── 5. Rerate ──────────────────────────────────────────────────────────────────
+function rerateScreen() {
+  return el("div", { class: "card" },
+    el("h2", {}, "Rate this period again"),
+    el("p", { class: "muted" },
+      "Never an edit. A provisional run is superseded; a finalized one is adjusted and left exactly as it was billed."),
+    el("label", { for: "reason" }, "Reason"),
+    el("select", { id: "reason" }, REASONS.map(r => el("option", { value: r }, r))),
+    el("label", { for: "detail" }, "Detail"),
+    el("input", { id: "detail", placeholder: "what moved?" }),
+    el("div", { style: "margin-top:.8rem" },
+      el("button", { class: "act", onclick: () => act(async () => {
+        const receipt = await api("/runs/rerate", {
+          method: "POST",
+          body: JSON.stringify({ ...periodBody(), reason: val("reason"), detail: val("detail") }),
+        });
+        state.run = receipt.rating_run_id;
+        state.notice = `outcome: ${receipt.outcome}`;
+      }, "rerated") }, "Rerate"),
+    ),
+  );
+}
+
+// ── 6. Compare ─────────────────────────────────────────────────────────────────
+function compareScreen() {
+  const runs = state.data.runs || [];
+  const d = state.data.delta;
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Why two runs differ"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { for: "before" }, "Before"),
+          el("select", { id: "before" }, runs.map(r => el("option", { value: r.id }, `${r.id.slice(0, 12)} (${r.state})`)))),
+        el("div", {}, el("label", { for: "after" }, "After"),
+          el("select", { id: "after" }, runs.map(r => el("option", { value: r.id }, `${r.id.slice(0, 12)} (${r.state})`)))),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(async () => {
+          state.data.delta = await api(
+            `/compare?before_run_id=${encodeURIComponent(val("before"))}&after_run_id=${encodeURIComponent(val("after"))}`);
+        }, "compared") }, "Compare"),
+      ),
+    ),
+    d ? el("div", { class: "card scroll" },
+      el("h2", {}, "Delta"),
+      el("div", { class: "big" }, amount(d.total_delta)),
+      el("p", { class: "muted" },
+        `${d.charges_changed} charge(s) changed of ${d.differences.length}; ` +
+        `${amount(d.total_before)} → ${amount(d.total_after)}`),
+      el("table", {},
+        el("thead", {}, el("tr", {}, ["Change", "Item", "Price", "Before", "After", "Delta", "Why"].map(h =>
+          el("th", { class: ["Before", "After", "Delta"].includes(h) ? "num" : "" }, h)))),
+        el("tbody", {}, d.differences.map(x => el("tr", {},
+          el("td", {}, pill(x.kind)),
+          el("td", { class: "mono" }, x.item_id),
+          el("td", { class: "mono" }, x.price_pin),
+          el("td", { class: "num" }, amount(x.before)),
+          el("td", { class: "num" }, amount(x.after)),
+          el("td", { class: "num" }, amount(x.delta)),
+          el("td", { class: "muted" }, x.reason || "—"),
+        ))),
+      ),
+    ) : null,
+  ];
+}
+
+// ── 7. Commitments ─────────────────────────────────────────────────────────────
+function commitmentsScreen() {
+  const cs = state.data.commitments || [];
+  return [
+    el("div", { class: "card" },
+      el("h2", {}, "Declare a minimum commitment"),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { for: "c-code" }, "Code"), el("input", { id: "c-code" })),
+        el("div", {}, el("label", { for: "c-minor" }, "Amount (minor units)"), el("input", { id: "c-minor", type: "number" })),
+        el("div", {}, el("label", { for: "c-cur" }, "Currency"), el("input", { id: "c-cur", value: "INR" })),
+        el("div", {}, el("label", { for: "c-codes" }, "Price codes (comma separated, blank = all)"),
+          el("input", { id: "c-codes" })),
+      ),
+      el("div", { style: "margin-top:.8rem" },
+        el("button", { class: "act", onclick: () => act(() => api("/commitments", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: acct(),
+            code: val("c-code"),
+            amount: { minor: Number(val("c-minor") || 0), currency: val("c-cur") },
+            price_codes: val("c-codes") ? val("c-codes").split(",").map(s => s.trim()) : [],
+          }),
+        }), "commitment defined") }, "Define"),
+      ),
+    ),
+    el("div", { class: "card scroll" },
+      el("h2", {}, "Commitments"),
+      el("table", {},
+        el("thead", {}, el("tr", {}, ["Code", "Account", "Floor", "Covers", "Interval", "Active", ""].map(h =>
+          el("th", { class: h === "Floor" ? "num" : "" }, h)))),
+        el("tbody", {}, cs.map(c => el("tr", {},
+          el("td", { class: "mono" }, c.code),
+          el("td", { class: "mono" }, c.account_id),
+          el("td", { class: "num" }, amount(c.amount)),
+          el("td", { class: "muted" }, c.price_codes.length ? c.price_codes.join(", ") : "everything"),
+          el("td", {}, c.interval),
+          el("td", {}, String(c.active)),
+          el("td", {}, c.active ? el("button", {
+            class: "ghost",
+            onclick: () => act(() => api(`/commitments/${encodeURIComponent(c.code)}/retire`, {
+              method: "POST", body: JSON.stringify({ reason: "" }),
+            }), `${c.code} retired`),
+          }, "retire") : null),
+        ))),
+      ),
+    ),
+  ];
+}
+
+// ── 8. Inspection ──────────────────────────────────────────────────────────────
+function inspectScreen() {
+  const i = state.data.inspect;
+  if (!i) return needsPeriod();
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Inspection — ${i.is_sound ? "sound" : "NOT sound"}`),
+    el("dl", { class: "kv" },
+      el("dt", {}, "State"), el("dd", {}, pill(i.state)),
+      el("dt", {}, "Total"), el("dd", {}, amount(i.total)),
+      el("dt", {}, "Basis digest"), el("dd", { class: "digest" }, short(i.basis_digest)),
+      el("dt", {}, "Result digest"), el("dd", { class: "digest" }, short(i.result_digest)),
+    ),
+    i.notes.length ? el("ul", {}, i.notes.map(n => el("li", { class: "muted" }, n))) : null,
+    el("table", { style: "margin-top:.8rem" },
+      el("thead", {}, el("tr", {}, ["Charge", "Kind", "Amount", "Adds up", "Provenance", "Traced", "Notes"].map(h =>
+        el("th", { class: h === "Amount" ? "num" : "" }, h)))),
+      el("tbody", {}, i.charges.map(c => el("tr", {},
+        el("td", { class: "mono" }, c.charge_id.slice(0, 12)),
+        el("td", {}, pill(c.kind)),
+        el("td", { class: "num" }, amount(c.amount)),
+        el("td", {}, String(c.breaks_down_correctly)),
+        el("td", {}, String(c.has_provenance)),
+        el("td", {}, String(c.has_usage_attribution)),
+        el("td", { class: "muted" }, c.notes.join("; ") || "—"),
+      ))),
+    ),
+  );
+}
+
+// ── 9. Diagnostics ─────────────────────────────────────────────────────────────
+function diagnosticsScreen() {
+  const d = state.data.diagnostics;
+  if (!d) return needsPeriod();
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Diagnostics — ${d.error_count} error(s), ${d.warning_count} warning(s)`),
+    d.findings.length ? el("table", {},
+      el("thead", {}, el("tr", {}, ["Severity", "Code", "Path", "Message", "Remediation"].map(h => el("th", {}, h)))),
+      el("tbody", {}, d.findings.map(f => el("tr", {},
+        el("td", {}, pill(f.severity)),
+        el("td", { class: "mono" }, f.code),
+        el("td", { class: "mono" }, f.path),
+        el("td", {}, f.message),
+        el("td", { class: "muted" }, f.remediation || "—"),
+      ))),
+    ) : el("p", { class: "ok" }, "Nothing to report."),
+  );
+}
+
+// ── 10. Search ─────────────────────────────────────────────────────────────────
+function searchScreen() {
+  const s = state.data.search;
+  return el("div", { class: "card scroll" },
+    el("h2", {}, `Search — ${s ? s.total : 0} run(s)`),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Run", "Agreement", "Period", "State", "Total", "Rerate"].map(h =>
+        el("th", { class: h === "Total" ? "num" : "" }, h)))),
+      el("tbody", {}, (s ? s.runs : []).map(r => el("tr", {},
+        el("td", { class: "mono" }, r.id.slice(0, 12)),
+        el("td", { class: "mono" }, r.subscription_id),
+        el("td", { class: "mono" }, `${r.period_start} – ${r.period_end}`),
+        el("td", {}, pill(r.state)),
+        el("td", { class: "num" }, amount(r.total)),
+        el("td", {}, String(r.is_rerate)),
+      ))),
+    ),
+  );
+}
+
+// ── 11. Timeline ───────────────────────────────────────────────────────────────
+function timelineScreen() {
+  const t = state.data.timeline || [];
+  return el("div", { class: "card" },
+    el("h2", {}, "Rating history"),
+    el("p", { class: "muted" },
+      "Includes the runs that changed nothing — that entry is the evidence determinism held."),
+    el("div", { class: "timeline" }, t.map(a => el("div", { class: "ev" },
+      el("span", { class: "mono" }, a.action), " ",
+      el("span", { class: "muted" }, a.subscription_id || a.account_id || "—"), " ",
+      a.total ? el("span", {}, amount(a.total)) : null, " ",
+      el("span", { class: "digest" }, a.detail ? short(a.detail) : ""),
+    ))),
+  );
+}
+
+const SCREENS = {
+  runs: runsScreen, preview: previewScreen, breakdown: breakdownScreen, explain: explainScreen,
+  rerate: rerateScreen, compare: compareScreen, commitments: commitmentsScreen,
+  inspect: inspectScreen, diagnostics: diagnosticsScreen, search: searchScreen,
+  timeline: timelineScreen,
+};
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...TABS.map(([key, label]) => el("button", {
+    class: state.tab === key ? "active" : "",
+    onclick: () => { state.tab = key; load(); },
+  }, label)));
+  const view = document.getElementById("view");
+  const screen = SCREENS[state.tab]();
+  view.replaceChildren(
+    ...(Array.isArray(screen) ? screen.filter(Boolean) : [screen]),
+    state.error ? el("div", { class: "err" }, state.error) : null,
+    state.notice ? el("div", { class: "ok" }, state.notice) : null,
+  );
+}
+
+for (const id of ["subscription", "account", "pstart", "pend"]) {
+  document.getElementById(id).addEventListener("change", load);
+}
+load();
+</script>
+</body>
+</html>
