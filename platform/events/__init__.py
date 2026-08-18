@@ -10,6 +10,13 @@ At M1 only the webhook dispatcher was present (moved and decoupled from `api`). 
 in-process **Event Bus** landed at **M4.1** (`InProcessEventBus` + dispatcher /
 registry / publisher / subscriber, behind `core.events.EventBus`). The durable
 outbox + distributed broker are M4.2+.
+
+**M10.2 (Epic 10)** adds the durable-storage *port* — `DurableEventLog` — exported here
+so callers depend on the seam, not on storage (ADR-0034). The SQL implementation lives in
+`events.persistence` and is **deliberately not imported here**: it is the one sub-package
+permitted `sqlmodel`/`sqlalchemy`, and re-exporting it would drag a storage library into
+every importer of `events` and dissolve the scoping the ADR exists to create. Import it
+explicitly (`from events.persistence import SqlDurableEventLog`) at a composition root.
 """
 
 from .bus import (
@@ -20,6 +27,7 @@ from .bus import (
     InProcessEventBus,
 )
 from .errors import DuplicateSubscription, EventBusError, EventBusShutdown, InvalidEvent
+from .ports import DurableEventLog, DurableEventLogError
 from .webhooks import emit_event, sign_payload
 
 __all__ = [
@@ -32,6 +40,8 @@ __all__ = [
     "DuplicateSubscription",
     "InvalidEvent",
     "EventBusShutdown",
+    "DurableEventLog",
+    "DurableEventLogError",
     "emit_event",
     "sign_payload",
 ]
