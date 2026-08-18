@@ -112,9 +112,12 @@ deferred and no Epic 10 work is authorized to perform it.
   declarative, idempotent create-if-absent; `downgrade` a documented no-op.
 * **`SqlDurableEventLog`** — append-only; idempotent on identity (at-least-once makes redelivery
   ordinary traffic); `append_many` is one transaction, all-or-nothing.
-* **Boundary enforcement** — 11 static AST assertions in both directions (permitted inside
-  `persistence`, forbidden one directory up), plus dependency-direction and `observability`-budget
-  checks. No existing global boundary test was weakened.
+* **Boundary enforcement** — **9 static AST test functions/assertions** in
+  `tests/test_events_boundary.py`, checking both directions (permitted inside `persistence`,
+  forbidden one directory up), plus dependency-direction and `observability`-budget checks. No
+  existing global boundary test was weakened. *(Corrected at M10.4: an earlier revision of this
+  document said "11". The sub-count was wrong; the implementation was not. The M10.2 total of
+  **52** added tests is unchanged and correct — 43 in `test_events_persistence.py` plus these 9.)*
 * **52 tests** (4690 → 4742 collected), including restart durability against file-backed SQLite.
 
 **Accepted condition carried forward: [DL-0139](../../.voxvoice/DECISION_LOG.md).** Three
@@ -141,16 +144,38 @@ written in the same transaction as the state change that produced it) already go
 **Delivers:** the M10.0 Blueprint, the M10.0a Decision Gate, and this plan — making M10.4 onward
 repository-derivable.
 
-### M10.4 — ⚠️ approved scope already delivered; **allocation open**
+### M10.4 — **CLOSED_BY_ABSORPTION** (delivered in M10.2)
 
-The approved M10.0/M10.0a content for M10.4 was **"Persistence: schema, migration `0034`+, concrete
-durable storage adapter"** — and all three landed at **M10.2** (§2). The source material defines no
-further M10.4 content.
+**Owner ruling (DL-0140): M10.4 is `CLOSED_BY_ABSORPTION`.** Its approved Persistence scope was
+**fully delivered in M10.2**, commit `15199e9f176fa68adfe2f77cdaecd900c063b239`. **M10.2 is the
+delivery milestone for that scope.**
 
-**This plan does not invent replacement scope.** M10.4 therefore has **no remaining approved
-content**, and closing it as *absorbed by M10.2* or re-scoping it requires an **Owner decision**.
-Until that decision, M10.4 is not a work milestone and nothing depends on it: M10.5 takes its inputs
-from M10.2 directly.
+The approved M10.4 content — from the [M10.0 Blueprint](../architecture/epic10/durable-event-telemetry-spine-blueprint.md)
+§16 ("M10.4 Persistence") and the [M10.0a Decision Gate](../architecture/epic10/m10.0a-decision-gate.md)
+Part 5 (*"`events/persistence/` with its own `Database` + `migrations/` at `0034`, prefix `evt_*`,
+IR1a-style scoped exception with an executable per-layer assertion"*) — was verified item-by-item
+against that commit:
+
+| Approved M10.4 item | Delivered in M10.2 |
+|---|---|
+| `platform/events/persistence/` package | ✅ |
+| its own **`EventDatabase`** (never `api`'s or `billing`'s) | ✅ |
+| **migration `0034`**, continuing the single global chain | ✅ |
+| **`evt_*`** table and index naming | ✅ |
+| concrete **`SqlDurableEventLog`** adapter | ✅ |
+| **IR1a-style** scoped persistence exception + executable boundary enforcement | ✅ |
+
+**M10.4 has no remaining approved implementation scope, and no replacement scope was invented.**
+**M10.5 proceeds directly from the M10.2 foundation.** Milestone **numbering is unchanged** — M10.4
+keeps its number and its place in the sequence; only its disposition is recorded.
+
+This is a **governance closure, not a code change**: nothing was implemented, moved, renumbered, or
+brought backward from M10.5 or later under this milestone.
+
+> **Note on [ADR-0034](../adr/ADR-0034-durable-storage-seam-core-only-packages.md).** Its §Status
+> enumerates the milestones it binds as *"(M10.2, M10.4–M10.7)"*. That was accurate when written at
+> M10.1, names which milestones the ADR's rules govern rather than assigning content, and is **not
+> corrected** — accepted ADRs are immutable (DOCUMENTATION_RULES §3.4).
 
 ### M10.5 — Retention
 
