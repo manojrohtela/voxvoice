@@ -51,9 +51,14 @@ than retro-fitting the history:
   it originally carried (outbox orchestration, retry, DLQ, quarantine) belongs to M10.6/M10.7 and is
   not brought forward.
 * **M10.3 does not implement durable bus integration.** See §M10.3 and §M10.6.
+* **M10.5 (Retention) is deferred and re-sequenced** (DL-0141), not cancelled. Its approved
+  semantics are unchanged, but its ED9/DS13 guards test **drained** and **metered** state that only
+  M10.6 and M10.10 create, so the documented order (M10.5 before M10.6) is **not executable**. Its
+  earliest executable position is **after M10.10**, completing before M10.12/M10.13. See §M10.5.
 
 Milestone **numbering and terminology are preserved** (M10.0a, M10.8a included); only the content
-allocation is corrected here.
+allocation and, for M10.5, the **execution position** are corrected here. **No milestone is
+renumbered.**
 
 ## 3. Milestones
 
@@ -177,13 +182,45 @@ brought backward from M10.5 or later under this milestone.
 > M10.1, names which milestones the ADR's rules govern rather than assigning content, and is **not
 > corrected** — accepted ADRs are immutable (DOCUMENTATION_RULES §3.4).
 
-### M10.5 — Retention
+### M10.5 — Retention · **DEFERRED / RE-SEQUENCED** (not cancelled)
 
-Retention over the durable log, per ADR-0032 **ED9** and ADR-0034 **DS12/DS13**: explicit
-configuration with **no implicit deletion default**; applied **only as a policy over a closed
-window**; **never deletes an un-drained event and never deletes an un-metered event**. Clock
-injected. This is the **only** exception to the append-only invariant, and it arrives with the
-guarantees that make it safe — M10.2 deliberately shipped no removal path at all.
+**Approved semantics — unchanged and not weakened.** Retention over the durable log, per ADR-0032
+**ED9** and ADR-0034 **DS12/DS13**: explicit configuration with **no implicit deletion default**;
+applied **only as a policy over a closed window**; **never deletes an un-drained event and never
+deletes an un-metered event**. Clock injected. This is the **only** exception to the append-only
+invariant, and it arrives with the guarantees that make it safe — M10.2 deliberately shipped no
+removal path at all.
+
+**Status: deferred by Owner ruling (DL-0141). No retention implementation is authorized at this
+point.** The milestone is **not cancelled**, its **number is not changed**, and the approved design
+in ADR-0032/ADR-0034 remains **immutable and unaltered**.
+
+**Why.** The M10.5 design gate established that the approved guarantee cannot be implemented
+truthfully against the current repository state. Retention is time-based over a closed window, and
+`evt_event` carries an indexed `recorded_at` that could define one — but the two **guards** cannot be
+evaluated, because the state they test does not exist:
+
+| Guard (ED9 / DS13, verified by EV8 / SV9) | State required | Milestone that creates it |
+|---|---|---|
+| "never deletes an **un-drained** event" | consumption state of the platform-owned metric buffer, surfaced through `MetricStreamPort.drain()` | **M10.10** |
+| "never deletes an **un-metered** event" | Billing's ingestion state, keyed `(event_id, meter_code)` | **M10.10** (Billing side, frozen) |
+| delivery/consumption state generally | outbox rows and their delivery state | **M10.6** |
+
+The M10.2 foundation contains **neither delivery/drain state nor metering state** — by design, since
+speculative fields were excluded. Deleting solely by `recorded_at` would satisfy DS12 while violating
+**DS13, EV8 and SV9** — exactly the *"revenue defect wearing an operations costume"* ED9 names.
+
+**Prerequisite chain and derived position.** M10.5 depends on **M10.6** (delivery/consumption state)
+and **M10.10** (drained/metered state). Its **earliest executable position is therefore after
+M10.10**, and it must complete **before M10.12/M10.13**, since hardening and certification must cover
+it. The originally documented ordering (M10.5 before M10.6) is **not executable**, and this plan
+records that dependency rather than pretending otherwise. **Numbering is unchanged** — M10.5 keeps
+its number and its place in this document; only its execution position moves.
+
+**Resumption condition.** M10.5 resumes only when its prerequisites exist and the retention gate can
+be satisfied **and tested honestly** — that is, when EV8 and SV9 can be written as real assertions
+rather than aspirations. Until then no retention code, schema, migration or guard column is
+authorized, and no M10.6/M10.10 work is pulled backward to enable it.
 
 ### M10.6 — Transactional outbox / durable write-side integration
 
