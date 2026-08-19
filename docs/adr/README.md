@@ -61,6 +61,7 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0034](ADR-0034-durable-storage-seam-core-only-packages.md) | Durable storage seam for `core`-only edge packages: a scoped `platform/events/persistence/**` sub-package may import `sqlmodel`/`sqlalchemy` and owns its own `Database` (the ADR-0031 IR1a precedent generalized), enforced by per-layer boundary assertions; migrations continue the single global chain at **0034** with the **`evt_*`** prefix | Epic 10 structural/dependency-inversion seam | Accepted 2026-08-18 |
 | [ADR-0035](ADR-0035-durable-write-interposition-on-the-event-bus.md) | Durable write interposition on the in-process Event Bus — **completes ADR-0032 where it is silent, supersedes nothing**: for a producer with no originating transaction the durable append **is** the state change (ED6 unweakened); an additive, default-disabled persistence seam inside `InProcessEventBus` writes **after `seq` stamping and before enqueue**, so no subscriber ever observes a non-durable event; a failed durable write never raises into the producer, is never dispatched, never rewinds `seq`, and surfaces through a typed hook; immutable `evt_event` is separated from a mutable **`evt_outbox`** (one row per event) that supplies ED9's `un-drained` predicate | Epic 10 M10.6 (durable write-side integration) | Accepted 2026-08-18 |
 | [ADR-0036](ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md) | Outbox retry ladder, dead-letter and quarantine — **completes ADR-0032 ED7/ED8 and continues ADR-0035 DW5/DW6; supersedes nothing**. A five-state lifecycle declared with `core.fsm` (`PENDING`/`RETRYING`/`DELIVERED`/`DEAD_LETTERED`/`QUARANTINED`, the last three **terminal**); a **pure, I/O-free** `OutboxLadder` that decides but never sleeps, loops, polls, schedules or dispatches; `DeliveryOutcome` reaching it through an **injected classifier** (no transport taxonomy in `events/`); `core.policies.RetryPolicy` reused with delivery values (5 attempts, 30s ×2 capped 1h, **no jitter**); append-only **`evt_outbox_failure`** as authoritative error evidence; transition + history in **one transaction**; migration `0036`. **Resolves the M10.7/M10.8 boundary**: recovery, restart re-dispatch and the driver are **M10.8** | Epic 10 M10.7 (retry ladder + DLQ + quarantine) | Accepted 2026-08-19 |
+| [ADR-0037](ADR-0037-outbox-recovery-driver-and-restart-re-dispatch.md) | Outbox recovery and restart re-dispatch — **completes ADR-0035 DW7 and ADR-0036 RL1; supersedes nothing**. A **caller-driven, deterministic** `recover(now, limit)` sweep on the `context`/`memory` `expire()` precedent — **no scheduler, worker, thread, timer or loop**; one sweep over `PENDING` + due `RETRYING`, ordered `(seq, event_id)`, terminal states never selected, **zero new FSM transitions**; `begin_attempt` before delivery; `DeliveryTransport` stays a **pure port with no production implementation**; concurrency an **accepted non-claim** (no claim/lease/lock/dedup); **no migration and no schema change**; `MetricStreamPort.replay()` stays **M10.10** | Epic 10 M10.8 (recovery + restart re-dispatch) | Accepted 2026-08-19 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -152,4 +153,28 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > operator-driven quarantine**, and **no concrete webhook transport** —
 > `platform/events/webhooks.py` stays byte-for-byte unchanged so no second retry mechanism appears
 > (blueprint R-11). Retention stays M10.5 (deferred, DL-0141), metrics stay M10.10, and **the
+> production runtime remains unwired**.
+
+> **Epic 10 continuation (M10.8).** **ADR-0037** is ratified before the M10.8 implementation. It
+> **completes ADR-0035 DW7 and ADR-0036 RL1, and supersedes nothing** — ADR-0032, ADR-0035 and
+> ADR-0036 stay immutable, ED1–ED12, DW1–DW11 and RL1–RL17 are preserved, ADR-0033/0034 are
+> unchanged, and AR-31/AR-32/DL-0017 continue to bind. DW7 and RL1 *assigned* recovery to M10.8 but
+> decided none of its questions; this ADR decides them, and decides them from the repository rather
+> than from generic outbox architecture. Its load-bearing ruling is that **a periodic sweep over
+> persisted state is caller-driven here, not scheduled**: `context/runtime.py` and
+> `memory/runtime.py` already ship exactly this shape — *"Deterministic — no background timer; the
+> caller (or a scheduler) invokes it. Returns the count expired."* — so `recover(now, limit)`
+> follows it and the scheduler stays **outside** the module, where both precedents put it. One sweep
+> selects `PENDING` (immediately eligible) **and** due `RETRYING` rows in `(seq, event_id)` order;
+> terminal states are never selected and **no FSM transition is added** — the seven ratified edges
+> are exactly sufficient. `begin_attempt` runs **before** delivery, so a crash costs an attempt
+> instead of granting one. `DeliveryTransport` remains a **pure port with no production
+> implementation**, which is what keeps `platform/events/webhooks.py` byte-for-byte unchanged and
+> prevents a second delivery mechanism (blueprint R-11). Concurrency is written down as an
+> **accepted non-claim**: two concurrent sweeps may deliver the same event, which is *correct* under
+> ED2/ED12 rather than a defect, and **no claim/lease, row lock, `FOR UPDATE`, advisory lock or
+> dedup table** is introduced — a static test keeps that true. It also resolves a second plan
+> contradiction: **`MetricStreamPort.replay()` belongs to M10.10**, not M10.8, and M10.8 owns only
+> the read-only **durable-log re-derivation** capability. **M10.8 requires no migration and no
+> schema change**; retention stays M10.5 (DL-0141), metrics stay M10.8a/M10.9/M10.10, and **the
 > production runtime remains unwired**.

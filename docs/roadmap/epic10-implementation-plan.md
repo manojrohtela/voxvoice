@@ -303,10 +303,14 @@ consumer never stalls a producer.
 ### M10.8 — Durable-log re-derivation & recovery
 
 Read a closed window back out of the durable log and re-derive from it; recovery after restart.
-Read-only and side-effect-free — no runtime logic executes. **Naming per OD-3:** "replay" stays
-reserved for `platform/replay/` (in-memory, visualization-only, frozen for Epic 10); Epic 10 says
-re-derivation and recovery. The one permitted exception is implementing the frozen
-`MetricStreamPort.replay()` **method name** exactly as specified.
+Re-derivation is read-only and side-effect-free — no runtime logic executes. **Naming per OD-3:**
+"replay" stays reserved for `platform/replay/` (in-memory, visualization-only, frozen for Epic 10);
+Epic 10 says re-derivation and recovery.
+
+**M10.8 / M10.10 boundary (owner ruling F-1, 2026-08-19, [ADR-0037](../adr/ADR-0037-outbox-recovery-driver-and-restart-re-dispatch.md) RC14).**
+**M10.8** owns the **durable-log re-derivation capability** required by restart and recovery.
+**M10.10** owns the **`MetricStreamPort` implementation, including `replay()`** — which M10.8 must
+not implement, import or wire. The frozen `MetricStreamPort` ABC is unchanged.
 
 > **Narrowed at M10.7 by [ADR-0036](../adr/ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md)
 > RL1 (owner ruling, 2026-08-19).** The M10.7 design gate found that the "read-only and

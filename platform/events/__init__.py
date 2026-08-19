@@ -27,6 +27,13 @@ M10.2 reason.
 `OUTBOX_LIFECYCLE` machine, `DeliveryOutcome`, the `DeliveryTransport` contract (no
 implementation) and the pure `OutboxLadder`. **No worker, scheduler or driver lives here**:
 recovery and restart re-dispatch are M10.8.
+
+**M10.8 (ADR-0037)** adds `OutboxRecovery` — the driver that finally *delivers*. It is
+**caller-driven**: `recover(now, limit)` sweeps `PENDING` and due `RETRYING` entries once, in
+`(seq, event_id)` order, on the same precedent `context`/`memory` use for their TTL sweeps.
+Still **no scheduler, worker, thread, timer, `sleep` or polling loop**, and still **no concrete
+`DeliveryTransport`** — the transport is injected, so `events/webhooks.py` stays untouched and
+no second delivery mechanism appears.
 """
 
 from .bus import (
@@ -54,6 +61,7 @@ from .ports import (
     OutboxState,
     OutboxTrigger,
 )
+from .recovery import OutboxRecovery, default_classifier
 from .webhooks import emit_event, sign_payload
 
 __all__ = [
@@ -81,6 +89,8 @@ __all__ = [
     "DeliveryClassifier",
     "DeliveryTransport",
     "OutboxLadder",
+    "OutboxRecovery",
+    "default_classifier",
     "LadderDecision",
     "DELIVERY_RETRY_POLICY",
     "emit_event",
