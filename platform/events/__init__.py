@@ -17,9 +17,15 @@ so callers depend on the seam, not on storage (ADR-0034). The SQL implementation
 permitted `sqlmodel`/`sqlalchemy`, and re-exporting it would drag a storage library into
 every importer of `events` and dissolve the scoping the ADR exists to create. Import it
 explicitly (`from events.persistence import SqlDurableEventLog`) at a composition root.
+
+**M10.6 (ADR-0035)** adds the `DurableOutbox` port — mutable per-event delivery state,
+`PENDING` and `DELIVERED` only — and the durable write seam on `InProcessEventBus`, which is
+optional and **disabled by default**. `events.persistence` stays unimported here for the same
+M10.2 reason.
 """
 
 from .bus import (
+    DurableWriteFailures,
     EventDispatcher,
     EventPublisher,
     EventRegistry,
@@ -27,7 +33,14 @@ from .bus import (
     InProcessEventBus,
 )
 from .errors import DuplicateSubscription, EventBusError, EventBusShutdown, InvalidEvent
-from .ports import DurableEventLog, DurableEventLogError
+from .ports import (
+    DurableEventLog,
+    DurableEventLogError,
+    DurableOutbox,
+    DurableWriteFailureHook,
+    OutboxEntry,
+    OutboxState,
+)
 from .webhooks import emit_event, sign_payload
 
 __all__ = [
@@ -42,6 +55,11 @@ __all__ = [
     "EventBusShutdown",
     "DurableEventLog",
     "DurableEventLogError",
+    "DurableOutbox",
+    "DurableWriteFailureHook",
+    "DurableWriteFailures",
+    "OutboxEntry",
+    "OutboxState",
     "emit_event",
     "sign_payload",
 ]

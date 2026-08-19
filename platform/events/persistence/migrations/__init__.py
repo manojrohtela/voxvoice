@@ -17,11 +17,12 @@ structure later without reshaping it.
 
 from __future__ import annotations
 
-from . import v0034_durable_event_log
+from . import v0034_durable_event_log, v0035_durable_outbox
 
 # Ordered migration registry. Append future migrations; never reorder or mutate applied
-# entries (append-only, like the event log itself).
-MIGRATIONS = (v0034_durable_event_log,)
+# entries (append-only, like the event log itself). `0035` (M10.6) was appended without
+# touching `0034`, which keeps an applied migration's scope fixed after the fact.
+MIGRATIONS = (v0034_durable_event_log, v0035_durable_outbox)
 
 # The chain this one continues (`billing/persistence/migrations` 0013–0033), asserted by
 # the migration-chain test rather than assumed — the M9.4 idiom.

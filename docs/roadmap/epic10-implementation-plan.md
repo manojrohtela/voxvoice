@@ -224,6 +224,40 @@ authorized, and no M10.6/M10.10 work is pulled backward to enable it.
 
 ### M10.6 — Transactional outbox / durable write-side integration
 
+> **Design gate closed — [ADR-0035](../adr/ADR-0035-durable-write-interposition-on-the-event-bus.md)
+> ratified 2026-08-18, before implementation.** The gate found ADR-0032 **ED6** not literally
+> executable: the runtime producers it governs hold no transaction (`platform/runtime/**` has no
+> `Database`, `Session` or `UnitOfWork`), and `InProcessEventBus.publish()` stamps `seq` and
+> dispatches in one method with no seam between them. ADR-0035 **completes ADR-0032 where it is
+> silent and supersedes nothing** — ADR-0032 stays immutable, ED1–ED12 preserved, ADR-0033/0034
+> unchanged, AR-31/AR-32/DL-0017 intact. It rules: **DW1** the durable append **is** the state change
+> where no originating transaction exists, and ED6 binds unchanged where one does — **no database,
+> `UnitOfWork` or transaction is introduced into `runtime/`**; **DW2/DW3** an *additive,
+> default-disabled* persistence seam inside `InProcessEventBus`, writing **after `seq` stamping and
+> before enqueue**, preserving the sole sequence authority, reentrancy, FIFO dispatch and subscriber
+> isolation (the subclass fallback is rejected; `bus.py` may import `DurableEventLog` from
+> `events/ports.py` but never `sqlmodel`, `sqlalchemy` or `events.persistence`); **DW4** a failed
+> durable write never raises into the producer, is never dispatched, never rewinds `seq`, and
+> surfaces through an injected typed hook with bounded in-process accounting; **DW5** immutable
+> `evt_event` is separated from a mutable **`evt_outbox`** (one row per event, `event_id` reference,
+> no second identity or sequence authority, in-process subscribers **not** destinations) supplying
+> the `un-drained` predicate ED9 needs; **DW6/DW7** M10.7 owns retry/DLQ/quarantine and M10.8 owns
+> recovery — neither may be implemented early; **DW10** M10.6 must **not** modify
+> `runtime/orchestrator/orchestrator.py` or wire the durable sink into the runtime.
+>
+> **Declared M10.6 limitation (ADR-0035 DW4).** A durable-write failure at M10.6 leaves the event
+> **neither durably recorded nor delivered**, and the in-process failure record does **not** survive
+> process termination. **M10.7** closes this gap through the retry/failure-state mechanism.
+>
+> **M10.6 provides the durable write-side capability and proves its semantics, but the production
+> runtime is not yet wired to the durable sink.**
+>
+> **EV5 proof (ADR-0035 DV6).** A hermetic **test-only** compound producer in the
+> `events/persistence` suite writes the `evt_event` and `evt_outbox` rows through the **same**
+> `EventDatabase.session`, forces an exception and proves both roll back. The existing `append_many`
+> rollback tests remain valid evidence but are **not sufficient alone** to claim compound
+> state+event atomicity. No production runtime transaction abstraction is created.
+
 The transactional outbox (ADR-0032 **ED6**): the event is written in the **same transaction** as the
 state change that produced it; both commit or both roll back. Precedent: `api/persistence/audit_store.py`
 (*"audit is atomic with the fact it records"*).

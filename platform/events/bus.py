@@ -19,6 +19,15 @@ Delivery model (deterministic + reentrancy-safe):
 Scope (M4.1): in-process only. No durable persistence, no distributed broker, no
 external transports (those are M4.2+). Strict producer/consumer async decoupling
 (an outbox) is a durable-delivery concern deferred with them (DL-0017).
+
+Durable seam (M10.6, ADR-0035 DW2/DW3): `InProcessEventBus` accepts an **optional**
+`DurableEventLog`. When supplied, `publish` durably writes the event **after** assigning
+`seq` and **before** enqueueing it, so no subscriber can ever observe an event that is not
+already durable — including a reentrant one, which is persisted at its own `publish` call.
+When it is omitted (the default) behaviour is exactly the M4.1 behaviour described above.
+The bus stays the sole sequence authority, holds only the framework-neutral port, and
+imports no storage library (ADR-0034 DS3/DS4). A failed durable write is never raised into
+the producer and its event is never dispatched (DW4) — see `DurableWriteFailures`.
 """
 
 from __future__ import annotations
@@ -41,8 +50,46 @@ from core.events import (
 )
 
 from .errors import DuplicateSubscription, EventBusShutdown, InvalidEvent
+from .ports import DurableEventLog, DurableWriteFailureHook
 
 log = logging.getLogger("voxvoice.events.bus")
+
+
+class DurableWriteFailures:
+    """Bounded in-process accounting for durable writes that failed (ADR-0035 DW4).
+
+    **A declared M10.6 limitation, stated plainly rather than implied by silence:** when the
+    durable write fails the event is neither durably recorded nor delivered, and *this record
+    does not survive process termination*. It is a bounded ring of the most recent failures
+    plus a monotonic total — enough for an operator to see that durability is degrading, and
+    deliberately not a durable failure history. **M10.7** closes the gap by turning a failed
+    write into a persisted, retryable entry; until then this is what exists, and it is not
+    presented as more.
+
+    Bounded on purpose: an unbounded list of failures is a memory leak that arrives exactly
+    when the process is already unhealthy.
+    """
+
+    def __init__(self, *, max_recent: int = 32) -> None:
+        self._recent: deque[tuple[str, int, str]] = deque(maxlen=max_recent)
+        self._total = 0
+
+    def record(self, event: Event, exc: Exception) -> None:
+        self._total += 1
+        self._recent.append((event.id, event.seq, repr(exc)))
+
+    @property
+    def total(self) -> int:
+        """Every durable-write failure since process start (never truncated)."""
+        return self._total
+
+    @property
+    def recent(self) -> tuple[tuple[str, int, str], ...]:
+        """The most recent failures as `(event_id, seq, repr(exception))`, oldest first."""
+        return tuple(self._recent)
+
+    def __len__(self) -> int:
+        return self._total
 
 
 class EventRegistry:
@@ -118,6 +165,8 @@ class InProcessEventBus(EventBus):
         clock: Callable[[], float] | None = None,
         id_factory: Callable[[], str] | None = None,
         on_error: Callable[[EventHandler, Event, Exception], None] | None = None,
+        durable: DurableEventLog | None = None,
+        on_durable_error: DurableWriteFailureHook | None = None,
     ) -> None:
         self._registry = EventRegistry()
         self._dispatcher = EventDispatcher(self._registry, on_error=on_error)
@@ -127,6 +176,12 @@ class InProcessEventBus(EventBus):
         self._is_shutdown = False
         self._clock = clock or time.time
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
+        # Durable seam (M10.6, ADR-0035 DW2). Optional and **disabled by default**: with
+        # `durable=None` this class is the M4.1 bus, unchanged. Typed by the port, so the
+        # bus never learns that storage exists (ADR-0034 DS3/DS4).
+        self._durable = durable
+        self._on_durable_error = on_durable_error
+        self._durable_failures = DurableWriteFailures()
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -141,6 +196,16 @@ class InProcessEventBus(EventBus):
     def subscriber_count(self) -> int:
         return len(self._registry)
 
+    @property
+    def is_durable(self) -> bool:
+        """Whether a durable sink is attached (ADR-0035 DW2). `False` is the default."""
+        return self._durable is not None
+
+    @property
+    def durable_failures(self) -> DurableWriteFailures:
+        """Bounded in-process accounting for failed durable writes (ADR-0035 DW4)."""
+        return self._durable_failures
+
     # ── EventBus contract ───────────────────────────────────────────────────
     def publish(self, event: Event) -> Event:
         if not isinstance(event.type, EventType):
@@ -150,6 +215,15 @@ class InProcessEventBus(EventBus):
             return event
         self._seq += 1
         stamped = replace(event, seq=self._seq)
+        # Durable write (ADR-0035 DW3): after `seq` is assigned, so the log persists the
+        # bus's authoritative value verbatim (ED3), and before the enqueue below, so no
+        # subscriber can observe an event that is not already durable (ED6). A reentrant
+        # publish is covered by the same line at its own call, not by a special case.
+        if self._durable is not None and not self._persist(stamped):
+            # DW4: not durable ⇒ not dispatched. `seq` is consumed and NOT rewound — reusing
+            # it would give two events one identity in the ordering dimension (ED3). A gap is
+            # honest evidence that a write failed. The producer is not raised into.
+            return stamped
         self._queue.append(stamped)
         if self._dispatching:
             return stamped  # reentrant publish → the running drain picks it up (ordered)
@@ -162,6 +236,30 @@ class InProcessEventBus(EventBus):
             if self._is_shutdown:
                 self._queue.clear()
         return stamped
+
+    def _persist(self, stamped: Event) -> bool:
+        """Durably record one stamped event. Returns whether it may now be dispatched.
+
+        Never raises: `core.events.EventBus.publish` is contractually *"must not raise into
+        the producer"* (ADR-0032 ED10, AR-31), and a producer here is a live conversation.
+        An already-recorded event is a **success** — the log is idempotent on identity and
+        delivery is at-least-once (ED2), so redelivery is ordinary traffic, not a failure.
+        """
+        try:
+            self._durable.append(stamped)
+        except Exception as exc:  # noqa: BLE001 — DW4: the producer must never see this
+            self._durable_failures.record(stamped, exc)
+            log.error(
+                "durable write failed for %s (seq=%d, id=%s); event NOT dispatched: %s",
+                stamped.type.value, stamped.seq, stamped.id, exc,
+            )
+            if self._on_durable_error is not None:
+                try:
+                    self._on_durable_error(stamped, exc)
+                except Exception:  # noqa: BLE001 — the hook must not corrupt the bus either
+                    log.exception("durable-write failure hook raised (ignored)")
+            return False
+        return True
 
     def subscribe(
         self, handler: EventHandler, *, types: EventTypeFilter = None

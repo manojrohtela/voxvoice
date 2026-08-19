@@ -59,6 +59,7 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0032](ADR-0032-event-durability-and-delivery-semantics.md) | Event durability and delivery semantics: **at-least-once**, append-only, one event identity and one sequence authority, transactional outbox, bounded retry ladder, distinct DLQ and quarantine, explicit retention — all behind the **unchanged** `core.events.EventBus` contract with no producer change (DL-0017's deferred work) | Epic 10 Durable Event & Telemetry Spine (new) | Accepted 2026-08-18 |
 | [ADR-0033](ADR-0033-metric-stream-seam.md) | The metric-stream seam is **pull-shaped**: a platform-owned buffer subscribes to the `EventBus` and Billing pulls through the frozen `MetricStreamPort`, never subscribing itself; `metric.*` is extended additively under AR-32; runtime `metric.*` is owned by `platform/observability/` while **`metric.billing.*` stays reserved to Billing** | Epic 10 (implements against ADR-0023 + ADR-0031; amends neither) | Accepted 2026-08-18 |
 | [ADR-0034](ADR-0034-durable-storage-seam-core-only-packages.md) | Durable storage seam for `core`-only edge packages: a scoped `platform/events/persistence/**` sub-package may import `sqlmodel`/`sqlalchemy` and owns its own `Database` (the ADR-0031 IR1a precedent generalized), enforced by per-layer boundary assertions; migrations continue the single global chain at **0034** with the **`evt_*`** prefix | Epic 10 structural/dependency-inversion seam | Accepted 2026-08-18 |
+| [ADR-0035](ADR-0035-durable-write-interposition-on-the-event-bus.md) | Durable write interposition on the in-process Event Bus — **completes ADR-0032 where it is silent, supersedes nothing**: for a producer with no originating transaction the durable append **is** the state change (ED6 unweakened); an additive, default-disabled persistence seam inside `InProcessEventBus` writes **after `seq` stamping and before enqueue**, so no subscriber ever observes a non-durable event; a failed durable write never raises into the producer, is never dispatched, never rewinds `seq`, and surfaces through a typed hook; immutable `evt_event` is separated from a mutable **`evt_outbox`** (one row per event) that supplies ED9's `un-drained` predicate | Epic 10 M10.6 (durable write-side integration) | Accepted 2026-08-18 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -120,3 +121,18 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > Billing contract and modifies no file under `platform/billing/**`. Epics 5–9 remain frozen; the
 > `v4.0.0` baseline, both Epic 9 digests, migration head `0033`, the 27 controls, advisories NS-5
 > and ST-3, and all nine declared limitations are preserved as historical state.
+
+> **Epic 10 continuation (M10.6).** **ADR-0035** is ratified **before** the M10.6 implementation, for
+> the reason the [Epic 10 plan](../roadmap/epic10-implementation-plan.md) anticipated in writing: the
+> M10.6 design gate found that ADR-0032 **ED6** cannot be executed literally, because the runtime
+> producers it governs hold no database transaction — `platform/runtime/**` has no `Database`,
+> `Session` or `UnitOfWork`, and `InProcessEventBus.publish()` stamps `seq` and dispatches in one
+> method with no seam between them. ADR-0035 **completes ADR-0032 where ADR-0032 is silent and
+> supersedes nothing**: ADR-0032 remains immutable, ED1–ED12 are preserved in full, ADR-0033 and
+> ADR-0034 are unchanged, and AR-31, AR-32 and DL-0017 continue to bind. It decides only the three
+> questions ADR-0032 left open — the transaction model, the write/dispatch interposition and
+> ordering, and durable-write failure semantics — plus the `evt_event` / `evt_outbox` separation that
+> **ED5** forces. It authorizes **M10.6 only**: retry, DLQ and quarantine stay M10.7; recovery stays
+> M10.8; retention stays M10.5 (deferred, DL-0141); the metric seam stays M10.10. **M10.6 provides
+> the durable write-side capability and proves its semantics, but the production runtime is not yet
+> wired to the durable sink.**

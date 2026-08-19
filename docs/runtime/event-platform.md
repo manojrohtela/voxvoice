@@ -146,3 +146,22 @@ so the envelope, the delivery model, the ordering and reentrancy guarantees, and
 above remain accurate. Of the extension points listed, Epic 10 takes **only** the durable outbox +
 retry/DLQ; the **WS/SSE event gateway, mid-call control API, distributed broker and SDK event
 surface stay deferred** (Epic 11/Epic 12 and DL-0017).
+
+## Revision note — Epic 10 (M10.6, 2026-08-18)
+
+[ADR-0035](../adr/ADR-0035-durable-write-interposition-on-the-event-bus.md) ratifies **how** the
+durable write attaches to this bus. It **completes ADR-0032 where ADR-0032 is silent and supersedes
+nothing**. The durable append happens **inside `publish()`, after the bus assigns `seq` and before
+the event is enqueued** — so no subscriber can ever observe a non-durable event — through an
+**additive, default-disabled** seam. The bus remains the **sole sequence authority**; reentrant
+publish, FIFO dispatch and subscriber isolation are unchanged; a failed durable write is never
+raised into the producer and never dispatched.
+
+**Nothing on this page changes.** `core.events.EventBus` is untouched, no abstract method is added,
+no signature changes and **no producer changes** — DL-0017's constraint still holds verbatim, so the
+envelope, delivery model, ordering and reentrancy guarantees described above all remain accurate.
+The seam is on the *implementation*, not on the contract, and it is off by default.
+
+**The production runtime is not wired to the durable sink at M10.6.** `ConversationOrchestrator`
+constructs its bus inline and is not modified; runtime wiring stays governed by the Epic 10/11
+boundary. Retry, DLQ and quarantine remain M10.7; recovery remains M10.8.

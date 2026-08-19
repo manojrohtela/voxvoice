@@ -14,6 +14,11 @@ Contents: the plane's own `EventDatabase` (never another plane's — DS5), the `
 row ↔ envelope mapping, the `SqlDurableEventLog` implementation of `events.ports.DurableEventLog`,
 and the migration chain continuing at `0034`.
 
+**M10.6 (ADR-0035)** adds `evt_outbox` (mutable per-event delivery state, `PENDING`/`DELIVERED`
+only), migration `0035`, and `SqlDurableEventSpine` — which implements `DurableEventLog` **and**
+`DurableOutbox` and writes both rows in **one transaction**, so an event and the entry announcing
+it cannot disagree about whether they happened.
+
 No SQLModel type escapes this package: callers hold the port, and the port speaks
 `core.events.Event`.
 """
@@ -23,13 +28,24 @@ from __future__ import annotations
 from .database import EventDatabase
 from .durable_log import SqlDurableEventLog
 from .mapping import to_event, to_row
-from .models import EVENT_TABLES, DurableEventRow
+from .models import (
+    ALL_EVENT_TABLES,
+    EVENT_TABLES,
+    OUTBOX_TABLES,
+    DurableEventRow,
+    DurableOutboxRow,
+)
+from .spine import SqlDurableEventSpine
 
 __all__ = [
     "EventDatabase",
     "SqlDurableEventLog",
+    "SqlDurableEventSpine",
     "DurableEventRow",
+    "DurableOutboxRow",
     "EVENT_TABLES",
+    "OUTBOX_TABLES",
+    "ALL_EVENT_TABLES",
     "to_event",
     "to_row",
 ]

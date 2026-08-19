@@ -25,7 +25,7 @@ from __future__ import annotations
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from .models import EVENT_TABLES
+from .models import ALL_EVENT_TABLES
 
 
 class EventDatabase:
@@ -40,8 +40,15 @@ class EventDatabase:
         self._session: Session | None = None
 
     def create_all(self) -> None:
-        """Create the `evt_*` tables (idempotent). Touches no other plane's table."""
-        SQLModel.metadata.create_all(self.engine, tables=[t.__table__ for t in EVENT_TABLES])
+        """Create the `evt_*` tables (idempotent). Touches no other plane's table.
+
+        Builds from `ALL_EVENT_TABLES` — every table the package owns across every
+        migration — so a fresh database matches a fully migrated one. Each migration still
+        builds from its own narrower tuple, which is what keeps an applied migration's scope
+        fixed after the fact."""
+        SQLModel.metadata.create_all(
+            self.engine, tables=[t.__table__ for t in ALL_EVENT_TABLES]
+        )
 
     @property
     def session(self) -> Session:

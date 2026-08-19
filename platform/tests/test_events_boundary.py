@@ -160,3 +160,55 @@ def test_events_package_init_does_not_import_persistence():
             assert "persistence" not in node.module, "events/__init__ must not import persistence"
         if isinstance(node, ast.ImportFrom) and node.level and node.module:
             assert node.module != "persistence"
+
+
+# ── M10.6 (ADR-0035 DW9): the durable seam did not move the bus's budget ────────
+
+
+def test_events_bus_imports_only_the_framework_neutral_port():
+    """ADR-0035 DW2/DW9. The seam is typed by `events/ports.py`, so `bus.py` may reference
+    `DurableEventLog` — and must still import no storage library and no persistence module.
+    A seam that dragged `events.persistence` into `bus.py` would put sqlmodel on the publish
+    path of every process that imports the bus."""
+    tops = _imported_tops(pathlib.Path("events/bus.py"))
+    assert not (tops & _STORAGE_LIBS), f"events/bus.py imports storage libraries: {tops}"
+    assert tops <= _EVENTS_ALLOWED, f"events/bus.py imports unexpected modules: {sorted(tops)}"
+
+
+def test_events_bus_never_imports_the_persistence_package():
+    source = pathlib.Path("events/bus.py").read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert "persistence" not in node.module, "events/bus.py must not import persistence"
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert "persistence" not in alias.name
+
+
+def test_events_ports_stays_framework_neutral_after_the_outbox_port():
+    """`DurableOutbox`, `OutboxState` and `OutboxEntry` (M10.6) are `core` + stdlib only.
+    The port is the seam; the moment it needs a storage type, the inversion is gone."""
+    tops = _imported_tops(pathlib.Path("events/ports.py"))
+    assert not (tops & _STORAGE_LIBS)
+    assert tops <= ({"core", "events"} | _STDLIB), f"events/ports.py: {sorted(tops)}"
+
+
+def test_runtime_acquired_no_database_or_transaction():
+    """ADR-0035 DW1/DW10, owner ruling D-1/D-6. The transaction model rests on runtime
+    producers having no transaction, and M10.6 must not have quietly given them one — nor
+    wired the durable sink into the runtime."""
+    forbidden_imports = {"sqlmodel", "sqlalchemy"}
+    forbidden_tokens = ("EventDatabase", "SqlDurableEventSpine", "SqlDurableEventLog",
+                        "UnitOfWork", "create_engine", "__tablename__")
+    for path in _files("runtime"):
+        assert not (_imported_tops(path) & forbidden_imports), f"{path} imports storage"
+        source = path.read_text()
+        for token in forbidden_tokens:
+            assert token not in source, f"{path} mentions {token} — runtime must stay in-memory"
+
+
+def test_the_orchestrator_is_not_wired_to_a_durable_sink():
+    """DW10 — M10.6 proves the capability; it does not make the production runtime durable."""
+    source = pathlib.Path("runtime/orchestrator/orchestrator.py").read_text()
+    assert "InProcessEventBus()" in source, "the orchestrator still constructs a plain bus"
+    assert "durable" not in source
