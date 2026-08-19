@@ -179,6 +179,17 @@ class EventType(StrEnum):
     AGENT_DIAGNOSTICS_GENERATED = "agent.diagnostics.generated"
     # cost / metering (producer: Metering)
     COST_UPDATED = "cost.updated"
+    # runtime telemetry (producer: platform/observability/ — M10.8a, ADR-0033 MS1/MS8)
+    # — additive vocabulary extension (no existing member changed; AR-32).
+    #   DEFINED here, EMITTED at M10.9: `platform/observability/` is the sole producer of
+    #   runtime `metric.*` (AR-2, MS8), and it is still a skeleton — there is nothing to emit
+    #   until M10.9 builds it. `metric.turn` is required by AR-42, which makes every
+    #   conversation-loop stage boundary carry a latency tap feeding it.
+    #
+    #   `COST_UPDATED` above stays outside this namespace and is untouched (OD-6): merging the
+    #   two would be exactly the silent mutation AR-32 forbids. `metric.billing.*` is reserved
+    #   to Billing (ADR-0031 IR9, ADR-0033 MS9, OD-9) and Epic 10 defines none.
+    METRIC_TURN = "metric.turn"
 
 
 class EventSource(StrEnum):

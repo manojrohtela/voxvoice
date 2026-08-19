@@ -452,10 +452,10 @@ def test_the_event_envelope_contract_is_unchanged():
     assert EventType.TURN_STARTED.value == "turn.started"
 
 
-def test_no_metric_event_type_exists_yet():
-    """M10.2 scope guard: the `metric.*` vocabulary is M10.8a, not this milestone."""
-    metric_members = [m for m in EventType if m.value.startswith("metric.")]
-    assert metric_members == [], metric_members
+def test_only_the_ratified_metric_event_type_exists():
+    """M10.8a landed `metric.turn` (ADR-0033 MS1); `metric.billing.*` stays reserved (MS9)."""
+    metric_members = {m.value for m in EventType if m.value.startswith("metric.")}
+    assert metric_members == {"metric.turn"}, metric_members
 
 
 def test_the_sql_log_satisfies_the_port():
