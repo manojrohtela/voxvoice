@@ -22,6 +22,11 @@ explicitly (`from events.persistence import SqlDurableEventLog`) at a compositio
 `PENDING` and `DELIVERED` only — and the durable write seam on `InProcessEventBus`, which is
 optional and **disabled by default**. `events.persistence` stays unimported here for the same
 M10.2 reason.
+
+**M10.7 (ADR-0036)** completes the lifecycle — `RETRYING`, `DEAD_LETTERED`, `QUARANTINED`, the
+`OUTBOX_LIFECYCLE` machine, `DeliveryOutcome`, the `DeliveryTransport` contract (no
+implementation) and the pure `OutboxLadder`. **No worker, scheduler or driver lives here**:
+recovery and restart re-dispatch are M10.8.
 """
 
 from .bus import (
@@ -33,13 +38,21 @@ from .bus import (
     InProcessEventBus,
 )
 from .errors import DuplicateSubscription, EventBusError, EventBusShutdown, InvalidEvent
+from .ladder import DELIVERY_RETRY_POLICY, LadderDecision, OutboxLadder
 from .ports import (
+    OUTBOX_LIFECYCLE,
+    TERMINAL_OUTBOX_STATES,
+    DeliveryClassifier,
+    DeliveryOutcome,
+    DeliveryTransport,
     DurableEventLog,
     DurableEventLogError,
     DurableOutbox,
     DurableWriteFailureHook,
     OutboxEntry,
+    OutboxFailure,
     OutboxState,
+    OutboxTrigger,
 )
 from .webhooks import emit_event, sign_payload
 
@@ -60,6 +73,16 @@ __all__ = [
     "DurableWriteFailures",
     "OutboxEntry",
     "OutboxState",
+    "OutboxTrigger",
+    "OutboxFailure",
+    "OUTBOX_LIFECYCLE",
+    "TERMINAL_OUTBOX_STATES",
+    "DeliveryOutcome",
+    "DeliveryClassifier",
+    "DeliveryTransport",
+    "OutboxLadder",
+    "LadderDecision",
+    "DELIVERY_RETRY_POLICY",
     "emit_event",
     "sign_payload",
 ]

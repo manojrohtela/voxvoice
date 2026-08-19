@@ -273,6 +273,26 @@ a second, competing delivery mechanism; **M10.2 and M10.3 changed nothing there.
 
 ### M10.7 — Retry ladder + DLQ + quarantine
 
+> **Design gate closed — [ADR-0036](../adr/ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md)
+> ratified 2026-08-19, before implementation.** It **completes ADR-0032 ED7/ED8 and continues
+> ADR-0035 DW5/DW6 and supersedes nothing.** Rulings: **RL1** resolves the M10.7/M10.8 boundary in
+> favour of ADR-0035 DW7 — **M10.8 owns recovery, restart re-dispatch and the driver**, so M10.7
+> contains **no polling, scheduler, worker, recovery loop, `sleep`, timer, thread or automatic
+> redelivery** and exposes `due(now)` as a query it never acts on; **RL2** a five-state lifecycle via
+> **`core.fsm`** with `DELIVERED`/`DEAD_LETTERED`/`QUARANTINED` terminal and `RETRYING → PENDING`
+> refused; **RL3** **no operator redrive**; **RL4** **no operator-driven quarantine**; **RL5**
+> `DeliveryOutcome` through an **injected classifier**, no transport taxonomy in `events/`; **RL6**
+> **reuse `core.policies.RetryPolicy`** — `max_attempts=5`, `base_delay_s=30.0`, `multiplier=2.0`,
+> `max_delay_s=3600.0` (30→60→120→240→480s), no constant inside transition logic; **RL7** **no
+> jitter**; **RL8** 1-based attempts incremented *before* the outcome, and a permanent failure
+> **does not consume the ladder**; **RL9** a **pure, I/O-free `OutboxLadder`** plus a
+> `DeliveryTransport` **contract only** — no concrete transport shipped; **RL10**
+> `events/webhooks.py` **byte-for-byte unchanged**; **RL11** migration `0036` (five `evt_outbox`
+> columns, `ALTER TABLE` authorized); **RL12** append-only **`evt_outbox_failure`** as authoritative
+> evidence, **no `last_error`**; **RL13** transition + history in **one transaction**, no
+> `UnitOfWork`; **RL14** injected clock, absolute `next_attempt_at`; **RL16** retention consequences
+> recorded, not implemented; **RL17** the production runtime **remains unwired**.
+
 Bounded retry with an explicitly configured backoff schedule and hard attempt cap (**no infinite
 retry, no hidden constants**, injected timing); **DLQ** after exhaustion with failure history
 retained; **quarantine** for deterministic poison messages, which does **not** consume the ladder.
@@ -287,6 +307,16 @@ Read-only and side-effect-free — no runtime logic executes. **Naming per OD-3:
 reserved for `platform/replay/` (in-memory, visualization-only, frozen for Epic 10); Epic 10 says
 re-derivation and recovery. The one permitted exception is implementing the frozen
 `MetricStreamPort.replay()` **method name** exactly as specified.
+
+> **Narrowed at M10.7 by [ADR-0036](../adr/ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md)
+> RL1 (owner ruling, 2026-08-19).** The M10.7 design gate found that the "read-only and
+> side-effect-free" clause above contradicted **[ADR-0035](../adr/ADR-0035-durable-write-interposition-on-the-event-bus.md)
+> DW7**, which assigns *"reading `PENDING` rows back and re-dispatching"* to M10.8 — re-dispatch
+> being a side effect. **DW7 remains authoritative and ADR-0035 is not modified.** The clause is
+> narrowed: it continues to describe **re-derivation**, which is genuinely read-only, and does
+> **not** constrain recovery. **M10.8 owns** reading persisted pending/retryable rows after restart,
+> deciding which are due for re-delivery, performing restart/recovery re-dispatch, and the recovery
+> driver/worker/scheduler that performs it. Nothing else about M10.8 is changed.
 
 ### M10.8a — `metric.*` vocabulary
 

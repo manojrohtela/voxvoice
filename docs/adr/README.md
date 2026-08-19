@@ -60,6 +60,7 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0033](ADR-0033-metric-stream-seam.md) | The metric-stream seam is **pull-shaped**: a platform-owned buffer subscribes to the `EventBus` and Billing pulls through the frozen `MetricStreamPort`, never subscribing itself; `metric.*` is extended additively under AR-32; runtime `metric.*` is owned by `platform/observability/` while **`metric.billing.*` stays reserved to Billing** | Epic 10 (implements against ADR-0023 + ADR-0031; amends neither) | Accepted 2026-08-18 |
 | [ADR-0034](ADR-0034-durable-storage-seam-core-only-packages.md) | Durable storage seam for `core`-only edge packages: a scoped `platform/events/persistence/**` sub-package may import `sqlmodel`/`sqlalchemy` and owns its own `Database` (the ADR-0031 IR1a precedent generalized), enforced by per-layer boundary assertions; migrations continue the single global chain at **0034** with the **`evt_*`** prefix | Epic 10 structural/dependency-inversion seam | Accepted 2026-08-18 |
 | [ADR-0035](ADR-0035-durable-write-interposition-on-the-event-bus.md) | Durable write interposition on the in-process Event Bus — **completes ADR-0032 where it is silent, supersedes nothing**: for a producer with no originating transaction the durable append **is** the state change (ED6 unweakened); an additive, default-disabled persistence seam inside `InProcessEventBus` writes **after `seq` stamping and before enqueue**, so no subscriber ever observes a non-durable event; a failed durable write never raises into the producer, is never dispatched, never rewinds `seq`, and surfaces through a typed hook; immutable `evt_event` is separated from a mutable **`evt_outbox`** (one row per event) that supplies ED9's `un-drained` predicate | Epic 10 M10.6 (durable write-side integration) | Accepted 2026-08-18 |
+| [ADR-0036](ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md) | Outbox retry ladder, dead-letter and quarantine — **completes ADR-0032 ED7/ED8 and continues ADR-0035 DW5/DW6; supersedes nothing**. A five-state lifecycle declared with `core.fsm` (`PENDING`/`RETRYING`/`DELIVERED`/`DEAD_LETTERED`/`QUARANTINED`, the last three **terminal**); a **pure, I/O-free** `OutboxLadder` that decides but never sleeps, loops, polls, schedules or dispatches; `DeliveryOutcome` reaching it through an **injected classifier** (no transport taxonomy in `events/`); `core.policies.RetryPolicy` reused with delivery values (5 attempts, 30s ×2 capped 1h, **no jitter**); append-only **`evt_outbox_failure`** as authoritative error evidence; transition + history in **one transaction**; migration `0036`. **Resolves the M10.7/M10.8 boundary**: recovery, restart re-dispatch and the driver are **M10.8** | Epic 10 M10.7 (retry ladder + DLQ + quarantine) | Accepted 2026-08-19 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -136,3 +137,19 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > M10.8; retention stays M10.5 (deferred, DL-0141); the metric seam stays M10.10. **M10.6 provides
 > the durable write-side capability and proves its semantics, but the production runtime is not yet
 > wired to the durable sink.**
+
+> **Epic 10 continuation (M10.7).** **ADR-0036** is ratified before the M10.7 implementation. It
+> **completes ADR-0032 ED7/ED8 and continues ADR-0035 DW5/DW6, and supersedes nothing** — ADR-0032
+> and ADR-0035 stay immutable, ED1–ED12 and DW1–DW11 are preserved, ADR-0033/0034 are unchanged, and
+> AR-31/AR-32/DL-0017 continue to bind. Its load-bearing ruling is **RL1**, which resolves a genuine
+> contradiction the M10.7 design gate surfaced: ADR-0035 **DW7** assigned restart re-dispatch to
+> M10.8 while the Epic 10 plan described M10.8 as *"read-only and side-effect-free"*. **DW7 remains
+> authoritative**; the plan's description is narrowed, and **M10.8 owns recovery, restart
+> re-dispatch and the driver that performs it**. M10.7 therefore ships **no worker, scheduler, poll,
+> loop, `sleep`, timer or thread** — it is a *decision-and-record* layer that computes what should
+> happen and persists it, exposing `due(now)` as a query it never acts on. It also records what it
+> deliberately does **not** do: **no operator redrive** (`DEAD_LETTERED` is terminal), **no
+> operator-driven quarantine**, and **no concrete webhook transport** —
+> `platform/events/webhooks.py` stays byte-for-byte unchanged so no second retry mechanism appears
+> (blueprint R-11). Retention stays M10.5 (deferred, DL-0141), metrics stay M10.10, and **the
+> production runtime remains unwired**.

@@ -106,7 +106,7 @@ def test_events_plane_owns_its_database_and_imports_no_other():
 
 def test_migration_0034_is_registered():
     versions = [m.VERSION for m in MIGRATIONS]
-    assert versions == ["0034", "0035"]
+    assert versions == ["0034", "0035", "0036"]
     assert MIGRATIONS[0].DESCRIPTION
 
 
@@ -131,7 +131,7 @@ def test_migration_creates_the_schema_on_an_empty_database(tmp_path):
 
     database = _file_db(tmp_path)
     applied = upgrade_all(database)
-    assert applied == ("0034", "0035")
+    assert applied == ("0034", "0035", "0036")
     assert "evt_event" in set(inspect(database.engine).get_table_names())
     database.close()
 

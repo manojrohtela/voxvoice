@@ -110,10 +110,62 @@ class DurableOutboxRow(SQLModel, table=True):
     created_at: float = Field(default=0.0, index=True)
     delivered_at: float | None = None
 
+    # ── M10.7 (ADR-0036 RL11), added by migration 0036 ───────────────────────
+    # `attempt_count` is 1-based and incremented when an attempt *begins*: counting afterwards
+    # would let a crash mid-attempt grant a free retry, and a bound a crash can widen is not a
+    # bound. `next_attempt_at` is an **absolute** instant (the `cp_billing_dunning` shape), not a
+    # delay recomputed on read — a restart must not silently reset the ladder.
+    attempt_count: int = Field(default=0)
+    next_attempt_at: float | None = Field(default=None, index=True)
+
+    # Two terminal timestamps, not one generic `terminal_at`: "we tried and gave up" and "this
+    # can never succeed" are different operational facts requiring different operator responses
+    # (ED8), and one column would make an operator re-derive which of them happened.
+    dead_lettered_at: float | None = None
+    quarantined_at: float | None = None
+    quarantine_reason: str = Field(default="")
+
     # `read_pending()` filters on state and orders by (seq, event_id); the composite makes
     # that an index scan rather than a filter-then-sort. `evt_`-prefixed for the NS-2 reason
     # in the module docstring.
-    __table_args__ = (Index("ix_evt_outbox_state_seq", "state", "seq"),)
+    __table_args__ = (
+        Index("ix_evt_outbox_state_seq", "state", "seq"),
+        # `due(now)` filters on state and `next_attempt_at`; the composite keeps that an index
+        # scan. M10.8's recovery driver reads through the same predicate.
+        Index("ix_evt_outbox_state_next_attempt", "state", "next_attempt_at"),
+    )
+
+
+class DurableOutboxFailureRow(SQLModel, table=True):
+    """One recorded **failed** delivery attempt (M10.7, ADR-0036 RL12).
+
+    A separate append-only table rather than columns on `evt_outbox`, because one outbox row
+    per event cannot hold N attempts, and a single `last_error` column keeps only the newest —
+    destroying exactly what ED8 requires a dead-lettered entry to retain. There is no update
+    path and no delete path here: history that can be edited is not evidence.
+
+    Shape follows `BillingReconciliationRow` (M9.4), the repository's append-only evidence
+    precedent: *"the finding carries no domain id, so the row uses a surrogate key"*. `event_id`
+    is an indexed reference, **not** a database foreign key — the same decoupled, order-free
+    table creation Epic 8 and Epic 9 chose, which also leaves retention (M10.5) free to decide
+    deletion order rather than having a constraint decide it.
+
+    `attempt` is the 1-based attempt this failure belongs to. A permanent failure records a row
+    without consuming the ladder (ED8), so its `attempt` is the last attempt actually made.
+    """
+
+    __tablename__ = "evt_outbox_failure"
+
+    id: int | None = Field(default=None, primary_key=True)
+    event_id: str = Field(index=True)
+    attempt: int = 0
+    outcome: str = Field(default="", index=True)
+    occurred_at: float = Field(default=0.0, index=True)
+    error: str = ""
+
+    # Reads are "this event's failures, in attempt order" — one composite index serves both the
+    # filter and the ordering, so history reads never sort.
+    __table_args__ = (Index("ix_evt_outbox_failure_event_attempt", "event_id", "attempt"),)
 
 
 # The tables migration **0034** owns. Frozen: `v0034_durable_event_log.TABLES` is this tuple,
@@ -123,8 +175,23 @@ EVENT_TABLES = (DurableEventRow,)
 # The tables migration **0035** owns (M10.6).
 OUTBOX_TABLES = (DurableOutboxRow,)
 
+# The tables migration **0036** *creates* (M10.7). The five new `evt_outbox` columns are an
+# `ALTER`, not a table, so they are not listed here — 0036 owns both, but only this tuple is a
+# create-set.
+OUTBOX_FAILURE_TABLES = (DurableOutboxFailureRow,)
+
+# The `evt_outbox` columns migration **0036** adds, as (name, DDL type). Declared once so the
+# migration and this model cannot disagree about what 0036 did.
+OUTBOX_RETRY_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("next_attempt_at", "FLOAT"),
+    ("dead_lettered_at", "FLOAT"),
+    ("quarantined_at", "FLOAT"),
+    ("quarantine_reason", "VARCHAR NOT NULL DEFAULT ''"),
+)
+
 # Every table this package owns, across every migration. `database.create_all` builds from
 # this one tuple, so a table cannot exist in a migration and be missing from a fresh
 # database. Each migration builds from its own tuple above, which is what keeps an applied
 # migration's scope fixed after the fact.
-ALL_EVENT_TABLES = EVENT_TABLES + OUTBOX_TABLES
+ALL_EVENT_TABLES = EVENT_TABLES + OUTBOX_TABLES + OUTBOX_FAILURE_TABLES

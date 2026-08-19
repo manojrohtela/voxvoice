@@ -175,21 +175,39 @@ def test_read_pending_is_deterministically_ordered(spine):
 # ── I. state boundary: M10.7 machinery is absent ────────────────────────────────
 
 
-def test_m106_exposes_only_pending_and_delivered():
-    """ADR-0035 DW6. RETRYING/DEAD_LETTERED/QUARANTINED are M10.7's; a state the
-    implementation cannot reach is a promise it cannot keep."""
-    assert {s.value for s in OutboxState} == {"pending", "delivered"}
+def test_the_lifecycle_exposes_exactly_the_five_ratified_states():
+    """Retargeted at M10.7 (owner ruling D-8): M10.6 pinned this to `{pending, delivered}` to
+    prove the ladder had not arrived early. ADR-0036 RL2 authorized the other three, so the
+    assertion now pins the **complete** lifecycle — exact equality, so a sixth state cannot leak
+    in from M10.8 or anywhere else. A state the implementation cannot reach is still a promise
+    it cannot keep."""
+    assert {s.value for s in OutboxState} == {
+        "pending", "retrying", "delivered", "dead_lettered", "quarantined",
+    }
 
 
-def test_the_outbox_table_carries_no_retry_dlq_or_quarantine_columns():
+def test_the_outbox_table_carries_exactly_the_ratified_columns():
+    """Retargeted at M10.7 (owner ruling D-8). The five M10.6 columns plus exactly the five
+    ADR-0036 RL11 authorized — and nothing else. Still an exact set, so it keeps guarding: the
+    forbidden list below is what M10.7 was ruled *not* to add, and what later milestones must
+    not smuggle in either."""
     columns = set(DurableOutboxRow.__table__.columns.keys())
     forbidden = {
-        "attempt_count", "attempts", "retry_count", "next_attempt_at", "backoff",
-        "backoff_seconds", "failure_history", "last_error", "dead_lettered_at",
-        "quarantined_at", "claimed_at", "claimed_by", "lease_expires_at", "consumer_id",
+        # M10.7 was ruled not to add these (ADR-0036 RL11): failure history is the authoritative
+        # error evidence, so no `last_error`; and there is no worker, so nothing to lease.
+        "last_error", "failure_history", "retry_history",
+        "attempts", "retry_count", "backoff", "backoff_seconds",
+        "claimed_at", "claimed_by", "lease_expires_at", "locked_by", "worker_id", "visible_at",
+        # Later milestones: M10.5 retention, M10.10 metering, DW5 destinations.
+        "retained_until", "expires_at", "purge_after", "metered_at", "meter_code",
+        "consumer_id", "destination", "endpoint_id",
     }
-    assert not (columns & forbidden), f"M10.7/multi-consumer columns leaked: {columns & forbidden}"
-    assert columns == {"event_id", "seq", "state", "created_at", "delivered_at"}
+    assert not (columns & forbidden), f"forbidden columns leaked: {columns & forbidden}"
+    assert columns == {
+        "event_id", "seq", "state", "created_at", "delivered_at",
+        "attempt_count", "next_attempt_at",
+        "dead_lettered_at", "quarantined_at", "quarantine_reason",
+    }
 
 
 def test_the_outbox_port_declares_no_retry_or_recovery_methods():
@@ -408,7 +426,7 @@ def test_the_restart_proof_does_not_use_an_in_memory_database():
 
 def test_migration_0035_is_registered_after_0034():
     versions = [m.VERSION for m in MIGRATIONS]
-    assert versions == ["0034", "0035"]
+    assert versions == ["0034", "0035", "0036"]
     assert CHAIN_STARTS_AFTER == "0033"
 
 
@@ -437,7 +455,7 @@ def test_upgrade_all_creates_both_tables_on_an_empty_database(tmp_path):
     db = EventDatabase(f"sqlite:///{tmp_path / 'migrated.db'}")
     applied = upgrade_all(db)
 
-    assert applied == ("0034", "0035")
+    assert applied == ("0034", "0035", "0036")
     tables = set(sa_inspect(db.engine).get_table_names())
     assert {"evt_event", "evt_outbox"} <= tables
     db.close()
@@ -476,12 +494,28 @@ def test_every_outbox_index_carries_the_evt_prefix():
 
 
 def test_create_all_builds_every_table_the_package_owns(tmp_path):
+    """Retargeted at M10.7 (owner ruling D-8). `create_all()` must build **exactly** the tables
+    the package owns through M10.7 — asserted as equality, not containment, so a table can
+    neither go missing on a fresh database nor appear without being owned by a migration.
+
+    The per-migration tuples stay distinct: `0034` still owns only `evt_event`, `0035` still
+    owns only `evt_outbox`, and `0036` owns the M10.7 addition. That separation is what keeps an
+    applied migration's scope fixed after the fact.
+    """
+    from events.persistence import OUTBOX_FAILURE_TABLES
+
     db = EventDatabase(f"sqlite:///{tmp_path / 'fresh.db'}")
     db.create_all()
 
     tables = set(sa_inspect(db.engine).get_table_names())
-    assert {t.__tablename__ for t in ALL_EVENT_TABLES} <= tables
-    assert ALL_EVENT_TABLES == EVENT_TABLES + OUTBOX_TABLES
+    assert tables == {"evt_event", "evt_outbox", "evt_outbox_failure"}
+    assert {t.__tablename__ for t in ALL_EVENT_TABLES} == tables
+    assert ALL_EVENT_TABLES == EVENT_TABLES + OUTBOX_TABLES + OUTBOX_FAILURE_TABLES
+
+    # The ownership split, unchanged by M10.7.
+    assert [t.__tablename__ for t in EVENT_TABLES] == ["evt_event"]
+    assert [t.__tablename__ for t in OUTBOX_TABLES] == ["evt_outbox"]
+    assert [t.__tablename__ for t in OUTBOX_FAILURE_TABLES] == ["evt_outbox_failure"]
     db.close()
 
 

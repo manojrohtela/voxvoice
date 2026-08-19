@@ -165,3 +165,25 @@ The seam is on the *implementation*, not on the contract, and it is off by defau
 **The production runtime is not wired to the durable sink at M10.6.** `ConversationOrchestrator`
 constructs its bus inline and is not modified; runtime wiring stays governed by the Epic 10/11
 boundary. Retry, DLQ and quarantine remain M10.7; recovery remains M10.8.
+
+## Revision note — Epic 10 (M10.7, 2026-08-19)
+
+[ADR-0036](../adr/ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md) adds the **bounded
+retry ladder, dead-letter and quarantine** discharging ADR-0032 **ED7/ED8**. It **completes ADR-0032
+and continues ADR-0035, and supersedes nothing.** The outbox lifecycle is a five-state machine
+declared with `core.fsm` — `PENDING`, `RETRYING`, `DELIVERED`, `DEAD_LETTERED`, `QUARANTINED` — the
+last three terminal, with `RETRYING → PENDING` refused so a bounded ladder can never restart itself.
+Backoff reuses `core.policies.RetryPolicy` and is deterministic with **no jitter**; failure evidence
+lives in an append-only `evt_outbox_failure` table written in the **same transaction** as the
+transition.
+
+**Nothing on this page changes.** `core.events.EventBus` is untouched, no producer changed, and the
+in-process delivery model, ordering and reentrancy guarantees are exactly as described above — the
+ladder never touches the bus.
+
+**M10.7 is a decision-and-record layer, not a delivery mechanism.** It ships a `DeliveryTransport`
+**contract only** — no concrete transport — and contains **no worker, scheduler, poll, loop,
+`sleep`, timer or thread**. Recovery, restart re-dispatch and the driver that performs them are
+**M10.8** (ADR-0035 DW7, reaffirmed by ADR-0036 RL1). `events/webhooks.py` remains byte-for-byte
+unchanged, so no second retry mechanism exists. The production runtime is still not wired to the
+durable sink.

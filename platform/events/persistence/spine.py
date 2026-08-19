@@ -23,11 +23,18 @@ it was — the pure append-only log — because a caller that wants history with
 state should not be forced to acquire an outbox. This class composes it for reads and does
 its own two-row staging for writes, so the read queries exist once.
 
-**Scope.** No retry, no backoff, no dead-letter, no quarantine, no failure history, no
-recovery worker and no re-dispatch: M10.7 owns the ladder and M10.8 owns recovery
-(ADR-0035 DW6/DW7). `mark_delivered` is the state transition M10.6 owns; its *caller*
-arrives with the durable consumers at M10.7/M10.10, exactly as the bus seam ships without
-runtime wiring (DW10).
+**M10.7 (ADR-0036).** The class now also *records* ladder transitions: `begin_attempt`,
+`record_failure` (which persists the transition **and** its `evt_outbox_failure` evidence in
+one commit), `failures` and the `due(now)` query. The decision itself is not made here — the
+pure `OutboxLadder` makes it, and this class validates it a second time through
+`core.fsm` before writing, so two independent statements of the lifecycle must agree.
+
+**Scope — what this class still does not do.** It never delivers anything, never polls,
+never sleeps, never loops and never schedules. `due(now)` is a **query**: nothing in M10.7
+calls it on a timer or acts on what it returns. **Recovery, restart re-dispatch and the
+driver that performs them are M10.8** (ADR-0035 DW7, reaffirmed by ADR-0036 RL1) — and the
+absence of a driver here is the reason that boundary holds. There is no redrive out of
+`DEAD_LETTERED` and no operator quarantine (RL3/RL4); retention is M10.5 and metering M10.10.
 """
 
 from __future__ import annotations
@@ -39,12 +46,25 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from core.events import Event
-from events.ports import DurableEventLog, DurableOutbox, OutboxEntry, OutboxState
+from core.fsm import StateMachine, TerminalStateError
+from core.policies import RetryPolicy
+from events.ladder import OutboxLadder
+from events.ports import (
+    OUTBOX_LIFECYCLE,
+    TERMINAL_OUTBOX_STATES,
+    DeliveryOutcome,
+    DurableEventLog,
+    DurableOutbox,
+    OutboxEntry,
+    OutboxFailure,
+    OutboxState,
+    OutboxTrigger,
+)
 
 from .database import EventDatabase
 from .durable_log import SqlDurableEventLog
 from .mapping import to_row
-from .models import DurableEventRow, DurableOutboxRow
+from .models import DurableEventRow, DurableOutboxFailureRow, DurableOutboxRow
 
 
 def _to_entry(row: DurableOutboxRow) -> OutboxEntry:
@@ -54,6 +74,22 @@ def _to_entry(row: DurableOutboxRow) -> OutboxEntry:
         state=OutboxState(row.state),
         created_at=row.created_at,
         delivered_at=row.delivered_at,
+        attempt_count=row.attempt_count,
+        next_attempt_at=row.next_attempt_at,
+        dead_lettered_at=row.dead_lettered_at,
+        quarantined_at=row.quarantined_at,
+        quarantine_reason=row.quarantine_reason,
+    )
+
+
+def _to_failure(row: DurableOutboxFailureRow) -> OutboxFailure:
+    return OutboxFailure(
+        id=row.id,
+        event_id=row.event_id,
+        attempt=row.attempt,
+        outcome=DeliveryOutcome(row.outcome),
+        occurred_at=row.occurred_at,
+        error=row.error,
     )
 
 
@@ -70,11 +106,20 @@ class SqlDurableEventSpine(DurableEventLog, DurableOutbox):
         database: EventDatabase,
         *,
         clock: Callable[[], float] | None = None,
+        policy: RetryPolicy | None = None,
     ) -> None:
         self._db = database
         self._clock = clock or time.time
         # Reads are the log's; composing it keeps one definition of every ordered query.
         self._log = SqlDurableEventLog(database, clock=self._clock)
+        # M10.7: the ladder decides, this class records. Injected so the bound is configurable
+        # and so no retry number ever appears in the branches below (ADR-0032 ED7).
+        self._ladder = OutboxLadder(policy)
+
+    @property
+    def ladder(self) -> OutboxLadder:
+        """The retry ladder these transitions apply. Read-only."""
+        return self._ladder
 
     # ── DurableEventLog: write (both rows, one transaction) ─────────────────
     def append(self, event: Event) -> bool:
@@ -121,13 +166,25 @@ class SqlDurableEventSpine(DurableEventLog, DurableOutbox):
 
     # ── DurableOutbox ───────────────────────────────────────────────────────
     def mark_delivered(self, event_id: str) -> bool:
+        """`PENDING → DELIVERED` or, since M10.7, `RETRYING → DELIVERED`.
+
+        Already-delivered is `False`, not an error: at-least-once (ED2) makes a repeated mark
+        ordinary traffic, and this is the repository's idempotent-scheduler convention — already
+        in the established state means *nothing to do*, while **any other refusal stays loud**.
+        A dead-lettered or quarantined entry is not silently marked delivered; it raises.
+        """
         session = self._db.session
         row = session.get(DurableOutboxRow, event_id)
         if row is None or row.state == OutboxState.DELIVERED.value:
             return False  # unknown or already delivered — idempotent (ED2)
+        self._guard_not_terminal(row, "mark delivered")
+        self._fire(row, OutboxTrigger.DELIVER)
         try:
             row.state = OutboxState.DELIVERED.value
             row.delivered_at = self._clock()
+            # A delivered entry is not due for anything; leaving a stale instant here would make
+            # `due(now)` report a finished entry forever.
+            row.next_attempt_at = None
             session.add(row)
             session.commit()
         except Exception:
@@ -155,6 +212,104 @@ class SqlDurableEventSpine(DurableEventLog, DurableOutbox):
                 .where(DurableOutboxRow.state == OutboxState.PENDING.value)
             ).one()
         )
+
+    # ── DurableOutbox: M10.7 ladder transitions (ADR-0036) ──────────────────
+
+    def begin_attempt(self, event_id: str) -> OutboxEntry | None:
+        """Count an attempt that is **starting** (ADR-0036 RL8)."""
+        session = self._db.session
+        row = session.get(DurableOutboxRow, event_id)
+        if row is None:
+            return None
+        self._guard_not_terminal(row, "begin an attempt on")
+        try:
+            row.attempt_count += 1
+            session.add(row)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        return _to_entry(row)
+
+    def record_failure(
+        self,
+        event_id: str,
+        outcome: DeliveryOutcome,
+        *,
+        error: str = "",
+        policy: RetryPolicy | None = None,
+    ) -> OutboxEntry | None:
+        """Apply one failed attempt's transition and append its evidence — **one transaction**.
+
+        The ladder decides; this only records. A `RETRYING` row whose failure row is missing (or
+        a failure row with no transition) is the fact/event disagreement ED6 forbids, one layer
+        up, so the two writes share a commit and roll back together.
+        """
+        if outcome is DeliveryOutcome.SUCCESS:
+            raise ValueError("record_failure is for failures; use mark_delivered for success")
+
+        session = self._db.session
+        row = session.get(DurableOutboxRow, event_id)
+        if row is None:
+            return None
+        self._guard_not_terminal(row, "record a failure against")
+
+        ladder = OutboxLadder(policy) if policy is not None else self._ladder
+        now = self._clock()
+        decision = ladder.decide(outcome, attempt_count=row.attempt_count, now=now)
+        # Validate through the machine rather than trusting the ladder: two independent
+        # statements of the lifecycle that must agree, and a mismatch raises instead of writing.
+        self._fire(row, decision.trigger)
+
+        try:
+            # The evidence records the attempt that failed. A permanent failure does not consume
+            # the ladder (ED8), so `attempt_count` is left exactly where it was.
+            session.add(
+                DurableOutboxFailureRow(
+                    event_id=event_id,
+                    attempt=row.attempt_count,
+                    outcome=outcome.value,
+                    occurred_at=now,
+                    error=error,
+                )
+            )
+            row.state = decision.state.value
+            row.next_attempt_at = decision.next_attempt_at
+            if decision.state is OutboxState.DEAD_LETTERED:
+                row.dead_lettered_at = now
+            elif decision.state is OutboxState.QUARANTINED:
+                row.quarantined_at = now
+                row.quarantine_reason = error
+            session.add(row)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        return _to_entry(row)
+
+    def failures(self, event_id: str) -> Sequence[OutboxFailure]:
+        rows = self._db.session.exec(
+            select(DurableOutboxFailureRow)
+            .where(DurableOutboxFailureRow.event_id == event_id)
+            .order_by(DurableOutboxFailureRow.attempt, DurableOutboxFailureRow.id)
+        ).all()
+        return tuple(_to_failure(r) for r in rows)
+
+    def due(self, now: float) -> Sequence[OutboxEntry]:
+        """Entries whose backoff has elapsed — **a query, never an action** (ADR-0036 RL1).
+
+        Nothing in M10.7 calls this on a timer or delivers what it returns; the recovery driver
+        is M10.8. Ordered by `(seq, event_id)` so the answer is deterministic across calls and
+        across restarts.
+        """
+        rows = self._db.session.exec(
+            select(DurableOutboxRow)
+            .where(DurableOutboxRow.state == OutboxState.RETRYING.value)
+            .where(DurableOutboxRow.next_attempt_at != None)  # noqa: E711 — SQL NULL, not `is`
+            .where(DurableOutboxRow.next_attempt_at <= now)
+            .order_by(DurableOutboxRow.seq, DurableOutboxRow.event_id)
+        ).all()
+        return tuple(_to_entry(r) for r in rows)
 
     def count_entries(self) -> int:
         """Outbox rows. `count()` is `DurableEventLog`'s and counts *events*. One row per
@@ -184,3 +339,35 @@ class SqlDurableEventSpine(DurableEventLog, DurableOutbox):
 
     def _exists(self, event_id: str) -> bool:
         return self._db.session.get(DurableEventRow, event_id) is not None
+
+    # ── M10.7 lifecycle guards (ADR-0036 RL2) ───────────────────────────────
+
+    def _guard_not_terminal(self, row: DurableOutboxRow, action: str) -> None:
+        """Refuse to touch a finished entry, loudly.
+
+        `DELIVERED`, `DEAD_LETTERED` and `QUARANTINED` are terminal, and terminality is read off
+        the machine rather than from a list here — so this cannot drift from `OUTBOX_LIFECYCLE`.
+        Silence would let a stale caller resurrect a closed entry, which is the failure the
+        Collections lifecycle refuses by construction.
+        """
+        state = OutboxState(row.state)
+        if state in TERMINAL_OUTBOX_STATES:
+            raise TerminalStateError(
+                f"outbox entry {row.event_id!r} is {state.value}; cannot {action} it"
+            )
+
+    def _fire(self, row: DurableOutboxRow, trigger: OutboxTrigger) -> OutboxState:
+        """Validate a transition through `core.fsm` **before** writing it.
+
+        The ladder computed the target independently; running the machine as well means two
+        statements of the lifecycle have to agree, and a disagreement raises
+        (`InvalidTransition` / `TerminalStateError`) instead of persisting a state nobody
+        authorized. No row is written here — this is validation, not mutation.
+        """
+        machine = StateMachine(
+            OUTBOX_LIFECYCLE,
+            OutboxState(row.state),
+            machine_id=f"evt_outbox:{row.event_id}",
+            clock=self._clock,
+        )
+        return machine.fire(trigger)

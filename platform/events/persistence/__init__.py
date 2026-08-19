@@ -14,6 +14,11 @@ Contents: the plane's own `EventDatabase` (never another plane's — DS5), the `
 row ↔ envelope mapping, the `SqlDurableEventLog` implementation of `events.ports.DurableEventLog`,
 and the migration chain continuing at `0034`.
 
+**M10.7 (ADR-0036)** adds `evt_outbox_failure` (append-only per-attempt failure evidence),
+migration `0036` — the first in this chain to `ALTER` rather than only create — and the ladder
+transitions on `SqlDurableEventSpine`. It adds **no driver**: recovery and restart re-dispatch
+are M10.8.
+
 **M10.6 (ADR-0035)** adds `evt_outbox` (mutable per-event delivery state, `PENDING`/`DELIVERED`
 only), migration `0035`, and `SqlDurableEventSpine` — which implements `DurableEventLog` **and**
 `DurableOutbox` and writes both rows in **one transaction**, so an event and the entry announcing
@@ -31,8 +36,11 @@ from .mapping import to_event, to_row
 from .models import (
     ALL_EVENT_TABLES,
     EVENT_TABLES,
+    OUTBOX_FAILURE_TABLES,
+    OUTBOX_RETRY_COLUMNS,
     OUTBOX_TABLES,
     DurableEventRow,
+    DurableOutboxFailureRow,
     DurableOutboxRow,
 )
 from .spine import SqlDurableEventSpine
@@ -43,8 +51,11 @@ __all__ = [
     "SqlDurableEventSpine",
     "DurableEventRow",
     "DurableOutboxRow",
+    "DurableOutboxFailureRow",
     "EVENT_TABLES",
     "OUTBOX_TABLES",
+    "OUTBOX_FAILURE_TABLES",
+    "OUTBOX_RETRY_COLUMNS",
     "ALL_EVENT_TABLES",
     "to_event",
     "to_row",
