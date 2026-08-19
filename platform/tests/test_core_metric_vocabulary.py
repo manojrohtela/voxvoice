@@ -98,10 +98,10 @@ def test_m108a_added_exactly_one_member():
     assert len(list(EventType)) == 104
 
 
-def test_event_source_is_unchanged_by_m108a():
-    """M10.8a touches `EventType` only (plan §M10.8a). `EventSource` gains nothing —
-    the observability producer's source is an M10.9 concern, not a vocabulary one."""
-    assert not hasattr(EventSource, "OBSERVABILITY")
+def test_event_source_gained_only_observability():
+    """M10.9 (ADR-0038 TP4) added OBSERVABILITY additively; MS8 names it the producer."""
+    assert EventSource.OBSERVABILITY.value == "observability"
+    assert len(list(EventSource)) == 25
 
 
 # ── 6. adjacent members keep their exact values ─────────────────────────────
@@ -169,23 +169,18 @@ def test_the_existing_publisher_carries_a_metric_event_without_change():
 # ── M10.8a is vocabulary only — no producer shipped ─────────────────────────
 
 
-def test_observability_is_still_a_skeleton():
-    """M10.8a must not become M10.9. The producer, the taps and the stage instrumentation all
-    belong to the next milestone and require ADR-0038 plus the D-1/D-3 rulings."""
-    package = pathlib.Path("observability")
-    modules = sorted(p.name for p in package.glob("*.py"))
-    assert modules == ["__init__.py"], f"observability gained modules: {modules}"
-    for forbidden in ("taps.py", "producer.py", "metrics.py"):
-        assert not (package / forbidden).exists()
+def test_observability_ships_only_the_turn_latency_producer():
+    """M10.9 builds the AR-42 tap and nothing else: no tracing, cost meter or logging config."""
+    modules = sorted(p.name for p in pathlib.Path("observability").glob("*.py"))
+    assert modules == ["__init__.py", "turn_latency.py"]
+    for future in ("tracing.py", "cost.py", "logging_config.py"):
+        assert not (pathlib.Path("observability") / future).exists()
 
 
-def test_nothing_emits_metric_turn_yet():
-    """The vocabulary exists; the producer does not. Asserted across production source so the
-    milestone boundary is structural rather than promised."""
-    for path in pathlib.Path(".").glob("*/**/*.py"):
-        parts = path.parts
-        if parts[0] in {"tests", ".venv"} or "__pycache__" in parts:
-            continue
-        if path.name == "events.py" and parts[0] == "core":
-            continue  # the definition itself
-        assert "METRIC_TURN" not in path.read_text(), f"{path} already emits metric.turn"
+def test_only_observability_emits_metric_turn():
+    """AR-2 — one producer per event type."""
+    emitters = {p for p in pathlib.Path(".").glob("*/**/*.py")
+                if p.parts[0] not in {"tests", ".venv"} and "__pycache__" not in p.parts
+                and "METRIC_TURN" in p.read_text()}
+    assert emitters == {pathlib.Path("core/events.py"),
+                        pathlib.Path("observability/turn_latency.py")}

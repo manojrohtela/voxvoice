@@ -28,10 +28,11 @@ from typing import TYPE_CHECKING
 from core.providers.llm import TokenDelta
 from core.providers.stt import Final, Partial
 
-from ..contracts import TranscriptSink
+from ..contracts import LatencyObserver, TranscriptSink
 from ..endpoint import FINAL_ENDPOINT_DECISIONS
 from ..interrupt import InterruptDecision
 from ..smart_turn import FINISH_DECISIONS, PREEMPT_DECISIONS
+from ..voice_activity import VoiceActivityState
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -70,6 +71,7 @@ class RuntimePipeline:
         endpoint: EndpointCoordinator | None = None,
         interrupt: InterruptCoordinator | None = None,
         smart_turn: SmartTurnCoordinator | None = None,
+        latency: LatencyObserver | None = None,
     ) -> None:
         self._transport = transport
         self._stt = stt
@@ -103,6 +105,10 @@ class RuntimePipeline:
         # (arbitration + adaptive policy + optional semantic hint). When absent, the
         # pipeline consumes the raw endpoint/interrupt decisions exactly as M3.4.
         self._smart_turn = smart_turn
+        # Latency observation (M10.9, ADR-0038 TP2): notify-only, and the same optional shape
+        # every framework above uses. When absent the pipeline behaves *exactly* as before — no
+        # branch below does anything but call `_tap`, which returns immediately.
+        self._latency = latency
         # The in-flight assistant response task (interruptible path only).
         self._response_task: asyncio.Task[None] | None = None
         # The most recent Final transcript awaiting an endpoint decision (so the
@@ -146,6 +152,7 @@ class RuntimePipeline:
             self._endpoint.cancel()  # terminalize any pending endpoint on shutdown
         if self._turns is not None:
             self._turns.cancel()  # terminalize any active turn on shutdown
+        self._tap_terminal("cancelled")  # emits only if boundaries were recorded (TP6)
         if self._voice_activity is not None:
             await self._voice_activity.stop()  # best-effort provider teardown
         await self._transport.stop(session_id=self._session_id)
@@ -182,6 +189,7 @@ class RuntimePipeline:
                     self._endpoint.on_user_speech()  # speech in progress; keeps turn open
                 self._emit("user", result.text, is_final=False)
             elif isinstance(result, Final):
+                self._tap("stt_final")
                 self._emit("user", result.text, is_final=True)
                 await self._on_segment(result.text)
         # Stream ended (caller hangup): close out a turn still awaiting confirmation
@@ -204,6 +212,7 @@ class RuntimePipeline:
         self._pending_text = user_text
         decision = self._endpoint.on_segment()  # notifies the Turn Engine if final
         if self._endpoint_finishes(decision):
+            self._tap("endpoint_decided")
             await self._complete_turn()
 
     async def _complete_turn(self) -> None:
@@ -245,6 +254,7 @@ class RuntimePipeline:
                     self._endpoint.on_user_speech()
                 self._emit("user", result.text, is_final=False)
             elif isinstance(result, Final):
+                self._tap("stt_final")
                 self._emit("user", result.text, is_final=True)
                 # Guard: never overlap two responses. If one is still playing and no
                 # interrupt was confirmed, let it finish before starting the next.
@@ -302,6 +312,7 @@ class RuntimePipeline:
         self._pending_text = user_text
         decision = self._endpoint.on_segment() if self._endpoint is not None else None
         if self._endpoint_finishes(decision):
+            self._tap("endpoint_decided")
             self._start_response()
 
     def _start_response(self) -> None:
@@ -340,6 +351,7 @@ class RuntimePipeline:
                 pass
         self._interrupt.start_user_turn()  # → USER_TURN_STARTING (cancels the turn)
         self._interrupt.complete()  # → INTERRUPT_COMPLETED
+        self._tap_terminal("interrupted")
         if self._endpoint is not None:
             self._endpoint.reset()  # drop any stale pending decision
         self._pending_text = None
@@ -353,31 +365,50 @@ class RuntimePipeline:
             {"role": "user", "content": user_text},
         ]
         parts: list[str] = []
+        first_token = True
         async for delta in self._llm.stream(context=context):
             if isinstance(delta, TokenDelta):
+                if first_token:
+                    # The *first* actual token, observed inside the stream — the boundary no
+                    # bus-derived design can see (ADR-0038 TP3 #4).
+                    self._tap("llm_first_token")
+                    first_token = False
                 parts.append(delta.text)
         agent_text = "".join(parts).strip()
         if not agent_text:
             if self._turns is not None:
                 self._turns.on_turn_completed()  # empty response still completes the turn
+            self._tap_terminal("completed")
             return
         if self._turns is not None:
             self._turns.on_assistant_speaking()
+        self._tap("playback_start")  # lifecycle marker, not a latency stage (TP3)
         if self._interrupt is not None:
             self._interrupt.on_assistant_started()  # begin barge-in monitoring
         self._emit("agent", agent_text, is_final=True)
+        first_audio = True
+        first_out = True
         async for frame in self._tts.synthesize(
             agent_text, voice=self._tts_voice, language=self._language
         ):
+            if first_audio:
+                self._tap("tts_first_audio")  # TP3 #5
+                first_audio = False
             if self._interrupt is not None and self._interrupt.stop_requested.is_set():
                 # A barge-in was confirmed → stop playback gracefully. The run loop
                 # drives the interrupt action phase + the new user turn.
+                self._tap_terminal("interrupted")
                 return
             await self._transport.send(session_id=self._session_id, frame=frame)
+            if first_out:
+                # The caller is now hearing audio — the terminus of voice-to-voice (TP3 #6).
+                self._tap("first_audio_out")
+                first_out = False
         if self._interrupt is not None:
             self._interrupt.on_assistant_finished()  # playback completed on its own
         if self._turns is not None:
             self._turns.on_turn_completed()
+        self._tap_terminal("completed")
 
     async def _tap_voice_activity(
         self, frames: AsyncIterator[AudioFrame]
@@ -388,7 +419,11 @@ class RuntimePipeline:
         async for frame in frames:
             if self._voice_activity is not None:
                 try:
-                    self._voice_activity.observe(frame)
+                    # `observe` already returns the *changed* state; M10.9 reads the return value
+                    # the M3.2 tap discarded. This is true end-of-utterance (ADR-0038 TP3 #1),
+                    # not an STT artefact.
+                    if self._voice_activity.observe(frame) is VoiceActivityState.SILENCE_CONFIRMED:
+                        self._tap("speech_end")
                 except Exception as exc:  # noqa: BLE001 — VAD must not break the pipeline
                     log.warning(
                         "pipeline %s: voice-activity observe failed (ignored): %s",
@@ -403,3 +438,42 @@ class RuntimePipeline:
             self._on_transcript(self._session_id, role, text, is_final)
         except Exception as exc:  # noqa: BLE001 — a sink must never break the pipeline
             log.warning("transcript sink raised (ignored): %s", exc)
+
+    # ── latency observation (M10.9, ADR-0038) ────────────────────────────────
+
+    def _tap(self, boundary: str) -> None:
+        """Record one stage boundary. Cheap by construction: the observer reads a clock and
+        writes a dict — **nothing is published here** (ADR-0038 TP10), because
+        `InProcessEventBus.publish()` is synchronous run-to-completion and would run every
+        subscriber inside the voice-to-voice budget."""
+        if self._latency is None:
+            return
+        try:
+            self._latency.record(self._session_id, self._turn_index(), boundary)
+        except Exception as exc:  # noqa: BLE001 — a tap must never break the pipeline (TP9)
+            log.warning(
+                "pipeline %s: latency tap %r failed (ignored): %s",
+                self._session_id, boundary, exc,
+            )
+
+    def _tap_terminal(self, status: str) -> None:
+        """The turn reached a terminal outcome; the observer emits at most one metric and
+        releases its state (ADR-0038 TP6/TP8)."""
+        if self._latency is None:
+            return
+        try:
+            self._latency.complete(self._session_id, self._turn_index(), status)
+        except Exception as exc:  # noqa: BLE001 — TP9
+            log.warning(
+                "pipeline %s: latency completion %r failed (ignored): %s",
+                self._session_id, status, exc,
+            )
+
+    def _turn_index(self) -> int:
+        """The turn these boundaries belong to. `0` when no Turn Engine is wired — a
+        lifecycle-only pipeline has no turn identity to attribute to, and inventing one would
+        make two different turns share a key."""
+        if self._turns is None:
+            return 0
+        context = self._turns.engine.current_context
+        return context.turn_index if context is not None else 0

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from .state import WorkerState
 
@@ -23,6 +23,29 @@ if TYPE_CHECKING:
 # A transcript sink receives (session_id, role, text, is_final). The Control
 # Plane provides one; the future Event Bus (M4) subsumes it.
 TranscriptSink = Callable[[str, str, str, bool], None]
+
+
+@runtime_checkable
+class LatencyObserver(Protocol):
+    """The per-turn latency observation seam (M10.9, ADR-0038 TP2).
+
+    Declared here, beside `TranscriptSink` and `LifecycleObserver`, for the reason those exist:
+    the pipeline must be observable **without knowing who observes it**. `platform/observability/`
+    satisfies this **structurally** — so `runtime/` imports no `observability`, `observability/`
+    imports no `runtime`, and the two meet only at a composition root.
+
+    Notify-only and best-effort. An implementation **must never raise into the pipeline, never
+    block, and never alter conversation behaviour** (ADR-0033 MS8, ADR-0038 TP9); the pipeline
+    isolates it anyway, on the `_tap_voice_activity` / `_emit` precedent (DL-0013).
+    """
+
+    def record(self, session_id: str, turn_index: int, boundary: str) -> None:
+        """One stage boundary was reached, now. `boundary` is one of the six AR-42 names
+        (ADR-0038 TP3) or the `playback_start` lifecycle marker."""
+
+    def complete(self, session_id: str, turn_index: int, status: str) -> None:
+        """The turn reached a terminal outcome — `"completed"`, `"cancelled"` or
+        `"interrupted"`. The observer emits at most one metric here and releases its state."""
 
 
 @dataclass(frozen=True, slots=True)

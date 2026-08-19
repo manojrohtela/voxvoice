@@ -62,6 +62,7 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0035](ADR-0035-durable-write-interposition-on-the-event-bus.md) | Durable write interposition on the in-process Event Bus — **completes ADR-0032 where it is silent, supersedes nothing**: for a producer with no originating transaction the durable append **is** the state change (ED6 unweakened); an additive, default-disabled persistence seam inside `InProcessEventBus` writes **after `seq` stamping and before enqueue**, so no subscriber ever observes a non-durable event; a failed durable write never raises into the producer, is never dispatched, never rewinds `seq`, and surfaces through a typed hook; immutable `evt_event` is separated from a mutable **`evt_outbox`** (one row per event) that supplies ED9's `un-drained` predicate | Epic 10 M10.6 (durable write-side integration) | Accepted 2026-08-18 |
 | [ADR-0036](ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md) | Outbox retry ladder, dead-letter and quarantine — **completes ADR-0032 ED7/ED8 and continues ADR-0035 DW5/DW6; supersedes nothing**. A five-state lifecycle declared with `core.fsm` (`PENDING`/`RETRYING`/`DELIVERED`/`DEAD_LETTERED`/`QUARANTINED`, the last three **terminal**); a **pure, I/O-free** `OutboxLadder` that decides but never sleeps, loops, polls, schedules or dispatches; `DeliveryOutcome` reaching it through an **injected classifier** (no transport taxonomy in `events/`); `core.policies.RetryPolicy` reused with delivery values (5 attempts, 30s ×2 capped 1h, **no jitter**); append-only **`evt_outbox_failure`** as authoritative error evidence; transition + history in **one transaction**; migration `0036`. **Resolves the M10.7/M10.8 boundary**: recovery, restart re-dispatch and the driver are **M10.8** | Epic 10 M10.7 (retry ladder + DLQ + quarantine) | Accepted 2026-08-19 |
 | [ADR-0037](ADR-0037-outbox-recovery-driver-and-restart-re-dispatch.md) | Outbox recovery and restart re-dispatch — **completes ADR-0035 DW7 and ADR-0036 RL1; supersedes nothing**. A **caller-driven, deterministic** `recover(now, limit)` sweep on the `context`/`memory` `expire()` precedent — **no scheduler, worker, thread, timer or loop**; one sweep over `PENDING` + due `RETRYING`, ordered `(seq, event_id)`, terminal states never selected, **zero new FSM transitions**; `begin_attempt` before delivery; `DeliveryTransport` stays a **pure port with no production implementation**; concurrency an **accepted non-claim** (no claim/lease/lock/dedup); **no migration and no schema change**; `MetricStreamPort.replay()` stays **M10.10** | Epic 10 M10.8 (recovery + restart re-dispatch) | Accepted 2026-08-19 |
+| [ADR-0038](ADR-0038-runtime-latency-taps-and-the-metric-turn-producer.md) | Runtime latency taps and the `metric.turn` producer — **completes ADR-0033 MS8; supersedes nothing**. Makes **AR-42** satisfiable: plan §1.12 excludes Epic 11 rework, not the minimal **additive, optional, notify-only** seam on `RuntimePipeline`. Six enumerated boundaries; `playback_start` + terminal outcome are lifecycle markers; the pipeline is **segment-driven** so derived durations follow the real order and **never go negative**; one **injected monotonic** clock owned by the tap; **one emission per terminal turn** (publish is synchronous run-to-completion); absent boundary ≠ 0; bounded per-turn state; logged failure isolation; adds `EventSource.OBSERVABILITY`; no migration, buffer, retention or new `EventType` | Epic 10 M10.9 (observability build-out + `metric.turn`) | Accepted 2026-08-19 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -178,3 +179,30 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > the read-only **durable-log re-derivation** capability. **M10.8 requires no migration and no
 > schema change**; retention stays M10.5 (DL-0141), metrics stay M10.8a/M10.9/M10.10, and **the
 > production runtime remains unwired**.
+
+> **Epic 10 continuation (M10.9).** **ADR-0038** is ratified before the M10.9 implementation. It
+> **completes ADR-0033 MS8 and supersedes nothing** — ADR-0032/0033/0034/0035/0036/0037 stay
+> immutable, and MS1–MS10, ED1–ED12, DW1–DW11, RL1–RL17, RC1–RC16, AR-2, AR-31, AR-32, AR-42 and
+> DL-0013 continue to bind. It makes **AR-42** — *"every stage boundary in the conversation loop
+> carries a latency tap"* — satisfiable for the first time since it was written. Its load-bearing
+> ruling resolves a conflict the M10.9 gate surfaced: plan §1.12 lists *"Conversation Runtime
+> changes"* as out of scope for the whole epic, while three of the six required boundaries occur
+> **inside `async for` loops in `RuntimePipeline._respond` and emit nothing**, so no bus-derived
+> design can observe them. The phrase is **defined nowhere**, the Blueprint's own non-goals omit
+> runtime changes, the frozen boundary F1–F17 does **not** freeze `platform/runtime/**`, and
+> Blueprint §12 assigns the taps to Epic 10 — so §1.12 is interpreted as excluding **Epic 11
+> vendor/runtime rework**, not the minimal **additive, optional, notify-only** observer the runtime
+> already carries six of. It also records something a later reader would otherwise rediscover as a
+> bug: the pipeline is **segment-driven**, so `stt_final` precedes `endpoint_decided` — the inverse
+> of Constitution v2's budget ordering — and derived durations therefore follow the **real** order so
+> that **no negative duration is ever emitted**, with v2's ordering kept as target semantics for
+> Epic 11 and the raw instants preserved so M10.11 can re-derive. The tap owns **one injected
+> monotonic clock** (`TurnTiming` is wall-clock and is left untouched, as is `TurnEngine`), captures
+> cheaply on the hot path, and publishes **exactly once per terminal turn** — never per boundary,
+> because `InProcessEventBus.publish()` is synchronous run-to-completion and would run every
+> subscriber, and potentially a durable write, inside the ≤1.0 s voice-to-voice budget (Blueprint
+> risk R-9). An unreached boundary is an **absent key, never `0`**; per-turn state is bounded by
+> in-flight turns; observation is best-effort with explicitly logged failure isolation (DL-0013),
+> while the FSM stays strict. `EventSource.OBSERVABILITY` is added additively. **No migration,
+> schema, buffer, retention, scheduler, thread or new `EventType`** — the metric buffer is M10.10 and
+> shadow validation is M10.11.

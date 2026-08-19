@@ -221,6 +221,12 @@ class EventSource(StrEnum):
     AGENT = "agent"
     MODEL = "model"
     METERING = "metering"
+    # runtime telemetry (M10.9, ADR-0038 TP4) — additive vocabulary extension (no existing
+    #   member changed; AR-32). `platform/observability/` is the sole producer of runtime
+    #   `metric.*` (ADR-0033 MS8), so it names itself rather than borrowing `PIPELINE` or
+    #   `RUNTIME`: an event names the component that produced it, and `MetricSignal.producer`
+    #   carries that downstream at M10.10.
+    OBSERVABILITY = "observability"
 
 
 @dataclass(frozen=True, slots=True)

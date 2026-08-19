@@ -39,6 +39,13 @@
     mid-call control (**Epic 12**); distributed broker, external transports, WS/SSE gateway
     expansion (deferred with DL-0017).
 
+    > **Clarified at M10.9 by [ADR-0038](../adr/ADR-0038-runtime-latency-taps-and-the-metric-turn-producer.md)
+    > TP1 (owner ruling, 2026-08-19).** *"Conversation Runtime changes"* excludes **substantive
+    > Conversation Runtime / provider / vendor-integration rework**, which Epic 11 owns. It does
+    > **not** prohibit the minimal **additive, optional, notify-only** latency observation seam that
+    > ratified **AR-42** requires — the seam `RuntimePipeline` already carries six of. Nothing else
+    > in this exclusion changes.
+
 ## 2. Milestone allocation — recorded honestly
 
 The executed sequence diverged from the M10.0 breakdown, and this plan records the divergence rather
