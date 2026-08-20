@@ -355,6 +355,27 @@ bus and decodes `metric.*` into `MetricSignal`; **Billing pulls** via `drain`/`r
 subscribes, never opens a connection, never holds a runtime resource. ADR-0023 and ADR-0031 are
 preserved, not amended. An unwired port ingests nothing — no usage is invented.
 
+> **Precedence ruled at M10.10 by [ADR-0039](../adr/ADR-0039-metric-stream-buffer-and-api-billing-edge.md)
+> MB1 (owner ruling, 2026-08-19).** *"Subscribes to the bus"* above conflicts with
+> [ADR-0035](../adr/ADR-0035-durable-write-interposition-on-the-event-bus.md) **DW11**, which calls the
+> platform metric buffer *"an outbox destination under DW5, not an in-process subscriber"*, while
+> **DW5** excludes in-process synchronous subscribers from outbox destinations. **M10.10 uses
+> in-process `EventBus` subscription**, as this section and [ADR-0033](../adr/ADR-0033-metric-stream-seam.md)
+> **MS3** state. **ADR-0035 is not amended, not superseded and not reinterpreted**, and DW11 remains in
+> force for every other purpose; the ruling is scoped strictly to M10.10's delivery mechanism. Nothing
+> else in this section changes.
+
+> **Implementation gated at M10.10 by [ADR-0039](../adr/ADR-0039-metric-stream-buffer-and-api-billing-edge.md)
+> Amendment 1, MB14/MB16 (owner ruling B-1, 2026-08-19).** `MetricSignal.source` is the Billing-owned
+> `MeterSource`, which has **no `observability` member**, while `EventSource.OBSERVABILITY` has existed
+> since M10.9. `RUNTIME_SESSION` and `CONTROL_PLANE_API` are **rejected** — `CommercialMeter.accepts()`
+> matches on source plus an allow-list that is *"empty ⇒ any type from the authoritative source"*, so
+> either would let `metric.turn` be **silently folded into an unrelated commercial meter**. The decoder
+> therefore requires `MeterSource.OBSERVABILITY`, an **additive change to frozen `billing/**`** that
+> needs its **own explicit authorization**. **M10.10 implementation is blocked until that vocabulary
+> authorization is issued and completed**, after which implementation still requires its own
+> authorization. Nothing else in this section changes.
+
 ### M10.11 — Shadow validation
 
 For a closed period: re-derive usage from the durable log via `replay(...)`, obtain the metered

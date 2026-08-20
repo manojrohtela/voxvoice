@@ -37,9 +37,27 @@ from tests.freeze.manifest import build_manifest, manifest_digest
 #: `docs/roadmap/epic9-implementation-plan.md`: *"Commit, tag, baseline **v4.0.0** recommendation"*.
 RELEASE_TAG = "v4.0.0"
 
-#: The digests M9.24 and M9.25 closed with. The release must preserve both exactly.
-CERTIFICATION_DIGEST = "39790b95d061a7631e6d1b61dab14b227f02038873ee87b5c6a34658bb01d2d8"
-FREEZE_MANIFEST_DIGEST = "eed692224f0aeb82c1a64e8edb39b3b553a709c67cf5d37ae50090bcb466b65c"
+#: The commit `v4.0.0` names. Pinned at **DL-0139's resolution** (owner ruling, 2026-08-20) so the
+#: two assertions below state the invariant they always meant: *"the tag points at **its** release
+#: commit, and **that** commit contains no unrelated work."* Both previously compared against
+#: `HEAD`, which is the same thing only while HEAD *is* the release commit — so both broke at the
+#: first post-release commit (`8b27a1a`, M10.1) and could never pass again by construction. Written
+#: as a literal, never derived from `HEAD` or from the tag: a value read from the thing under test
+#: cannot detect that thing moving.
+RELEASE_COMMIT = "532b0bd72d55921fa385a3e4162d899c90fbe6ad"
+
+#: The certification and freeze-manifest digests the release must preserve exactly.
+#:
+#: **Re-baselined at M10.10** (owner ruling, 2026-08-20) from M9.24/M9.25's
+#: `39790b95d061a7631e6d1b61dab14b227f02038873ee87b5c6a34658bb01d2d8` and
+#: `eed692224f0aeb82c1a64e8edb39b3b553a709c67cf5d37ae50090bcb466b65c`, which are quoted here as
+#: history and never recomputed. PL-2's control definition legitimately changed — it gained the
+#: narrow, structural `api/metering/** → billing.foundation` exception that ADR-0031 IR6 and its
+#: topology always contemplated — and the manifest embeds the certification results, so both
+#: digests move together. Neither digest generation nor manifest semantics changed, and no
+#: verification was weakened: the verdict, the advisory set and every other control are identical.
+CERTIFICATION_DIGEST = "c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6"
+FREEZE_MANIFEST_DIGEST = "cdafb4ab6cba00bcaed0c9b6a3ae477253ce66e492b5b743c9835072704d1fb7"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -69,9 +87,12 @@ def test_the_release_tag_is_annotated():
 
 
 def test_the_release_tag_points_at_the_release_commit():
+    """**Retargeted at DL-0139's resolution** (owner ruling, 2026-08-20) from `HEAD` to
+    `RELEASE_COMMIT`. Nothing is weakened: the assertion still fails if the tag is moved to any
+    other commit — which is the release identity it exists to protect — and it now also holds
+    while development continues past the release."""
     tagged = _git("rev-list", "-n", "1", RELEASE_TAG)
-    head = _git("rev-parse", "HEAD")
-    assert tagged == head, f"{RELEASE_TAG} -> {tagged[:8]}, HEAD -> {head[:8]}"
+    assert tagged == RELEASE_COMMIT, f"{RELEASE_TAG} -> {tagged[:8]}, expected {RELEASE_COMMIT[:8]}"
 
 
 def test_no_second_epic9_tag_was_invented(tags):
@@ -114,11 +135,20 @@ def test_the_release_commit_contains_the_whole_frozen_epic():
 
 
 def test_the_release_contains_no_unrelated_work():
-    """§3: unrelated user work must never enter v4.0.0."""
+    """§3: unrelated user work must never enter v4.0.0.
+
+    **Retargeted at DL-0139's resolution** (owner ruling, 2026-08-20) from `HEAD` to
+    `RELEASE_COMMIT`. The allow-list is untouched and no path is exempted; what changed is *which
+    commit* is inspected. Reading `HEAD` asked whether the newest development commit looked like an
+    Epic 9 release — a question with no true answer after `8b27a1a` — while the invariant §3
+    actually states is about the release commit, which is immutable and still satisfies it.
+    """
     # `--name-only`, not `--stat`: git *truncates* long paths in a stat summary
     # (`.../customer/routers/consolidation_engine.py`), so a keyword filter over stat output
     # silently fails to see the very paths it is meant to classify.
-    paths = [p for p in _git("show", "--name-only", "--format=", "HEAD").splitlines() if p]
+    paths = [
+        p for p in _git("show", "--name-only", "--format=", RELEASE_COMMIT).splitlines() if p
+    ]
     unrelated = [
         p
         for p in paths

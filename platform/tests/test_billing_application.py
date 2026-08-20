@@ -1206,9 +1206,41 @@ def test_the_foundation_never_imports_the_application():
 
 
 def test_no_frozen_epic_imports_billing():
+    """**IR4**, as interpreted at M10.10 (owner ruling, 2026-08-20). ADR-0031 is unchanged.
+
+    The companion of `test_ir4_no_frozen_epic_imports_billing`, and it reuses the *same* rule from
+    the certification runner so the control and both test guards cannot drift. One pair is
+    permitted — `api/metering/** → billing.foundation` — and nothing else; `api` itself remains a
+    forbidden plane.
+    """
+    from tests.certification.runner import (
+        FORBIDDEN_PLANES,
+        PERMITTED_BILLING_EDGES,
+        _imported_dotted,
+        _permitted_billing_edge,
+    )
+    from tests.certification.runner import REPO_ROOT as CERT_ROOT
+
+    assert "api" in FORBIDDEN_PLANES  # the plane is not exempt; one edge inside it is
+    assert PERMITTED_BILLING_EDGES == (("api/metering/", "billing.foundation"),)
+    assert not _permitted_billing_edge(
+        CERT_ROOT / "api" / "metering" / "metric_buffer.py", {"billing.application"}
+    )
+    assert not _permitted_billing_edge(CERT_ROOT / "runtime" / "worker.py", {"billing.foundation"})
+
     for plane in ("core", "runtime", "product", "actuator", "api", "events", "gateway"):
-        if pathlib.Path(plane).is_dir():
-            assert "billing" not in _imported_tops(plane), f"{plane} imports billing"
+        root = CERT_ROOT / plane
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            imports = {
+                n for n in _imported_dotted(path.read_text()) if n.split(".")[0] == "billing"
+            }
+            assert not imports or _permitted_billing_edge(path, imports), (
+                f"{path.relative_to(CERT_ROOT)} imports billing outside the authorized edge"
+            )
 
 
 def test_the_application_duplicates_no_foundation_rule():

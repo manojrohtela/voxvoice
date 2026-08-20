@@ -51,9 +51,18 @@ RELEASE_INPUTS = dict(
     commit_state="uncommitted",
 )
 
-#: The certification digest M9.24 closed with. Pinned here so a drifting tree fails the freeze
-#: rather than quietly re-certifying to a different value.
-CERTIFIED_DIGEST = "39790b95d061a7631e6d1b61dab14b227f02038873ee87b5c6a34658bb01d2d8"
+#: The certification digest. Pinned here so a drifting tree fails the freeze rather than quietly
+#: re-certifying to a different value.
+#:
+#: **Re-baselined at M10.10** (owner ruling, 2026-08-20) from M9.24's
+#: `39790b95d061a7631e6d1b61dab14b227f02038873ee87b5c6a34658bb01d2d8`. The **control definition**
+#: legitimately changed: PL-2 gained the narrow, structural `api/metering/** → billing.foundation`
+#: exception that ADR-0031 IR6 and its topology always contemplated, so the report it produces is
+#: a different — and correct — document. Nothing was weakened to reach this value: the verdict is
+#: still `certified_with_advisories`, `NS-5` and `ST-3` are still the only non-passing controls,
+#: and every other control's result is byte-identical. The old digest is quoted above as history,
+#: never recomputed.
+CERTIFIED_DIGEST = "c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6"
 
 
 @pytest.fixture(scope="module")

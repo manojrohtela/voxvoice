@@ -48,6 +48,23 @@ BILLING_ROOT = REPO_ROOT / "billing"
 #: Planes Billing may never import (ADR-0031 IR1/IR3). `core` is the one shared downward dependency.
 FORBIDDEN_PLANES = ("runtime", "actuator", "api", "product", "bootstrap", "providers")
 
+#: The **only** authorized inbound edge into Billing from a sibling plane (owner ruling,
+#: 2026-08-20; ADR-0039 MB11/MB12, M10.10).
+#:
+#: ADR-0031 states both **IR4** (*"no frozen-Epic package may import `billing`"*) and **IR6**
+#: (*"`api/foundation` imports `billing` only"*), and its topology marks five `api/` sub-packages
+#: `← + billing … (additive, Epic 9)` with *"Billing is wired HERE"* on `api/bootstrap.py`. IR4
+#: is therefore about forbidden cross-plane/product dependencies, not about the additive
+#: `api → billing` direction ADR-0031 itself contemplated — which stayed invisible only because
+#: the Epic 9 api-side wiring was never built, so this scan had nothing to find until M10.10
+#: built it.
+#:
+#: Expressed as **(importer path prefix, importable Billing sub-package)** pairs rather than as a
+#: plane exemption. Both halves are load-bearing: dropping `api` from `FORBIDDEN_PLANES` would
+#: permit *any* `api → billing` import, and omitting the sub-package would let the metering seam
+#: reach Billing's application or persistence layers. Neither is authorized.
+PERMITTED_BILLING_EDGES = (("api/metering/", "billing.foundation"),)
+
 #: Vendor SDK roots that may appear only behind an adapter boundary (ADR-0031 PS2).
 VENDOR_ROOTS = ("stripe", "razorpay", "paddle", "braintree", "adyen", "avalara", "taxjar", "boto3")
 
@@ -117,6 +134,39 @@ def _billing_model_modules():
             # shrink coverage silently and still report SATISFIED.
             out.append(importlib.import_module(f"billing.persistence.{info.name}"))
     return out
+
+
+def _imported_dotted(source: str) -> set[str]:
+    """Fully dotted imported module names.
+
+    `_imported_modules` deliberately truncates to the top-level package, which is the right
+    granularity for *forbidding* a plane. `PERMITTED_BILLING_EDGES` has to tell
+    `billing.foundation` from `billing.application`, so it needs the whole name."""
+    out: set[str] = set()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.add(node.module)
+    return out
+
+
+def _permitted_billing_edge(path: Path, billing_imports: set[str]) -> str:
+    """The authorizing rule if every Billing import of `path` is permitted, else `""`.
+
+    *Every* one: a module reaching `billing.foundation` **and** `billing.application` is not
+    partially authorized, it is a violation."""
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    for prefix, allowed in PERMITTED_BILLING_EDGES:
+        if not relative.startswith(prefix):
+            continue
+        if all(n == allowed or n.startswith(f"{allowed}.") for n in billing_imports):
+            return f"{prefix}** → {allowed}"
+    return ""
 
 
 def _imported_modules(source: str) -> set[str]:
@@ -361,8 +411,14 @@ def _pl_1(e: CertificationEvidence) -> ControlResult:
 
 
 def _pl_2(e: CertificationEvidence) -> ControlResult:
-    """No package outside Billing imports Billing."""
+    """No package outside Billing imports Billing, except the one authorized edge.
+
+    The exception is **structural** — a `PERMITTED_BILLING_EDGES` pair matched on the importing
+    path *and* the imported Billing sub-package — never a filename trick or a test exclusion. The
+    result names every edge it allowed, so the permission is visible in the certification report
+    rather than buried in this runner."""
     bad = []
+    permitted = []
     checked = 0
     for plane in FORBIDDEN_PLANES:
         root = REPO_ROOT / plane
@@ -370,8 +426,16 @@ def _pl_2(e: CertificationEvidence) -> ControlResult:
             continue
         for path in _py_files(root):
             checked += 1
-            if "billing" in _imported_modules(path.read_text()):
-                bad.append(str(path.relative_to(REPO_ROOT)))
+            source = path.read_text()
+            if "billing" not in _imported_modules(source):
+                continue
+            relative = str(path.relative_to(REPO_ROOT))
+            imports = {n for n in _imported_dotted(source) if n.split(".")[0] == "billing"}
+            rule = _permitted_billing_edge(path, imports)
+            if rule:
+                permitted.append(f"{relative} ({rule})")
+            else:
+                bad.append(relative)
     if not checked:
         return ControlResult(
             "PL-2",
@@ -380,7 +444,10 @@ def _pl_2(e: CertificationEvidence) -> ControlResult:
             (),
             0,
         )
-    return _bad("PL-2", bad, checked)
+    # Stated in the report, not only in the code: a reader of the certification must be able to
+    # see *which* edge was allowed and under what rule without reading this module.
+    detail = "authorized edge(s): " + "; ".join(sorted(permitted)) if permitted else ""
+    return _bad("PL-2", bad, checked, detail)
 
 
 #: The one Foundation module permitted to name a clock: it *defines* the seam every other module

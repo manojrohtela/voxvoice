@@ -13,6 +13,7 @@ their strings). AR-32's *"never by silent mutation"* is what these tests make ex
 
 from __future__ import annotations
 
+import ast
 import pathlib
 
 from core.events import EventSource, EventType
@@ -177,10 +178,66 @@ def test_observability_ships_only_the_turn_latency_producer():
         assert not (pathlib.Path("observability") / future).exists()
 
 
+def _production_modules() -> list[pathlib.Path]:
+    return [
+        path
+        for path in pathlib.Path(".").glob("*/**/*.py")
+        if path.parts[0] not in {"tests", ".venv"} and "__pycache__" not in path.parts
+    ]
+
+
+def _publishes_metric_turn(source: str) -> bool:
+    """Whether this module *publishes* `metric.turn` — a `publish`/`emit` call naming it.
+
+    An AST call check, not a substring scan. Consuming an event necessarily names its type (a
+    subscription filter is the whole point), so presence of the symbol says nothing about who
+    produces it; the call is what AR-2 is actually about.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if called not in {"publish", "emit"}:
+            continue
+        arguments = [*node.args, *(kw.value for kw in node.keywords)]
+        if any("METRIC_TURN" in ast.dump(argument) for argument in arguments):
+            return True
+    return False
+
+
 def test_only_observability_emits_metric_turn():
-    """AR-2 — one producer per event type."""
-    emitters = {p for p in pathlib.Path(".").glob("*/**/*.py")
-                if p.parts[0] not in {"tests", ".venv"} and "__pycache__" not in p.parts
-                and "METRIC_TURN" in p.read_text()}
-    assert emitters == {pathlib.Path("core/events.py"),
-                        pathlib.Path("observability/turn_latency.py")}
+    """**AR-2 — one producer per event type**, tested as *emission* rather than as mention.
+
+    Rewritten at M10.10 (owner ruling, 2026-08-20). The original assertion pinned the set of files
+    whose text contained `METRIC_TURN`, which was exactly right while nothing consumed the event —
+    at M10.8a/M10.9 the only modules that could name it were the enum and its producer. M10.10
+    ships the first consumer (`api/metering/metric_buffer.py` subscribes through
+    `EventType.METRIC_TURN`), and a subscription is not a production. The invariant is unchanged
+    and, if anything, sharpened: **exactly one production module publishes `metric.turn`**, and it
+    is still the observability tap. `core/events.py` drops out because defining the vocabulary was
+    never emitting it.
+    """
+    emitters = {path for path in _production_modules() if _publishes_metric_turn(path.read_text())}
+    assert emitters == {pathlib.Path("observability/turn_latency.py")}, emitters
+
+
+def test_a_second_publisher_of_metric_turn_would_fail_the_guard():
+    """The guard has teeth: a module that publishes `metric.turn` is detected, wherever it lives.
+
+    Without this, an emission check that silently matched nothing would look identical to a
+    correctly-enforced invariant."""
+    assert _publishes_metric_turn("publisher.publish(EventType.METRIC_TURN, {})")
+    assert _publishes_metric_turn("self._bus.emit(type=EventType.METRIC_TURN)")
+
+
+def test_consuming_metric_turn_is_not_emitting_it():
+    """M10.10's buffer names the type to *subscribe* to it, and publishes nothing (ADR-0039 MB4)."""
+    consumer = pathlib.Path("api/metering/metric_buffer.py")
+    source = consumer.read_text()
+    assert "METRIC_TURN" in source
+    assert not _publishes_metric_turn(source)

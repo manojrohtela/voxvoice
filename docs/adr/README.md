@@ -63,6 +63,7 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 | [ADR-0036](ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md) | Outbox retry ladder, dead-letter and quarantine — **completes ADR-0032 ED7/ED8 and continues ADR-0035 DW5/DW6; supersedes nothing**. A five-state lifecycle declared with `core.fsm` (`PENDING`/`RETRYING`/`DELIVERED`/`DEAD_LETTERED`/`QUARANTINED`, the last three **terminal**); a **pure, I/O-free** `OutboxLadder` that decides but never sleeps, loops, polls, schedules or dispatches; `DeliveryOutcome` reaching it through an **injected classifier** (no transport taxonomy in `events/`); `core.policies.RetryPolicy` reused with delivery values (5 attempts, 30s ×2 capped 1h, **no jitter**); append-only **`evt_outbox_failure`** as authoritative error evidence; transition + history in **one transaction**; migration `0036`. **Resolves the M10.7/M10.8 boundary**: recovery, restart re-dispatch and the driver are **M10.8** | Epic 10 M10.7 (retry ladder + DLQ + quarantine) | Accepted 2026-08-19 |
 | [ADR-0037](ADR-0037-outbox-recovery-driver-and-restart-re-dispatch.md) | Outbox recovery and restart re-dispatch — **completes ADR-0035 DW7 and ADR-0036 RL1; supersedes nothing**. A **caller-driven, deterministic** `recover(now, limit)` sweep on the `context`/`memory` `expire()` precedent — **no scheduler, worker, thread, timer or loop**; one sweep over `PENDING` + due `RETRYING`, ordered `(seq, event_id)`, terminal states never selected, **zero new FSM transitions**; `begin_attempt` before delivery; `DeliveryTransport` stays a **pure port with no production implementation**; concurrency an **accepted non-claim** (no claim/lease/lock/dedup); **no migration and no schema change**; `MetricStreamPort.replay()` stays **M10.10** | Epic 10 M10.8 (recovery + restart re-dispatch) | Accepted 2026-08-19 |
 | [ADR-0038](ADR-0038-runtime-latency-taps-and-the-metric-turn-producer.md) | Runtime latency taps and the `metric.turn` producer — **completes ADR-0033 MS8; supersedes nothing**. Makes **AR-42** satisfiable: plan §1.12 excludes Epic 11 rework, not the minimal **additive, optional, notify-only** seam on `RuntimePipeline`. Six enumerated boundaries; `playback_start` + terminal outcome are lifecycle markers; the pipeline is **segment-driven** so derived durations follow the real order and **never go negative**; one **injected monotonic** clock owned by the tap; **one emission per terminal turn** (publish is synchronous run-to-completion); absent boundary ≠ 0; bounded per-turn state; logged failure isolation; adds `EventSource.OBSERVABILITY`; no migration, buffer, retention or new `EventType` | Epic 10 M10.9 (observability build-out + `metric.turn`) | Accepted 2026-08-19 |
+| [ADR-0039](ADR-0039-metric-stream-buffer-and-api-billing-edge.md) | The platform metric-stream buffer and the first `api → billing` edge — **completes ADR-0033 MS3–MS7; supersedes nothing**. Resolves the M10.10 conflict between **MS3**/plan §M10.10 (*"subscribes to the bus"*) and **DW11** (*"an outbox destination under DW5, not an in-process subscriber"*): **owner precedence ruling — in-process `EventBus` subscription**, scoped strictly to M10.10's delivery mechanism; **ADR-0035 is not amended, not superseded, not reinterpreted**, and DW11 stays in force for every other purpose. The outbox path is not executable here — RC9 defers a concrete `DeliveryTransport`, DW10/RL17/RC16 keep durable runtime wiring unwired — and an in-process synchronous subscriber sits correctly **outside** DW5. One process-wide **bounded** in-memory buffer (fixed **10 000** in a named constant, no configuration surface, **drop-oldest** + counter, rate-limited `WARNING`, **no persistence/migration/flush/shutdown hook — lost on process exit**); **enforceable hot-path budget** (bounded O(1), no I/O, blocking, reentrant `publish()`, thread or hot-path lock, on a `deque(maxlen=…)` equivalent); **destructive** org-keyed insertion-ordered `drain`, **best-effort non-destructive `replay` with no historical guarantee**, no cursor model; `Event.seq` as **provenance only** (per-bus, per-session, no global ordering, no second sequence authority); three distinct counters for malformed / missing `voice_to_voice_ms` / empty `org_id`, each producing **no signal** rather than invented usage (CV10, DL-0013); first **`api → billing`** edge, acyclic under AR-15, Billing untouched and `NullMetricStream` still its default. **Architecture only — does not authorize implementation**. **Amendment 1 (2026-08-19, additive; MB1–MB13 unchanged, not superseded)** fixes the decoder mapping (`producer = "observability.turn_latency"`, `payload_digest = SHA-256` over canonical sorted-key/compact/UTF-8 JSON of **`Event.data` only**, `sequence = event.seq`, `observed_at = event.ts`, `raw_unit = "ms"`) and records a **frozen-boundary blocker**: `MeterSource` has **no `observability` member**, and `RUNTIME_SESSION`/`CONTROL_PLANE_API` would let `accepts()`'s empty allow-list **silently fold turn latency into an unrelated commercial meter** — so `MeterSource.OBSERVABILITY` needs a **separate additive Billing vocabulary authorization**, ungranted, and **implementation stays blocked behind it** | Epic 10 M10.10 (metric-stream seam) | Accepted 2026-08-19 |
 
 > **Terminology note (ADR-0019 → ADR-0020).** ADR-0019 was written using the name
 > `RegistrySnapshot` (and `RegistryEntry`) for the compiler's injected, immutable
@@ -206,3 +207,43 @@ authority hierarchy. Process: [`.voxvoice/DOCUMENTATION_RULES.md`](../../.voxvoi
 > while the FSM stays strict. `EventSource.OBSERVABILITY` is added additively. **No migration,
 > schema, buffer, retention, scheduler, thread or new `EventType`** — the metric buffer is M10.10 and
 > shadow validation is M10.11.
+
+> **Epic 10 continuation (M10.10).** **ADR-0039** is ratified before any M10.10 implementation — and,
+> unusually, **ratifies architecture only: it does not authorize implementation**, which requires a
+> separate explicit authorization. It **completes ADR-0033 MS3–MS7 and supersedes nothing** —
+> ADR-0023, ADR-0031, ADR-0032, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0037 and ADR-0038 stay
+> immutable, and MS1–MS10, ED1–ED12, DW1–DW11, RL1–RL17, RC1–RC16, TP1–TP11, AR-2, AR-15, AR-31,
+> AR-32, AR-42 and DL-0013 continue to bind. Its load-bearing ruling resolves a **direct conflict
+> between two ratified ADRs** that the M10.10 gate surfaced: **ADR-0033 MS3** and plan §M10.10 say the
+> platform buffer *"subscribes to the `EventBus`"*, while **ADR-0035 DW11** says it is *"an outbox
+> destination under DW5, not an in-process subscriber"* — and **DW5** excludes in-process synchronous
+> subscribers from outbox destinations, so the two are mutually exclusive. The owner ruled for
+> **in-process `EventBus` subscription**, scoped **strictly** to M10.10's delivery mechanism: ADR-0033
+> owns this seam, ADR-0035 disclaims MS-level authority in its own text, and the outbox path is not
+> executable inside M10.10 because **RC9** defers a concrete `DeliveryTransport` and **DW10/RL17/RC16**
+> keep durable runtime wiring explicitly unwired — choosing it would pull transport and runtime wiring
+> into the milestone. **ADR-0035 is not amended, not superseded and not reinterpreted generally**, and
+> DW11 remains in force for every other purpose; as an in-process synchronous subscriber the buffer
+> sits correctly **outside** DW5's category rather than against it. The ADR then settles six properties
+> no ratified document specified: **boundedness** (one process-wide in-memory buffer, fixed capacity
+> **10 000** in a single named constant with **no configuration surface**, **drop-oldest** with a
+> counter and rate-limited `WARNING`, and **no persistence, migration, flush or shutdown hook — the
+> contents are lost on process exit**, stated plainly because MS5 makes a Billing outage an expected
+> steady state and an unbounded buffer would therefore be a guaranteed OOM); an **enforceable hot-path
+> budget** (bounded O(1) in-memory work only — no I/O, blocking, sleeping, provider call, reentrant
+> `publish()`, thread/task/timer or hot-path lock — on a `deque(maxlen=…)` equivalent so bus-side
+> append and API-side drain need no mutual exclusion, because `publish()` is synchronous
+> run-to-completion **inside the conversation coroutine** and dispatcher isolation protects correctness
+> but never latency); **destructive**, org-keyed, insertion-ordered `drain` with **no cursor model**,
+> and a **non-destructive, best-effort `replay` that guarantees nothing historical** and can never
+> recover what overflow or process exit removed; `Event.seq` carried as **provenance only** — per-bus,
+> per-session, **no global ordering claim**, no second sequence authority (ED3); and three **distinct**
+> counters for malformed envelopes, a missing `voice_to_voice_ms` and an empty `org_id`, each of which
+> produces **no `MetricSignal` at all** rather than a fabricated `0`, a substituted scalar, a
+> `scope=None` or synthesized attribution — **CV10**: ingest nothing rather than invent usage, with
+> DL-0013's graceful, logged degradation and **no second quarantine mechanism**. It records the first
+> **`api → billing`** edge in the repository, acyclic under AR-15, with Billing still never
+> subscribing, never holding a runtime resource, `MetricStreamPort` still the single inbound path, and
+> `NullMetricStream` still the default so an unwired port ingests nothing. **`billing/**` and every
+> pre-existing `api/**` file are untouched; no migration, schema, transport, scheduler, thread, worker,
+> persistence, configuration or `EventType`/`EventSource` change** — shadow validation stays M10.11.

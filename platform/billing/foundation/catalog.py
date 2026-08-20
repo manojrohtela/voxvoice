@@ -40,6 +40,14 @@ class MeterSource(StrEnum):
     WORKFLOW = "workflow"
     DEPLOYMENT = "deployment"
     CONTROL_PLANE_API = "control_plane.api"
+    # runtime observability (producer: `platform/observability/turn_latency.py` — M10.10,
+    # ADR-0039 Amendment 1 MB14) — additive vocabulary extension under AR-32; no existing
+    # member's name or value changes. Named separately rather than folded into
+    # RUNTIME_SESSION because `CommercialMeter.accepts()` matches on source **plus** an
+    # allow-list that is empty ⇒ "any type from the authoritative source": reusing an
+    # existing member would let `metric.turn` be silently counted by an unrelated meter.
+    #   DEFINED here; the decoder that stamps it is a separately authorized step.
+    OBSERVABILITY = "observability"
 
 
 class FeatureKind(StrEnum):

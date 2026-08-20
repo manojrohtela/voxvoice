@@ -1292,7 +1292,62 @@ def test_ir3_billing_imports_no_other_plane():
     assert not leaked, f"billing imports forbidden plane(s): {sorted(leaked)}"
 
 
+def _forbidden_billing_importers(plane: str) -> list[str]:
+    """Files in `plane` that import `billing` outside the one authorized edge.
+
+    **Rewritten at M10.10** (owner ruling, 2026-08-20). The rule is *imported* from the
+    certification runner rather than restated here, so the IR4 test guard and the PL-2 control
+    cannot drift apart — one policy, two enforcement points.
+    """
+    from tests.certification.runner import REPO_ROOT as CERT_ROOT
+    from tests.certification.runner import _imported_dotted, _permitted_billing_edge
+
+    root = CERT_ROOT / plane
+    if not root.is_dir():
+        return []
+    bad = []
+    for path in sorted(root.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        imports = {
+            name for name in _imported_dotted(path.read_text()) if name.split(".")[0] == "billing"
+        }
+        if imports and not _permitted_billing_edge(path, imports):
+            bad.append(str(path.relative_to(CERT_ROOT)))
+    return bad
+
+
 def test_ir4_no_frozen_epic_imports_billing():
+    """**IR4**, as interpreted at M10.10 (owner ruling, 2026-08-20). ADR-0031 is unchanged.
+
+    ADR-0031 states IR4 (*"no frozen-Epic package may import `billing`"*) **and** IR6
+    (*"`api/foundation` imports `billing` only"*), and its topology marks five `api/` sub-packages
+    `← + billing … (additive, Epic 9)`. IR4 governs forbidden cross-plane/product dependencies; it
+    was never meant to forbid the additive `api → billing` direction the same ADR contemplated —
+    which stayed invisible only because the Epic 9 api-side wiring was never built, so this scan
+    had nothing to find until M10.10 built it.
+
+    The exception is **one pair**, not a plane exemption: `api/metering/** → billing.foundation`.
+    Every other combination below is still a violation, which is what keeps this from decaying
+    into *"api may import billing"*.
+    """
+    from tests.certification.runner import PERMITTED_BILLING_EDGES, _permitted_billing_edge
+    from tests.certification.runner import REPO_ROOT as CERT_ROOT
+
+    assert PERMITTED_BILLING_EDGES == (("api/metering/", "billing.foundation"),)
+
+    metering = CERT_ROOT / "api" / "metering" / "metric_buffer.py"
+    assert _permitted_billing_edge(metering, {"billing.foundation.catalog"})
+    for forbidden in (
+        {"billing.application.metering_engine"},
+        {"billing.persistence.models"},
+        {"billing"},
+        {"billing.foundation.domain", "billing.persistence.models"},  # mixed ⇒ forbidden
+    ):
+        assert not _permitted_billing_edge(metering, forbidden), forbidden
+    for elsewhere in ("api/routers/sessions.py", "api/foundation/services.py", "api/main.py"):
+        assert not _permitted_billing_edge(CERT_ROOT / elsewhere, {"billing.foundation"}), elsewhere
+
     for plane in (
         "core",
         "runtime",
@@ -1308,10 +1363,9 @@ def test_ir4_no_frozen_epic_imports_billing():
         "workflow",
         "knowledge",
     ):
-        if not pathlib.Path(plane).is_dir():
-            continue
-        assert "billing" not in _imported_tops(plane), (
-            f"{plane} imports billing — freeze is one-way"
+        offenders = _forbidden_billing_importers(plane)
+        assert offenders == [], (
+            f"{plane} imports billing outside the authorized edge — freeze is one-way: {offenders}"
         )
 
 

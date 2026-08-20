@@ -15,8 +15,8 @@ Runtime Platform v1.0 (Epic 5, frozen).
 > makes the freeze durable rather than a description of a working directory. §12 now records the
 > released state.
 
-**Manifest digest:** `eed692224f0aeb82c1a64e8edb39b3b553a709c67cf5d37ae50090bcb466b65c`
-**Certification digest:** `39790b95d061a7631e6d1b61dab14b227f02038873ee87b5c6a34658bb01d2d8`
+**Manifest digest:** `cdafb4ab6cba00bcaed0c9b6a3ae477253ce66e492b5b743c9835072704d1fb7`
+**Certification digest:** `c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6`
 
 ---
 
@@ -105,10 +105,10 @@ Anything not expressible additively requires an ADR.
 ## 9. Certification & Freeze Verdicts
 
 **Certification (M9.24): `CERTIFIED_WITH_ADVISORIES`** — catalogue `m9.24.1`, digest
-`39790b95d061a763…`, 27 controls, 24 blocking all `SATISFIED`, 0 blocking violations, 0
+`c044b3f6a23066df…`, 27 controls, 24 blocking all `SATISFIED`, 0 blocking violations, 0
 inconclusive.
 
-**Freeze (M9.25): `FREEZE_WITH_ADVISORIES`** — manifest digest `eed692224f0aeb82…`, eleven of twelve
+**Freeze (M9.25): `FREEZE_WITH_ADVISORIES`** — manifest digest `cdafb4ab6cba00bc…`, eleven of twelve
 freeze invariants satisfied at freeze time; FZ-12 was the exception and is discharged by this
 release.
 
