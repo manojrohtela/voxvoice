@@ -189,7 +189,7 @@ brought backward from M10.5 or later under this milestone.
 > M10.1, names which milestones the ADR's rules govern rather than assigning content, and is **not
 > corrected** — accepted ADRs are immutable (DOCUMENTATION_RULES §3.4).
 
-### M10.5 — Retention · **DEFERRED / RE-SEQUENCED** (not cancelled)
+### M10.5 — Retention ✅ complete (originally **DEFERRED / RE-SEQUENCED**, not cancelled)
 
 **Approved semantics — unchanged and not weakened.** Retention over the durable log, per ADR-0032
 **ED9** and ADR-0034 **DS12/DS13**: explicit configuration with **no implicit deletion default**;
@@ -245,7 +245,7 @@ authorized, and no M10.6/M10.10 work is pulled backward to enable it.
 > architecture only and authorizes no implementation** (**RT12**); **DL-0141 remains Open** until
 > M10.5 lands (**RT13**). Nothing else in this section changes.
 
-### M10.6 — Transactional outbox / durable write-side integration
+### M10.6 — Transactional outbox / durable write-side integration ✅ complete
 
 > **Design gate closed — [ADR-0035](../adr/ADR-0035-durable-write-interposition-on-the-event-bus.md)
 > ratified 2026-08-18, before implementation.** The gate found ADR-0032 **ED6** not literally
@@ -294,7 +294,7 @@ persistence seam on `InProcessEventBus` — it requires a new ADR, ratified befo
 Also at M10.6: audit `events/webhooks.py` (best-effort, no retry today) so the outbox does not create
 a second, competing delivery mechanism; **M10.2 and M10.3 changed nothing there.**
 
-### M10.7 — Retry ladder + DLQ + quarantine
+### M10.7 — Retry ladder + DLQ + quarantine ✅ complete
 
 > **Design gate closed — [ADR-0036](../adr/ADR-0036-outbox-retry-ladder-dead-letter-and-quarantine.md)
 > ratified 2026-08-19, before implementation.** It **completes ADR-0032 ED7/ED8 and continues
@@ -323,7 +323,7 @@ DLQ and quarantine are **distinguishable persisted states** — "we tried and ga
 never succeed" require different operator responses (ADR-0032 ED7/ED8). **AR-31** must hold: a dead
 consumer never stalls a producer.
 
-### M10.8 — Durable-log re-derivation & recovery
+### M10.8 — Durable-log re-derivation & recovery ✅ complete
 
 Read a closed window back out of the durable log and re-derive from it; recovery after restart.
 Re-derivation is read-only and side-effect-free — no runtime logic executes. **Naming per OD-3:**
@@ -345,7 +345,7 @@ not implement, import or wire. The frozen `MetricStreamPort` ABC is unchanged.
 > deciding which are due for re-delivery, performing restart/recovery re-dispatch, and the recovery
 > driver/worker/scheduler that performs it. Nothing else about M10.8 is changed.
 
-### M10.8a — `metric.*` vocabulary
+### M10.8a — `metric.*` vocabulary ✅ complete
 
 Additive `metric.*` members in `core.events.EventType`, including **`metric.turn`** (`AR-42`).
 Permitted by **AR-32** without a dedicated ADR (OD-1), recorded in ADR-0033. **No existing member's
@@ -353,7 +353,7 @@ name or value may change**; `COST_UPDATED = "cost.updated"` stays untouched and 
 (OD-6). **Excludes `metric.billing.*`**, which is reserved to Billing (OD-9). Follows the Epic 6
 source-comment convention. **Must complete before M10.9** — there is nothing to emit until it does.
 
-### M10.9 — Observability build-out + `metric.turn`
+### M10.9 — Observability build-out + `metric.turn` ✅ complete
 
 Build `platform/observability/` from skeleton to a real producer within its `core` + stdlib budget:
 per-turn latency taps at every conversation-loop stage boundary feeding `metric.turn` (**AR-42**),
@@ -362,7 +362,7 @@ alter conversation behaviour, and must use an injected clock. **Sole producer of
 (`AR-2`). Not a general-purpose logging framework. The **frozen Epic 8** observability capability
 (`api/**/observability*`, `cp_alert_rule`, `v0012`) is untouched.
 
-### M10.10 — Metric-stream seam
+### M10.10 — Metric-stream seam ✅ complete
 
 Implement `MetricStreamPort` **outside `platform/billing/**`**, as **additive new modules under
 `platform/api/`** (OD-8, ADR-0031 §8 *"(additive)"*), creating the first `api → billing` edge.
@@ -392,7 +392,7 @@ preserved, not amended. An unwired port ingests nothing — no usage is invented
 > authorization is issued and completed**, after which implementation still requires its own
 > authorization. Nothing else in this section changes.
 
-### M10.11 — Shadow validation
+### M10.11 — Shadow validation ✅ complete
 
 For a closed period: re-derive usage from the durable log via `replay(...)`, obtain the metered
 usage, compare, and prove agreement. **Any divergence is an Epic 10 defect and is never resolved by
