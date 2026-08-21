@@ -382,6 +382,15 @@ For a closed period: re-derive usage from the durable log via `replay(...)`, obt
 usage, compare, and prove agreement. **Any divergence is an Epic 10 defect and is never resolved by
 modifying Billing.**
 
+> **Boundary ratified at M10.11 by [ADR-0040](../adr/ADR-0040-durable-log-historical-re-derivation-for-shadow-validation.md)
+> SV1/SV5 (owner ruling, 2026-08-20).** **SV1** — the *"durable log"* above is the **durable event
+> log** (`platform/events/persistence/**`, `evt_event`), **not** `MetricTurnBuffer`: MB5's destructive
+> `drain` and MB6's resident-only `replay` mean the buffer cannot serve a closed period, and ADR-0040
+> is the *"different mechanism, separately ratified"* MB6 required. **SV5** — M10.11 is a **hermetic**
+> validation scenario and **wires no production component** (no tap, durable sink, buffer,
+> `metric_stream` rebinding, worker, thread, timer, transport or outbox). ADR-0039 is unamended and
+> the scope stated above is otherwise unchanged.
+
 ### M10.12 — Hardening
 
 Performance (latency taps must not violate invariant I1), failure drills, operator surfaces (DLQ
