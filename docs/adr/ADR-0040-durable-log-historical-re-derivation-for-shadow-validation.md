@@ -57,8 +57,10 @@ durable sink (**DW10 / RL17 / RC16** keep it unwired); `MetricTurnBuffer` is ins
 Billing's `metric_stream` defaults to `NullMetricStream` (**CV10**). So there is no metered usage to
 obtain and no durable content to re-derive from in a running system.
 
-**4. The durable log has no windowed read.** `DurableEventLog` exposes `append`, `append_many`,
-`read_all()` and `count()` — the `read_all()` limitation accepted at M10.8.
+**4. The durable log has no windowed read.** `DurableEventLog` exposes five methods — `append`,
+`append_many`, `read_all()`, `read_session()` and `count()`. None of them is time-ranged
+(`read_session()` selects by session, not by period), so reading a closed period means filtering
+`read_all()` — the limitation accepted at M10.8.
 
 ## Decision
 
