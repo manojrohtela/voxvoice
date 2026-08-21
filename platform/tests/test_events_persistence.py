@@ -399,12 +399,78 @@ def test_the_implementation_exposes_no_update_or_delete_method():
     assert not forbidden, forbidden
 
 
-def test_no_sql_delete_or_update_statement_exists_in_persistence():
+#: The **only** module permitted a deletion statement (ADR-0032 ED9/EV4, ADR-0041 RT11).
+#: EV4 has always read *"no update or delete path exists on the durable event log **outside the
+#: retention policy**"*; until M10.5 there was no retention policy, so this guard enforced the
+#: stronger "none at all" the M10.2 docstring declared explicitly temporary. M10.5 is that
+#: sanctioned exception arriving — so the guard narrows to the ratified boundary rather than
+#: being relaxed past it.
+#:
+#: Exact paths, never a prefix or a glob: an exception that grows by adding a file is not an
+#: exception. This is the `PERMITTED_BILLING_EDGES` shape (tests/certification/runner.py), which
+#: M10.10 established for the one authorized `api/metering → billing.foundation` edge.
+PERMITTED_DELETION_MODULES = ("events/persistence/retention.py",)
+
+#: Forbidden **everywhere**, retention included. EV4 sanctions *removing* a recorded event under
+#: the retention policy; it sanctions no update path at all (**ED5**), so a retention adapter
+#: that rewrote an event would be exactly as illegal as one in the log.
+_UPDATE_TOKENS = ("session.merge", ".update(")
+
+#: Forbidden everywhere **except** the allowlisted retention adapter.
+_DELETE_TOKENS = ("session.delete", "delete(")
+
+
+def _persistence_modules():
     import pathlib
 
-    for path in pathlib.Path("events/persistence").rglob("*.py"):
+    return sorted(pathlib.Path("events/persistence").rglob("*.py"))
+
+
+def test_no_sql_delete_or_update_statement_exists_in_persistence():
+    """ADR-0032 ED5/EV4. Append-only everywhere; deletion only in the one sanctioned module."""
+    permitted_seen = 0
+    for path in _persistence_modules():
         source = path.read_text().lower()
-        for token in ("session.delete", "session.merge", ".update(", "delete("):
+        for token in _UPDATE_TOKENS:
+            assert token not in source, f"{path} contains a mutation path: {token}"
+        if path.as_posix() in PERMITTED_DELETION_MODULES:
+            permitted_seen += 1
+            continue
+        for token in _DELETE_TOKENS:
+            assert token not in source, f"{path} contains a mutation path: {token}"
+    assert permitted_seen == len(PERMITTED_DELETION_MODULES), (
+        "an allowlisted deletion module is missing from events/persistence — an exception that "
+        "names a file that does not exist silently protects nothing"
+    )
+
+
+def test_the_deletion_allowlist_names_exactly_one_module():
+    """Retention is the **sole** sanctioned exception (ADR-0041 RT11, RI11). A second entry is a
+    governance decision, not a refactor, so the count is asserted rather than assumed."""
+    assert PERMITTED_DELETION_MODULES == ("events/persistence/retention.py",)
+
+
+def test_the_permitted_deletion_module_actually_deletes():
+    """The exception must be *used*. If retention ever stops deleting, the allowlist should be
+    withdrawn rather than kept 'just in case' — the ADR-0034 DS4 rule that
+    `test_events_persistence_may_import_storage_libraries` already applies to the storage
+    exception one directory up."""
+    import pathlib
+
+    source = pathlib.Path(PERMITTED_DELETION_MODULES[0]).read_text().lower()
+    assert any(token in source for token in _DELETE_TOKENS), (
+        "the retention adapter contains no deletion statement; withdraw the EV4 exception"
+    )
+
+
+def test_every_other_persistence_module_remains_delete_free():
+    """The narrowing must not have become a blanket permission: every module that is not the
+    retention adapter is still held to the original, stricter rule."""
+    others = [p for p in _persistence_modules() if p.as_posix() not in PERMITTED_DELETION_MODULES]
+    assert others, "expected other persistence modules to exist"
+    for path in others:
+        source = path.read_text().lower()
+        for token in _DELETE_TOKENS + _UPDATE_TOKENS:
             assert token not in source, f"{path} contains a mutation path: {token}"
 
 

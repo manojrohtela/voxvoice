@@ -24,6 +24,13 @@ only), migration `0035`, and `SqlDurableEventSpine` — which implements `Durabl
 `DurableOutbox` and writes both rows in **one transaction**, so an event and the entry announcing
 it cannot disagree about whether they happened.
 
+**M10.5 (ADR-0041)** adds `SqlRetentionStore` — the **only module in the repository permitted a
+deletion statement**, and the executable form of EV4's *"outside the retention policy"* clause.
+It is named explicitly in the EV4 guard's allowlist; every other module here remains delete-free,
+and no module here (this one included) may update or merge. It needs **no migration**: the window
+scan uses the already-indexed `evt_event.recorded_at` and the drained read uses `evt_outbox.state`,
+so the chain stays at `0036`.
+
 No SQLModel type escapes this package: callers hold the port, and the port speaks
 `core.events.Event`.
 """
@@ -43,12 +50,14 @@ from .models import (
     DurableOutboxFailureRow,
     DurableOutboxRow,
 )
+from .retention import SqlRetentionStore
 from .spine import SqlDurableEventSpine
 
 __all__ = [
     "EventDatabase",
     "SqlDurableEventLog",
     "SqlDurableEventSpine",
+    "SqlRetentionStore",
     "DurableEventRow",
     "DurableOutboxRow",
     "DurableOutboxFailureRow",

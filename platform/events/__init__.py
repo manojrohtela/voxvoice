@@ -28,6 +28,16 @@ M10.2 reason.
 implementation) and the pure `OutboxLadder`. **No worker, scheduler or driver lives here**:
 recovery and restart re-dispatch are M10.8.
 
+**M10.5 (ADR-0041)** adds retention — the **sole sanctioned exception** to the append-only
+invariant (ED9/EV4). `EventRetention` deletes an event only when all five guards hold: a policy
+is configured, `recorded_at` is inside a **closed** window from an injected clock, the
+`evt_outbox` row is `DELIVERED` (the only drained state — `DEAD_LETTERED` and `QUARANTINED` are
+terminal *failures* and keep their evidence), and a supplied `MeteredWatermark` covers it.
+Anything absent or unreadable means **retain** (RT8). The attestation is a port `events/`
+declares and never implements — no Billing import, no metering algorithm. The sweep is
+caller-driven like `OutboxRecovery`, and the SQL adapter stays in `events.persistence`,
+unimported here for the M10.2 reason.
+
 **M10.8 (ADR-0037)** adds `OutboxRecovery` — the driver that finally *delivers*. It is
 **caller-driven**: `recover(now, limit)` sweeps `PENDING` and due `RETRYING` entries once, in
 `(seq, event_id)` order, on the same precedent `context`/`memory` use for their TTL sweeps.
@@ -56,12 +66,18 @@ from .ports import (
     DurableEventLogError,
     DurableOutbox,
     DurableWriteFailureHook,
+    MeteredWatermark,
+    NullMeteredWatermark,
     OutboxEntry,
     OutboxFailure,
     OutboxState,
     OutboxTrigger,
+    RetentionCandidate,
+    RetentionStore,
+    RetentionWindow,
 )
 from .recovery import OutboxRecovery, default_classifier
+from .retention import DRAINED_STATES, EventRetention, RetentionPolicy, drained
 from .webhooks import emit_event, sign_payload
 
 __all__ = [
@@ -90,6 +106,15 @@ __all__ = [
     "DeliveryTransport",
     "OutboxLadder",
     "OutboxRecovery",
+    "MeteredWatermark",
+    "NullMeteredWatermark",
+    "RetentionCandidate",
+    "RetentionStore",
+    "RetentionWindow",
+    "RetentionPolicy",
+    "EventRetention",
+    "DRAINED_STATES",
+    "drained",
     "default_classifier",
     "LadderDecision",
     "DELIVERY_RETRY_POLICY",

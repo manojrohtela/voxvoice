@@ -359,3 +359,115 @@ class DurableOutbox(ABC):
         **A query, not an action.** M10.7 never calls it on a timer, never loops over it and
         never delivers anything it returns — that is the recovery driver, and the driver is
         **M10.8** (ADR-0035 DW7 / ADR-0036 RL1)."""
+
+
+# ── M10.5 retention (ADR-0041) ──────────────────────────────────────────────────
+#
+# Two new ports, deliberately **not** methods on `DurableEventLog`. ED5 makes that contract
+# append-only and `test_the_port_exposes_no_update_or_delete_method` pins its surface to five
+# methods; a `delete` there would hand every holder of the log a removal path, which is exactly
+# what EV4 forbids *outside* the retention policy. Retention gets its own narrow seam instead,
+# so the capability exists precisely where it is sanctioned and nowhere else (ADR-0041 RT11).
+
+
+class MeteredWatermark(ABC):
+    """Whether an event is covered by a **metering attestation** (ADR-0041 RT6).
+
+    The minimal question retention needs answered, and nothing more. `events/` declares this
+    port and never implements it against Billing: a composition root outside the plane may see
+    both sides, the plane may not (ADR-0031 IR3/IR4, certification PL-2). This is the shape
+    `MetricStreamPort` already uses in the other direction — Billing declares, the platform
+    implements — and the shape `OutboxRecovery`'s injected `DeliveryClassifier` uses to keep
+    transport taxonomy out of `events/`.
+
+    **An input, never a derivation.** `events/` does not compute, infer, cache or reconstruct
+    metering state; it cannot be wrong about a fact it does not own (ADR-0023 M1 — Billing
+    measures nothing, and symmetrically `events/` meters nothing). There is deliberately no
+    `quantity`, no `meter_code` and no period: anything richer would be a second metering
+    algorithm (ADR-0041 RR6).
+    """
+
+    @abstractmethod
+    def covers(self, event_id: str) -> bool:
+        """`True` only if a valid metering attestation covers this event.
+
+        An implementation that cannot answer must return `False` or raise — both are read as
+        *not covered* (**RT8**), because retention never deletes on a maybe."""
+
+
+class NullMeteredWatermark(MeteredWatermark):
+    """Covers nothing. The default when no attestation is supplied (ADR-0041 RT8).
+
+    Default-deny expressed as an object rather than as a branch, following the repository's
+    `NullEventEmitter` / `NullAuditReader` convention. An unconfigured deployment therefore
+    deletes nothing *by construction* — not because some caller remembered to check.
+    """
+
+    def covers(self, event_id: str) -> bool:
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionWindow:
+    """The **closed** span of `recorded_at` a sweep may consider — `[start, end)`.
+
+    Both bounds are explicit instants, which is the whole point: ED9/RT7.2 require a closed
+    window and forbid *"everything older than now"*. An open-ended rule cannot be inspected
+    before it runs, and its blast radius grows silently with the age of the deployment.
+
+    Half-open at the top, following the period convention M10.11's re-derivation already uses
+    (`period_start <= ts < period_end`): adjacent windows then tile exactly, so an event on a
+    boundary belongs to one sweep rather than to two or none.
+    """
+
+    start: float
+    end: float
+
+    def __post_init__(self) -> None:
+        if not self.end > self.start:
+            raise ValueError(f"retention window must be non-empty, got [{self.start}, {self.end})")
+
+    def contains(self, recorded_at: float) -> bool:
+        return self.start <= recorded_at < self.end
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionCandidate:
+    """One event considered for deletion, with the two durable facts the guards need.
+
+    `outbox_state` is `None` when the event has **no** `evt_outbox` row. That is not treated as
+    "nothing to deliver, therefore safe": an event whose delivery state cannot be read is an
+    event whose drained-ness cannot be proven, so it is retained (**RT8**).
+    """
+
+    event_id: str
+    recorded_at: float
+    outbox_state: OutboxState | None
+
+
+class RetentionStore(ABC):
+    """Read the retention candidates, and perform the one sanctioned deletion (ADR-0041 RT11).
+
+    Separate from `DurableEventLog` on purpose — see the note above this section. The store is
+    deliberately **dumb**: it selects on the window and deletes by id, and it evaluates none of
+    the five guards. The predicate lives in one place (`events/retention.py`), where it can be
+    read whole and tested without a database.
+    """
+
+    @abstractmethod
+    def candidates(self, window: RetentionWindow) -> Sequence[RetentionCandidate]:
+        """Events whose `recorded_at` falls in `window`, ordered deterministically.
+
+        **A query, not an action**, on the `due(now)` precedent: it selects, and nothing that
+        reads it is obliged to delete. Narrowing in SQL is an optimization over the indexed
+        `recorded_at` column — the window is re-checked in Python by the policy, so a store
+        that returned too much still cannot cause a deletion."""
+
+    @abstractmethod
+    def delete(self, event_ids: Sequence[str]) -> int:
+        """Delete exactly these `evt_event` rows. Returns how many were removed.
+
+        **Deletes nothing else.** Not the `evt_outbox` row, not failure history, not any event
+        outside `event_ids`: RT7 sanctions deleting *an `evt_event` row* and the exception is
+        read no wider than it is written (`DurableOutbox.count_entries` already anticipates the
+        two counts diverging "only if retention (M10.5) ever removed one and not the other")."""

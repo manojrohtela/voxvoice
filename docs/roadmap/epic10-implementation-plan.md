@@ -209,7 +209,7 @@ evaluated, because the state they test does not exist:
 
 | Guard (ED9 / DS13, verified by EV8 / SV9) | State required | Milestone that creates it |
 |---|---|---|
-| "never deletes an **un-drained** event" | consumption state of the platform-owned metric buffer, surfaced through `MetricStreamPort.drain()` | **M10.10** |
+| "never deletes an **un-drained** event" | ~~consumption state of the platform-owned metric buffer, surfaced through `MetricStreamPort.drain()`~~ — **superseded at M10.5 by [ADR-0041](../adr/ADR-0041-retention-guards-drained-by-outbox-and-the-metered-watermark.md) RT1/RT5**; the drained predicate is **`evt_outbox.state == DELIVERED`** (ADR-0035 DW5) | ~~M10.10~~ **M10.6** |
 | "never deletes an **un-metered** event" | Billing's ingestion state, keyed `(event_id, meter_code)` | **M10.10** (Billing side, frozen) |
 | delivery/consumption state generally | outbox rows and their delivery state | **M10.6** |
 
@@ -228,6 +228,22 @@ its number and its place in this document; only its execution position moves.
 be satisfied **and tested honestly** — that is, when EV8 and SV9 can be written as real assertions
 rather than aspirations. Until then no retention code, schema, migration or guard column is
 authorized, and no M10.6/M10.10 work is pulled backward to enable it.
+
+> **Guards ratified at M10.5 by [ADR-0041](../adr/ADR-0041-retention-guards-drained-by-outbox-and-the-metered-watermark.md)
+> (owner ruling, 2026-08-20).** The approved scope above is **unchanged**; only the two guards'
+> definitions are now settled, and the resumption condition is met. **RT1/RT5** — *"un-drained"* means
+> **`evt_outbox.state == DELIVERED`** (ADR-0035 DW5, `events/ports.py`), which outranks the
+> metric-buffer reading struck from the table above; **RT3** — `DEAD_LETTERED` and `QUARANTINED` are
+> terminal but **not drained**, so they are never deleted. **RT4** — ADR-0039 MB1/MB3/MB5/MB6 are
+> unamended and are *why* a durable predicate is used. **RT6** — *"un-metered"* is supplied by a
+> **`MeteredWatermark`** port **declared by `events/`** and implemented outside that plane, as an
+> input never a derivation, so `events/ → billing` stays forbidden and **PL-2/IR4 are unwidened**
+> (**RT10**); absent ⇒ retain. **RT7/RT8** — deletion requires all five conditions (configured policy ·
+> closed window from an injected clock · `DELIVERED` · covered by the attestation · **default-deny**).
+> **RT9** — M10.5 is **hermetic**; **no production wiring** is authorized. **RT11** — no migration is
+> required and EV4 stands, with retention its sole sanctioned exception. **ADR-0041 ratifies
+> architecture only and authorizes no implementation** (**RT12**); **DL-0141 remains Open** until
+> M10.5 lands (**RT13**). Nothing else in this section changes.
 
 ### M10.6 — Transactional outbox / durable write-side integration
 

@@ -185,13 +185,22 @@ class OutboxRecovery:
         the `DurableEventLog` port — whose implementation reconstructs the envelope with the
         existing `events.persistence.mapping.to_event` under its round-trip contract — so this
         module acquires no storage import, no session and no second mapping.
+
+        **Retention does not create a missing envelope here** (M10.5, ADR-0041). Retention may
+        delete an `evt_event` row while keeping its `evt_outbox` row, so the two are no longer
+        strictly co-resident for all time — but it deletes only events whose entry is already
+        `DELIVERED`, and `DELIVERED` is terminal, so such an entry is never selected by
+        `candidates()` and never reaches this method. The lookup failure therefore still means
+        what it always meant: something wrote an outbox entry without its event.
         """
         event = envelopes.get(entry.event_id)
         if event is not None:
             return event
         raise LookupError(
             f"outbox entry {entry.event_id!r} has no event in the durable log; "
-            "the two are written in one transaction (ADR-0035 DW1) and cannot diverge"
+            "the two are written in one transaction (ADR-0035 DW1), and retention (M10.5, "
+            "ADR-0041) deletes only events whose entry is already DELIVERED — which this "
+            "sweep never selects, so neither path explains a missing envelope here"
         )
 
     def _resolve_now(self, now: float | None) -> float:
