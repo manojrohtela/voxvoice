@@ -205,11 +205,31 @@ class SqlDurableEventSpine(DurableEventLog, DurableOutbox):
         return tuple(_to_entry(r) for r in rows)
 
     def count_pending(self) -> int:
+        return self._count_state(OutboxState.PENDING)
+
+    # ── M10.12 operator surfaces (ADR-0042 HD7/HD8) ─────────────────────────
+
+    def count_dead_lettered(self) -> int:
+        """DLQ depth — a read-only, point-in-time total."""
+        return self._count_state(OutboxState.DEAD_LETTERED)
+
+    def count_quarantined(self) -> int:
+        """Quarantine count — a read-only, point-in-time total."""
+        return self._count_state(OutboxState.QUARANTINED)
+
+    def _count_state(self, state: OutboxState) -> int:
+        """`COUNT(*)` over one outbox state, served by `ix_evt_outbox_state_seq`.
+
+        One helper rather than three near-identical queries: the three counts differ only in the
+        state they filter on, and writing that difference once is what stops them drifting apart.
+        **Reads only** — no `add`, no `commit`, no flush of pending work, so a count can never
+        move an entry (HD9, HI1, HI2).
+        """
         return int(
             self._db.session.exec(
                 select(func.count())
                 .select_from(DurableOutboxRow)
-                .where(DurableOutboxRow.state == OutboxState.PENDING.value)
+                .where(DurableOutboxRow.state == state.value)
             ).one()
         )
 

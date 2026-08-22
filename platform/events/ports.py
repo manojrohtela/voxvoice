@@ -313,6 +313,34 @@ class DurableOutbox(ABC):
     def count_pending(self) -> int:
         """How many entries are still `PENDING`."""
 
+    # ── M10.12 operator surfaces (ADR-0042 HD7/HD8) ─────────────────────────
+    #
+    # Two counts, and deliberately nothing else. They answer the only question §M10.12 asks —
+    # *"DLQ depth, quarantine count"* — and they answer it the way `count_pending` already does:
+    # a point-in-time total over the indexed `state` column, with no window, no session scope and
+    # no listing. Anything richer would be a read API, which is **Epic 12's** (HD15).
+    #
+    # **Observability, not operator control** (HD9). ADR-0036 **RL3** forbids a redrive API and
+    # **RL4** forbids operator-triggered quarantine; both govern *actions*, and counting rows
+    # performs no transition and offers no way out of a terminal state. The deferred
+    # operator-control milestone stays deferred, and these methods do not begin it.
+
+    @abstractmethod
+    def count_dead_lettered(self) -> int:
+        """How many entries are `DEAD_LETTERED` — the DLQ depth (ADR-0042 HD7).
+
+        A **query**: read-only, point-in-time, total across all sessions. It causes no transition
+        and no side effect, which is what keeps it on the observability side of RL3."""
+
+    @abstractmethod
+    def count_quarantined(self) -> int:
+        """How many entries are `QUARANTINED` (ADR-0042 HD7).
+
+        Counted separately from `count_dead_lettered()` because the two are different operational
+        facts — *"we tried and gave up"* versus *"this can never succeed"* (ED8) — and a combined
+        "terminal failures" number would make an operator re-derive which they are looking at,
+        exactly as a shared terminal timestamp would (see `OutboxEntry`)."""
+
     # ── M10.7 (ADR-0036) — record a decision the ladder already made ─────────
     #
     # Each method persists **one transition and its evidence in one transaction** (RL13). None

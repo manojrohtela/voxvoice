@@ -19,6 +19,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlmodel import select
 
 from core.events import Event, EventSource, EventType
+from core.policies import RetryPolicy
 from events.persistence import (
     ALL_EVENT_TABLES,
     EVENT_TABLES,
@@ -29,7 +30,7 @@ from events.persistence import (
     SqlDurableEventSpine,
 )
 from events.persistence.migrations import CHAIN_STARTS_AFTER, MIGRATIONS, upgrade_all
-from events.ports import DurableOutbox, OutboxEntry, OutboxState
+from events.ports import DeliveryOutcome, DurableOutbox, OutboxEntry, OutboxState
 
 
 class FrozenClock:
@@ -608,3 +609,119 @@ def test_rows_written_through_the_bus_use_the_session_the_spine_owns(tmp_path):
     rows = db.session.exec(select(DurableOutboxRow)).all()
     assert [r.event_id for r in rows] == ["e-1"]
     db.close()
+
+
+# ── M10.12 operator surfaces (ADR-0042 HD7/HD8/HD9) ─────────────────────────────
+#
+# Appended additively (HD14): nothing above is modified, and the deny-list guard at
+# `test_the_outbox_port_declares_no_retry_or_recovery_methods` keeps its rule unchanged — the
+# two counts pass it because they are counts, not controls.
+
+
+def _drive(spine, event_id, state: OutboxState) -> None:
+    """Move one appended entry to `state` using only ratified transitions."""
+    if state is OutboxState.PENDING:
+        return
+    if state is OutboxState.DELIVERED:
+        spine.mark_delivered(event_id)
+        return
+    if state is OutboxState.QUARANTINED:
+        spine.record_failure(event_id, DeliveryOutcome.PERMANENT_FAILURE, error="fatal")
+        return
+    spine.begin_attempt(event_id)
+    spine.record_failure(event_id, DeliveryOutcome.TRANSIENT_FAILURE, error="flaky")
+    if state is OutboxState.RETRYING:
+        return
+    if state is OutboxState.DEAD_LETTERED:
+        # `EXHAUST` is only an edge out of `RETRYING`, so the ladder is entered first and spent
+        # on the second failure under a two-rung policy.
+        spine.begin_attempt(event_id)
+        spine.record_failure(
+            event_id,
+            DeliveryOutcome.TRANSIENT_FAILURE,
+            error="flaky",
+            policy=RetryPolicy(max_attempts=2),
+        )
+        return
+    raise AssertionError(f"unsupported state {state!r}")
+
+
+def _populate(spine) -> None:
+    """One entry in each of the five outbox states, so every count is proven against a
+    population containing all of them rather than only its own."""
+    for n, state in enumerate(OutboxState, start=1):
+        spine.append(make_event(f"e-{n}", seq=n))
+        _drive(spine, f"e-{n}", state)
+
+
+def test_the_operator_counts_are_zero_on_an_empty_outbox(spine):
+    assert spine.count_dead_lettered() == 0
+    assert spine.count_quarantined() == 0
+
+
+def test_each_operator_count_counts_only_its_own_state(spine):
+    """HV1/HV2 — correct across **every** outbox state. A count that ignored its filter would
+    return 5 here, and one that matched the wrong state would return 0."""
+    _populate(spine)
+
+    assert spine.count_entries() == 5
+    assert spine.count_pending() == 1
+    assert spine.count_dead_lettered() == 1
+    assert spine.count_quarantined() == 1
+
+
+def test_the_counts_track_transitions(spine):
+    """Point-in-time (HD8): the answer follows the outbox rather than being cached."""
+    spine.append(make_event("e-1", seq=1))
+    assert spine.count_quarantined() == 0
+
+    _drive(spine, "e-1", OutboxState.QUARANTINED)
+    assert spine.count_quarantined() == 1
+    assert spine.count_dead_lettered() == 0
+
+
+def test_the_counts_are_totals_not_session_scoped(spine):
+    """HD8 — `evt_outbox` carries no session column, so a total is the only honest answer; the
+    count must aggregate across sessions rather than silently reporting one."""
+    for n, session in ((1, "s-a"), (2, "s-b")):
+        spine.append(make_event(f"e-{n}", seq=n, session_id=session))
+        _drive(spine, f"e-{n}", OutboxState.QUARANTINED)
+
+    assert spine.count_quarantined() == 2
+
+
+def test_counting_mutates_nothing(spine):
+    """HV3 / HI1 / HI2 — a count is a query. Every row is byte-identical afterwards, and the
+    counts are stable across repeated calls."""
+    _populate(spine)
+    before = {
+        r.event_id: (r.state, r.attempt_count, r.next_attempt_at, r.quarantine_reason)
+        for r in spine._db.session.exec(select(DurableOutboxRow)).all()
+    }
+    events_before = [e.id for e in spine.read_all()]
+
+    for _ in range(3):
+        assert (spine.count_dead_lettered(), spine.count_quarantined()) == (1, 1)
+
+    after = {
+        r.event_id: (r.state, r.attempt_count, r.next_attempt_at, r.quarantine_reason)
+        for r in spine._db.session.exec(select(DurableOutboxRow)).all()
+    }
+    assert after == before, "counting changed outbox state"
+    assert [e.id for e in spine.read_all()] == events_before, "counting changed the event log"
+
+
+def test_the_counts_do_not_appear_on_the_event_log_port():
+    """HD13 — `DurableEventLog` keeps its five methods; operator state is the outbox's."""
+    from events.ports import DurableEventLog
+
+    surface = {n for n in dir(DurableEventLog) if not n.startswith("_")}
+    assert surface == {"append", "append_many", "read_session", "read_all", "count"}
+
+
+def test_the_operator_counts_do_not_trip_the_existing_deny_list():
+    """HV4 — the M10.7/M10.8 deny-list guard above still passes unmodified, and it must: a method
+    named bare `quarantine` would be operator control, while `count_quarantined` is a count."""
+    methods = {n for n in dir(DurableOutbox) if not n.startswith("_")}
+    assert {"count_dead_lettered", "count_quarantined"} <= methods
+    assert not (methods & {"dead_letter", "quarantine", "redrive", "release", "drain"})

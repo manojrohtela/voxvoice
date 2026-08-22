@@ -212,3 +212,107 @@ def test_the_orchestrator_is_not_wired_to_a_durable_sink():
     source = pathlib.Path("runtime/orchestrator/orchestrator.py").read_text()
     assert "InProcessEventBus()" in source, "the orchestrator still constructs a plain bus"
     assert "durable" not in source
+
+
+# ── M10.12 hardening (ADR-0042) ─────────────────────────────────────────────────
+#
+# Additive only (HD14). Nothing above is weakened, narrowed or removed; these guards pin
+# properties that were previously proven only behaviourally, so a regression fails statically
+# instead of waiting for a production incident.
+
+
+def _calls_in(path: pathlib.Path, attr: str) -> list[str]:
+    """Names of functions/methods in `path` that call `.<attr>(...)` anywhere in their body."""
+    tree = ast.parse(path.read_text())
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr == attr
+            ):
+                hits.append(node.name)
+                break
+    return hits
+
+
+def test_the_latency_tap_publishes_only_from_its_terminal_method():
+    """ADR-0038 TP10, made **structural** (ADR-0042 HD1).
+
+    The existing M10.9 test proves *behaviourally* that one turn yields one `metric.turn`. This
+    pins the reason: publication happens from the terminal path only. A publish added to
+    `record()` would run unbounded subscriber work — and, once a durable sink is attached, a
+    synchronous database write — inside a ≤ 1.0 s voice-to-voice budget, which is Blueprint risk
+    **R-9** realised. That regression now fails here rather than in production.
+    """
+    publishers = set(_calls_in(pathlib.Path("observability/turn_latency.py"), "publish"))
+    assert publishers <= {"complete"}, (
+        f"metric.turn is published from {sorted(publishers)}; TP10 permits the terminal path only"
+    )
+    assert "record" not in publishers, "a boundary capture must never publish (TP10)"
+
+
+def test_the_latency_tap_takes_no_blocking_or_scheduling_dependency():
+    """HD1/HV7 — the tap stays a clock read and a dict write."""
+    tops = _imported_tops(pathlib.Path("observability/turn_latency.py"))
+    assert not (tops & {"threading", "sched", "concurrent", "queue"}), sorted(tops)
+    assert not (tops & _STORAGE_LIBS), "the tap must acquire no storage dependency"
+
+
+def test_the_outbox_operator_counts_are_declared_on_the_port():
+    """ADR-0042 HD7/HD10 — the two counts live on `DurableOutbox`, so no caller reaches
+    `evt_outbox` around the seam."""
+    from events.ports import DurableOutbox
+
+    assert {"count_dead_lettered", "count_quarantined"} <= set(DurableOutbox.__abstractmethods__)
+
+
+def test_no_module_outside_persistence_uses_the_outbox_row_model():
+    """HD10 — a reader that queried `evt_outbox` directly would become a second implementation of
+    a ratified contract and dissolve the ADR-0034 storage seam.
+
+    Structural, not textual: `ports.py`, `retention.py`, `recovery.py` and `events/__init__.py`
+    all *name* `evt_outbox` in their prose — correctly, since they document what the port
+    abstracts — and a substring scan would flag exactly the modules that are behaving. Reaching
+    the table means using its **row model**, so that is what is checked.
+    """
+    offenders = []
+    for package in ("events", "api", "runtime", "observability", "core"):
+        for path in _files(package):
+            if "persistence" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Name) and node.id == "DurableOutboxRow":
+                    offenders.append(str(path))
+                    break
+                if isinstance(node, ast.ImportFrom) and node.names:
+                    if any(a.name == "DurableOutboxRow" for a in node.names):
+                        offenders.append(str(path))
+                        break
+    assert not offenders, f"the outbox row model is used outside persistence: {offenders}"
+
+
+def test_the_operator_counts_introduce_no_control_capability():
+    """HD9 / HV5 — ADR-0036 RL3/RL4 remain in force. Counting is observability; the deny-list
+    guard in `test_events_outbox.py` still owns the method-name rule, and this asserts the
+    complementary property: nothing M10.12 added can move an entry."""
+    from events.ports import OUTBOX_LIFECYCLE, TERMINAL_OUTBOX_STATES, DurableOutbox
+
+    surface = {n for n in dir(DurableOutbox) if not n.startswith("_")}
+    control = {"redrive", "release", "requeue", "unquarantine", "reopen", "purge"}
+    assert not (surface & control), f"operator-control leaked onto the port: {surface & control}"
+
+    for state in TERMINAL_OUTBOX_STATES:
+        assert not OUTBOX_LIFECYCLE.triggers_from(state), (
+            f"{state} gained an outgoing edge; terminal states must stay terminal (RL3/RL4)"
+        )
+
+
+def test_m10_12_added_no_migration():
+    """HD11 / HV10 — the counts read the existing indexed `state` column."""
+    from events.persistence.migrations import MIGRATIONS
+
+    assert tuple(m.VERSION for m in MIGRATIONS) == ("0034", "0035", "0036")
