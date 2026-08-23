@@ -3,6 +3,39 @@
 All notable releases of the VoxVoice platform. Versioning follows SemVer at the
 platform-baseline level (see `docs/releases/`).
 
+## Unreleased — Epic 10 (Durable Event & Telemetry Spine) · 🟢 Implemented (M10.2–M10.12) · ✅ Certified (M10.13) · 🔒 Epic 10 architecture FROZEN (M10.14) · 📦 **RELEASED v5.0.0** (M10.15)
+
+### Added
+
+- **Epic 10 Repository Release — Durable Event & Telemetry Spine v1.0 · v5.0.0 (M10.15)** — the
+  release commit and annotated tag `v5.0.0`, plus
+  `docs/releases/epic10-durable-event-telemetry-spine-v1.0.md`. **Contributes repository-release
+  metadata only**: no event type, no table, no migration, no route, no port method, no production
+  module and no version-file change — the annotated tag is the single release identity, as it was
+  for v1.0.0, v2.0.0, v3.0.0 and v4.0.0, and `platform/pyproject.toml` remains `version = "0.1.0"`.
+  **Discharges M10.14's deferred commit**: owner ruling **R-2** froze the architecture without
+  committing, so the freeze manifest recorded a two-part `commit_state` — the certified
+  implementation committed at `db8c508`, its own freeze artifacts intentionally uncommitted — and
+  this commit preserves them, discharging roadmap risk **D-11** (*"implementation exists but is
+  uncommitted at freeze"*) without repeating it. Freeze verdict **`FROZEN`** (manifest `m10.14.1`,
+  digest `d3d4858d5f18b7f6…`, 12 attestations `EF-1`…`EF-12` all satisfied) and certification
+  verdict **`certified`** (catalogue `m10.13.1`, digest `7e57bc14764201b1…`, 13 controls
+  `E10-1`…`E10-13`, 0 blocking violations, 0 advisories, 0 inconclusive) are both **preserved
+  unchanged and consumed as evidence** — M10.15 re-certified nothing and re-froze nothing. Epic 9's
+  historical digests `eed692224f0aeb82…` and `39790b95d061a763…` are quoted as Epic 9 history only,
+  never recomputed. Migration head remains **`0036`**; migrations `0001`–`0033` unchanged;
+  `platform/billing/**` unchanged since `v4.0.0` apart from the single authorized
+  `MeterSource.OBSERVABILITY` member (ADR-0039 Amendment 1, MB14). **No advisory was fixed and no
+  limitation was closed** — Epic 9's `NS-5` and `ST-3` remain open advisories with their original
+  owners, Epic 9's nine limitations remain Epic 9's, and Epic 10's four declared limitations
+  (`E10-LIM-1`…`E10-LIM-4`) all remain open. **No performance baseline was created and Epic 10
+  makes no latency claim**: ADR-0042 HD2/HD3 rule out benchmarking here and record **I1 as a
+  standing Epic 11 obligation**, `docs/performance/` does not exist, and nothing in this release
+  asserts a voice-to-voice budget is met. Ruff cleanliness is claimed only for the Epic 10 DoD
+  scopes `ruff check . --exclude voicebot` and `ruff check billing/ tests/`; `voicebot/bot.py`
+  carries two pre-existing findings outside Epic 10's scope. Rationale **DL-0146**; no ADR-0044 was
+  required.
+
 ## Unreleased — Epic 9 (Billing & Subscription Platform) · 🟢 Implemented (M9.0A–M9.25) · 🔒 Epic 9 architecture FROZEN (M9.25) · 📦 **RELEASED v4.0.0** (M9.26)
 
 The opening of **Epic 9**: an architecture blueprint and one ratified ADR fixing the
