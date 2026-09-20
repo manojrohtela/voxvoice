@@ -602,9 +602,23 @@ def _changed_since_baseline(*pathspecs: str) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(changes, key=lambda c: c[1]))
 
 
-def _changed_since_head(*pathspecs: str) -> tuple[str, ...]:
-    """Paths under `pathspecs` that this working tree changes relative to `HEAD`."""
-    raw = _git("diff", "--name-only", "HEAD", "--", *pathspecs)
+#: **The M10.13 certification commit and its parent** — the range that *is* M10.13.
+CERTIFICATION_COMMIT = "db8c50828c91567aa9a7c518e58f804593a592f9"
+CERTIFICATION_PARENT = "8ee7d3c1bf57ae862307c357c75e4c2008665e0f"
+
+
+def _changed_by_the_certification(*pathspecs: str) -> tuple[str, ...]:
+    """Paths under `pathspecs` that **the M10.13 certification commit** changed.
+
+    Asked between two pinned commits (M11.2.1, **ADR-0052**). The original form compared `HEAD`
+    against the **working tree**, which answers *"is anyone editing these right now?"* — a question
+    about today's checkout, not about M10.13. Under that form any later epic authorized to touch a
+    path here would retroactively un-certify Epic 10, which is not a power Epic 10 has: later work
+    is governed by its own accepted ADRs and its own certification gates.
+
+    The claim this control makes — *"M10.13 changed no Epic 9 artifact"* — is a permanent fact
+    about one commit, and is now stated as one."""
+    raw = _git("diff", "--name-only", CERTIFICATION_PARENT, CERTIFICATION_COMMIT, "--", *pathspecs)
     return tuple(sorted(p.strip() for p in raw.splitlines() if p.strip()))
 
 
@@ -627,6 +641,86 @@ def _baseline_source(path: str) -> str:
     """A file's contents as of the baseline tag."""
     _require_baseline()
     return _git("show", f"{BASELINE_TAG}:{path}")
+
+
+
+def _certified_source(path: str) -> str:
+    """A file's contents **as of the certified commit** — the tree M10.13 certified.
+
+    Distinct from `_baseline_source`, which reads `v4.0.0`: that is the *Epic 9* baseline every
+    "unchanged since" comparison starts from, whereas this is the tree Epic 10's certification is
+    a statement **about** (M11.5.1, ADR-0052 Amendment 1 **HC9**)."""
+    return _git("show", f"{CERTIFICATION_COMMIT}:{path}")
+
+
+def _certified_python_sources(prefix: str) -> dict[str, str]:
+    """Every `.py` file under `prefix` as of the certified commit, keyed by repo-relative path.
+
+    The historical counterpart of `_python_sources`, which walks the **live** filesystem. Reading
+    through `git ls-tree`/`git show` rather than the checkout is what makes the count a permanent
+    fact about the certified tree instead of a measurement of whoever last edited the repository
+    (ADR-0052 **HC9**)."""
+    listing = _git("ls-tree", "-r", "--name-only", CERTIFICATION_COMMIT, "--", prefix)
+    sources: dict[str, str] = {}
+    for line in listing.splitlines():
+        path = line.strip()
+        if not path.endswith(".py") or "__pycache__" in path:
+            continue
+        sources[path] = _git("show", f"{CERTIFICATION_COMMIT}:{path}")
+    return sources
+
+
+def _evt_names_in(sources: dict) -> tuple[list[str], list[str]]:
+    """`(names, violations)` for the `evt_` prefix rule over one set of sources.
+
+    Factored so the **historical count** and the **live invariant** run identical extraction
+    logic against different trees — two questions, one implementation, no chance of the two
+    drifting apart (M11.5.1)."""
+    names: list[str] = []
+    violations: list[str] = []
+    for path, source in sources.items():
+        label = getattr(path, "name", str(path).rsplit("/", 1)[-1])
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:  # pragma: no cover
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name) and t.id == "__tablename__" for t in node.targets
+                )
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                names.append(node.value.value)
+                if not node.value.value.startswith("evt_"):
+                    violations.append(f"{label}: table {node.value.value!r}")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Index"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                names.append(node.args[0].value)
+                if not node.args[0].value.startswith("ix_evt_"):
+                    violations.append(f"{label}: index {node.args[0].value!r}")
+    return names, violations
+
+
+def _created_names_in(sources: dict) -> tuple[list[str], list[str]]:
+    """`(names, violations)` for objects a migration creates, over one set of sources."""
+    names: list[str] = []
+    violations: list[str] = []
+    for path, source in sources.items():
+        label = getattr(path, "name", str(path).rsplit("/", 1)[-1])
+        for created in _created_object_names(source):
+            names.append(created)
+            if not created.startswith("evt_") and not created.startswith("ix_evt_"):
+                violations.append(f"{label}: created object {created!r}")
+    return names, violations
 
 
 def _enum_members(source: str, class_name: str) -> dict[str, str]:
@@ -805,53 +899,46 @@ def _created_object_names(source: str) -> list[str]:
 
 
 def _e10_3() -> Epic10ControlResult:
-    """Every Epic 10 table and index name carries the `evt_` prefix (ADR-0034 DS9)."""
-    names: list[str] = []
-    violations: list[str] = []
-    for path, source in _python_sources(PLATFORM_ROOT / "events").items():
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:  # pragma: no cover
-            continue
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and any(
-                    isinstance(t, ast.Name) and t.id == "__tablename__" for t in node.targets
-                )
-                and isinstance(node.value, ast.Constant)
-                and isinstance(node.value.value, str)
-            ):
-                names.append(node.value.value)
-                if not node.value.value.startswith("evt_"):
-                    violations.append(f"{path.name}: table {node.value.value!r}")
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "Index"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-            ):
-                names.append(node.args[0].value)
-                if not node.args[0].value.startswith("ix_evt_"):
-                    violations.append(f"{path.name}: index {node.args[0].value!r}")
+    """Every Epic 10 table and index name carries the `evt_` prefix (ADR-0034 DS9).
 
-    for path, source in _python_sources(
-        PLATFORM_ROOT / "events" / "persistence" / "migrations"
-    ).items():
-        for created in _created_object_names(source):
-            names.append(created)
-            if not created.startswith("evt_") and not created.startswith("ix_evt_"):
-                violations.append(f"{path.name}: created object {created!r}")
+    **Two trees, two questions** (M11.5.1, ADR-0052 **HC9**):
 
-    if not names:
+    * the **examined count** is the number of names in the **certified tree** — a permanent fact
+      about what M10.13 certified, so a later epic legitimately adding a table cannot move the
+      Epic 10 certification digest;
+    * the **violation scan** stays on the **live tree**, because *"no table under `events/` may
+      escape the prefix"* is an ongoing invariant that must keep biting on new code.
+    """
+    historical_names, _ = _evt_names_in(_certified_python_sources("platform/events"))
+    historical_created, _ = _created_names_in(
+        _certified_python_sources("platform/events/persistence/migrations")
+    )
+    historical = historical_names + historical_created
+
+    live_names, violations = _evt_names_in(_python_sources(PLATFORM_ROOT / "events"))
+    live_created, created_violations = _created_names_in(
+        _python_sources(PLATFORM_ROOT / "events" / "persistence" / "migrations")
+    )
+    violations = violations + created_violations
+
+    # **Both** halves need evidence, and neither substitutes for the other (ADR-0043 CD4). An
+    # unreadable certified tree means the count cannot be stated; an empty live scan means the
+    # prefix invariant had nothing to check, which is a vacuous pass rather than a real one.
+    if not historical:
         return Epic10ControlResult(
             "E10-3",
             Epic10ControlOutcome.INCONCLUSIVE,
-            detail="no table or index declaration was found under events/",
+            detail="no table or index declaration was found under events/ at the certified commit",
         )
-    return _bad("E10-3", violations, len(names), f"{len(names)} evt_-prefixed name(s) examined")
+    if not (live_names or live_created):
+        return Epic10ControlResult(
+            "E10-3",
+            Epic10ControlOutcome.INCONCLUSIVE,
+            detail="no table or index declaration was found under events/ in the current tree",
+        )
+    return _bad(
+        "E10-3", violations, len(historical), f"{len(historical)} evt_-prefixed name(s) examined"
+    )
 
 
 def _e10_4() -> Epic10ControlResult:
@@ -882,10 +969,29 @@ def _e10_4() -> Epic10ControlResult:
 
 
 def _e10_5() -> Epic10ControlResult:
-    """`metric.billing.*` stays reserved to Billing (ADR-0033 MS9)."""
+    """`metric.billing.*` stays reserved to Billing (ADR-0033 MS9).
+
+    **The control this milestone was called in to repair** (M11.5.1, ADR-0052 **HC9**). Its
+    examined count was `len(current)` — the number of `EventType` members in the **live tree** —
+    and `examined` is a digest input. So a later epic adding a legitimately additive event type
+    moved Epic 10's published certification digest **while every control still reported
+    `satisfied`**: the digest was measuring the repository's growth rather than the certified
+    tree. M11.5 hit exactly that and correctly stopped.
+
+    * **examined** → the member count in the **certified tree** (stable forever);
+    * **violations** → still scanned on the **live tree**, because *"no `metric.billing.*` member
+      may ever appear outside Billing"* is an ongoing reservation, not a historical observation.
+    """
+    historical = _enum_members(_certified_source("platform/core/events.py"), "EventType")
     current = _enum_members(
         (PLATFORM_ROOT / "core" / "events.py").read_text(encoding="utf-8"), "EventType"
     )
+    if not historical:
+        return Epic10ControlResult(
+            "E10-5",
+            Epic10ControlOutcome.INCONCLUSIVE,
+            detail="no EventType members were readable at the certified commit",
+        )
     if not current:
         return Epic10ControlResult(
             "E10-5",
@@ -900,8 +1006,8 @@ def _e10_5() -> Epic10ControlResult:
     return _bad(
         "E10-5",
         violations,
-        len(current),
-        f"{len(current)} event type(s) examined; the metric.billing.* namespace is unused",
+        len(historical),
+        f"{len(historical)} event type(s) examined; the metric.billing.* namespace is unused",
     )
 
 
@@ -911,6 +1017,10 @@ def _e10_6() -> Epic10ControlResult:
     A textual scan fires on `commercial_subscriptions.py` and on docstrings that use the word
     correctly. Only a `.subscribe(...)` **call** or a reference to the `EventBus` **symbol** is a
     subscription."""
+    # Historical count, live invariant (M11.5.1, ADR-0052 **HC9**): the number of Billing modules
+    # M10.13 examined is a fact about the certified tree, while "no Billing module subscribes to a
+    # bus" must keep being checked against whatever Billing looks like today.
+    historical = _certified_python_sources("platform/billing")
     sources = _python_sources(PLATFORM_ROOT / "billing")
     violations: list[str] = []
     for path, source in sources.items():
@@ -934,11 +1044,25 @@ def _e10_6() -> Epic10ControlResult:
                 for alias in node.names:
                     if alias.name == "EventBus":
                         violations.append(f"{relative}: imports EventBus")
+    # Both halves need evidence (ADR-0043 CD4), for the reason E10-3 states: an empty live scan
+    # is a vacuous pass, not a clean one.
+    if not historical:
+        return Epic10ControlResult(
+            "E10-6",
+            Epic10ControlOutcome.INCONCLUSIVE,
+            detail="no Billing modules were readable at the certified commit",
+        )
+    if not sources:
+        return Epic10ControlResult(
+            "E10-6",
+            Epic10ControlOutcome.INCONCLUSIVE,
+            detail="no Billing modules were readable in the current tree",
+        )
     return _bad(
         "E10-6",
         violations,
-        len(sources),
-        f"{len(sources)} billing module(s) examined; none subscribes to a bus",
+        len(historical),
+        f"{len(historical)} billing module(s) examined; none subscribes to a bus",
     )
 
 
@@ -992,8 +1116,9 @@ def _e10_10() -> Epic10ControlResult:
 
     1. the original values are reproducible from the baseline tree;
     2. the current post-M10.10 values are readable and recorded as a distinct state;
-    3. **M10.13 changed no Epic 9 artifact** — compared against `HEAD`, not against the baseline,
-       because the M10.10 re-baseline is authorized history and only *new* edits are forbidden.
+    3. **M10.13 changed no Epic 9 artifact** — compared across the certification commit itself,
+       not against the baseline, because the M10.10 re-baseline is authorized history and only
+       edits made *by M10.13* are forbidden (M11.2.1, ADR-0052).
     """
     historical_doc = _baseline_source(EPIC9_RELEASE_DOC)
     historical_manifest = _MANIFEST_DIGEST_RE.search(historical_doc)
@@ -1027,7 +1152,7 @@ def _e10_10() -> Epic10ControlResult:
             detail="the current release record did not yield both digests",
         )
 
-    touched = _changed_since_head(*EPIC9_FROZEN_ARTIFACTS)
+    touched = _changed_by_the_certification(*EPIC9_FROZEN_ARTIFACTS)
     violations.extend(f"{path}: Epic 9 artifact modified by M10.13" for path in touched)
 
     return _bad(

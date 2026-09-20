@@ -1,0 +1,476 @@
+{
+  "a8_budgets_ms": {
+    "endpoint": 250,
+    "llm": 350,
+    "stt": 150,
+    "tts": 200,
+    "voice_to_voice": 1000
+  },
+  "benchmark": "voxvoice.i1.baseline",
+  "configuration": {
+    "sessions_measured": 55,
+    "turns_per_session": 2,
+    "warmup_sessions": 3
+  },
+  "environment": {
+    "cpu_count": 10,
+    "git_revision": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "implementation": "CPython",
+    "machine": "arm64",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.13.3",
+    "timestamp_utc": "2026-09-19T03:26:14Z"
+  },
+  "live_providers": {
+    "cartesia": "NOT EXECUTED \u2014 no credential",
+    "deepgram": "NOT EXECUTED \u2014 no credential",
+    "groq": "NOT EXECUTED \u2014 no credential"
+  },
+  "metric_source": "metric.turn (observability/turn_latency.py) \u2014 no second timing chain",
+  "profiles": [
+    {
+      "cold": {
+        "failed_sessions": 0,
+        "measurements": [
+          {
+            "count": 2,
+            "max": 1.0,
+            "mean": 0.5,
+            "min": 0.0,
+            "name": "egress",
+            "p50": 0.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          },
+          {
+            "count": 2,
+            "max": 240.0,
+            "mean": 240.0,
+            "min": 240.0,
+            "name": "endpoint",
+            "p50": 240.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": true
+          },
+          {
+            "count": 2,
+            "max": 308.0,
+            "mean": 294.0,
+            "min": 280.0,
+            "name": "llm",
+            "p50": 280.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          },
+          {
+            "count": 2,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "name": "tts",
+            "p50": 0.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": true
+          },
+          {
+            "count": 2,
+            "max": 290.0,
+            "mean": 277.0,
+            "min": 264.0,
+            "name": "user_speech",
+            "p50": 264.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          },
+          {
+            "count": 2,
+            "max": 246.0,
+            "mean": 244.0,
+            "min": 242.0,
+            "name": "voice_to_voice",
+            "p50": 242.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          }
+        ],
+        "missing_boundaries": {},
+        "turns": 2
+      },
+      "executed": true,
+      "injected_delays_ms": {
+        "llm_first_token_ms": 0.0,
+        "stt_final_ms": 0.0,
+        "transport_send_ms": 0.0,
+        "tts_first_audio_ms": 0.0
+      },
+      "name": "A-hermetic",
+      "reason": "",
+      "warm": {
+        "failed_sessions": 0,
+        "measurements": [
+          {
+            "count": 110,
+            "max": 2.0,
+            "mean": 0.34545454545454546,
+            "min": 0.0,
+            "name": "egress",
+            "p50": 0.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 240.0,
+            "mean": 240.0,
+            "min": 240.0,
+            "name": "endpoint",
+            "p50": 240.0,
+            "p95": 240.0,
+            "p99": 240.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": true
+          },
+          {
+            "count": 110,
+            "max": 303.0,
+            "mean": 286.94545454545454,
+            "min": 271.0,
+            "name": "llm",
+            "p50": 287.0,
+            "p95": 300.0,
+            "p99": 302.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 6.0,
+            "mean": 0.09090909090909091,
+            "min": 0.0,
+            "name": "tts",
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 2.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 294.0,
+            "mean": 272.8,
+            "min": 255.0,
+            "name": "user_speech",
+            "p50": 276.0,
+            "p95": 287.0,
+            "p99": 291.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 246.0,
+            "mean": 241.27272727272728,
+            "min": 240.0,
+            "name": "voice_to_voice",
+            "p50": 241.0,
+            "p95": 242.0,
+            "p99": 243.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          }
+        ],
+        "missing_boundaries": {},
+        "turns": 110
+      }
+    },
+    {
+      "cold": {
+        "failed_sessions": 0,
+        "measurements": [
+          {
+            "count": 2,
+            "max": 7.0,
+            "mean": 6.0,
+            "min": 5.0,
+            "name": "egress",
+            "p50": 5.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          },
+          {
+            "count": 2,
+            "max": 240.0,
+            "mean": 240.0,
+            "min": 240.0,
+            "name": "endpoint",
+            "p50": 240.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": true
+          },
+          {
+            "count": 2,
+            "max": 377.0,
+            "mean": 377.0,
+            "min": 377.0,
+            "name": "llm",
+            "p50": 377.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": true
+          },
+          {
+            "count": 2,
+            "max": 80.0,
+            "mean": 80.0,
+            "min": 80.0,
+            "name": "tts",
+            "p50": 80.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": true
+          },
+          {
+            "count": 2,
+            "max": 284.0,
+            "mean": 283.0,
+            "min": 282.0,
+            "name": "user_speech",
+            "p50": 282.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          },
+          {
+            "count": 2,
+            "max": 449.0,
+            "mean": 448.0,
+            "min": 447.0,
+            "name": "voice_to_voice",
+            "p50": 447.0,
+            "p95": null,
+            "p99": null,
+            "unit": "ms",
+            "withheld_percentiles": {
+              "p95": 20,
+              "p99": 100
+            },
+            "zero_variance": false
+          }
+        ],
+        "missing_boundaries": {},
+        "turns": 2
+      },
+      "executed": true,
+      "injected_delays_ms": {
+        "llm_first_token_ms": 120.0,
+        "stt_final_ms": 40.0,
+        "transport_send_ms": 5.0,
+        "tts_first_audio_ms": 80.0
+      },
+      "name": "B-simulated",
+      "reason": "",
+      "warm": {
+        "failed_sessions": 0,
+        "measurements": [
+          {
+            "count": 110,
+            "max": 12.0,
+            "mean": 5.7,
+            "min": 5.0,
+            "name": "egress",
+            "p50": 5.0,
+            "p95": 8.0,
+            "p99": 12.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 241.0,
+            "mean": 240.0090909090909,
+            "min": 240.0,
+            "name": "endpoint",
+            "p50": 240.0,
+            "p95": 240.0,
+            "p99": 240.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 393.0,
+            "mean": 372.0181818181818,
+            "min": 351.0,
+            "name": "llm",
+            "p50": 374.0,
+            "p95": 383.0,
+            "p99": 384.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 84.0,
+            "mean": 80.22727272727273,
+            "min": 80.0,
+            "name": "tts",
+            "p50": 80.0,
+            "p95": 81.0,
+            "p99": 83.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 299.0,
+            "mean": 277.5,
+            "min": 254.0,
+            "name": "user_speech",
+            "p50": 279.0,
+            "p95": 288.0,
+            "p99": 295.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          },
+          {
+            "count": 110,
+            "max": 455.0,
+            "mean": 447.7181818181818,
+            "min": 446.0,
+            "name": "voice_to_voice",
+            "p50": 447.0,
+            "p95": 451.0,
+            "p99": 453.0,
+            "unit": "ms",
+            "withheld_percentiles": {},
+            "zero_variance": false
+          }
+        ],
+        "missing_boundaries": {},
+        "turns": 110
+      }
+    },
+    {
+      "cold": null,
+      "executed": false,
+      "injected_delays_ms": null,
+      "name": "C-live",
+      "reason": "deepgram: NOT EXECUTED \u2014 no credential; groq: NOT EXECUTED \u2014 no credential; cartesia: NOT EXECUTED \u2014 no credential",
+      "warm": null
+    }
+  ],
+  "stage2_host": "NOT EXECUTED \u2014 no Oracle A1 class host provisioned",
+  "telemetry_overhead": {
+    "measurements": [
+      {
+        "count": 27,
+        "max": 1463.8640000048326,
+        "mean": 1448.5584120390101,
+        "min": 1422.5417910056422,
+        "name": "session_wall_clock (Epic 10 wired)",
+        "p50": 1450.5127080046805,
+        "p95": 1460.9867920080433,
+        "p99": null,
+        "unit": "ms",
+        "withheld_percentiles": {
+          "p99": 100
+        },
+        "zero_variance": false
+      },
+      {
+        "count": 27,
+        "max": 1461.9200829911279,
+        "mean": 1448.1332592587462,
+        "min": 1424.2885419953382,
+        "name": "session_wall_clock (Epic 10 detached)",
+        "p50": 1450.1670840109,
+        "p95": 1456.5922920010053,
+        "p99": null,
+        "unit": "ms",
+        "withheld_percentiles": {
+          "p99": 100
+        },
+        "zero_variance": false
+      }
+    ],
+    "note": "Wall-clock includes the harness's paced frame delivery, which dominates both arms; only the difference is meaningful, and it is one machine's figure, not a general one.",
+    "p50_difference_ms": 0.34562399378046393
+  }
+}

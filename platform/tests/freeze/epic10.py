@@ -23,12 +23,22 @@ Epic 9 data enters in exactly one direction and one form: its **historical diges
 the `v4.0.0` tree as evidence (R-1). That is an observation of a value, not the execution of Epic
 9's freeze.
 
-## The frozen boundary is a commit, not `HEAD`
+## The frozen boundary is a **commit range**, not `HEAD` and not the working tree
 
-Every "unchanged since" comparison here is against **`CERTIFIED_COMMIT`**, pinned as a literal.
-Deriving the boundary from `HEAD` would let the manifest drift the moment M10.15 commits — a freeze
-that moved with the tree would not be a freeze. Pinning it means this manifest describes the same
-state forever.
+Every "unchanged since" comparison here runs between two pinned literals —
+**`CERTIFIED_COMMIT` → `FREEZE_BOUNDARY_COMMIT`** — and never against `HEAD` or the checkout.
+
+Deriving the near end from `HEAD` would let the manifest drift the moment M10.15 commits. Leaving
+the *far* end implicit is the same mistake pointing the other way, and it was the live defect this
+module carried until **M11.2.1**: `git diff CERTIFIED_COMMIT -- <path>` with no second ref compares
+against **the working tree**, so EF-1 and EF-10 silently changed the question from *"did the freeze
+change this?"* to *"has anyone changed this, ever, in any later epic?"* Those are different
+questions, and only the first is Epic 10's to ask. EF-11 already stated that distinction
+(`EPIC10_FREEZE_BOUNDARY_PATHS`); M11.2.1 finished applying it (**ADR-0052**).
+
+Pinning both ends means this manifest describes the same state forever, and legitimate later
+work — governed by its own accepted ADRs and certification gates — cannot make Epic 10
+retroactively un-freeze.
 
 ## Derived versus declared (honesty, not decoration)
 
@@ -85,6 +95,21 @@ BASELINE_COMMIT = "532b0bd72d55921fa385a3e4162d899c90fbe6ad"
 #: never read from `HEAD`: a boundary derived from the thing under test cannot detect that thing
 #: moving, and would silently absorb M10.15's commit into the frozen inventory.
 CERTIFIED_COMMIT = "db8c50828c91567aa9a7c518e58f804593a592f9"
+
+#: **The freeze boundary commit** — the far end of every "did the freeze change this?" range.
+#:
+#: M10.14 deferred its commit; M10.15 discharged it under DL-0146 **R-2**, so the tree that *is*
+#: the frozen state, once committed, is the Epic 10 release commit. Every attestation and test
+#: that asks what **the freeze** changed compares `CERTIFIED_COMMIT → FREEZE_BOUNDARY_COMMIT`.
+#:
+#: This is the same correction EF-11 already carries (see `EPIC10_FREEZE_BOUNDARY_PATHS`): a
+#: comparison whose far end is the **working tree** stops being a question about M10.14 the moment
+#: anything else happens in the repository. Asked of the live tree, EF-1 and EF-10 could not
+#: distinguish *"the freeze changed a frozen plane"* from *"a later, separately governed epic
+#: did"* — so they would report `NOT_FROZEN` for work Epic 10 never had any authority over.
+#: Pinning both ends makes the answer a permanent fact about history rather than a statement
+#: about whoever last edited the checkout (ADR-0052).
+FREEZE_BOUNDARY_COMMIT = "3779e932182ed06ec5411c83ba53f0c2b585b8b8"
 
 #: The migration head M10.13 certified. Asserted, never inferred: a freeze that read the head from
 #: the chain would happily freeze a chain that had grown.
@@ -388,6 +413,14 @@ def _require_boundaries() -> None:
         raise FreezeEvidenceUnavailable(
             f"the certified commit {CERTIFIED_COMMIT} is not resolvable as itself"
         )
+    boundary = _git("rev-parse", f"{FREEZE_BOUNDARY_COMMIT}^{{commit}}").strip()
+    if boundary != FREEZE_BOUNDARY_COMMIT:  # pragma: no cover — a rewritten history
+        raise FreezeEvidenceUnavailable(
+            f"the freeze boundary {FREEZE_BOUNDARY_COMMIT} is not resolvable as itself"
+        )
+    # Ancestry of the range is asserted by its own test against real git, not here: `_is_ancestor`
+    # is a documented monkeypatch seam (EF-11's later-tag scenario stubs it), so a guard placed in
+    # this helper would fail on a stub rather than on the repository.
 
 
 def _changed(from_ref: str, to_ref: str | None, *pathspecs: str) -> tuple[tuple[str, str], ...]:
@@ -575,7 +608,7 @@ def _bad(control_id: str, violations: Sequence[str], detail: str) -> FreezeAttes
 
 
 def _ef_1() -> FreezeAttestation:
-    changed = _changed(CERTIFIED_COMMIT, None, *FROZEN_PLANES)
+    changed = _changed(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, *FROZEN_PLANES)
     return _bad(
         "EF-1",
         [f"{p}: frozen plane changed ({s})" for s, p in changed],
@@ -590,7 +623,7 @@ def _ef_2() -> FreezeAttestation:
     violations = []
     if versions[-1] != EPIC10_MIGRATION_HEAD:
         violations.append(f"migration head is {versions[-1]}, expected {EPIC10_MIGRATION_HEAD}")
-    added = _changed(CERTIFIED_COMMIT, None, "platform")
+    added = _changed(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "platform")
     for status, path in added:
         if "/migrations/v" in path:
             violations.append(f"{path}: migration changed by M10.14 ({status})")
@@ -624,7 +657,7 @@ def _ef_4() -> FreezeAttestation:
 
 
 def _ef_5() -> FreezeAttestation:
-    changed = _changed(CERTIFIED_COMMIT, None, *EPIC9_FREEZE_ARTIFACTS)
+    changed = _changed(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, *EPIC9_FREEZE_ARTIFACTS)
     return _bad(
         "EF-5",
         [f"{p}: Epic 9 artifact modified by M10.14 ({s})" for s, p in changed],
@@ -633,7 +666,7 @@ def _ef_5() -> FreezeAttestation:
 
 
 def _ef_6() -> FreezeAttestation:
-    changed = _changed(CERTIFIED_COMMIT, None, *M10_13_ARTIFACTS)
+    changed = _changed(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, *M10_13_ARTIFACTS)
     return _bad(
         "EF-6",
         [f"{p}: M10.13 certification artifact modified ({s})" for s, p in changed],
@@ -712,7 +745,7 @@ def _ef_9() -> FreezeAttestation:
 
 def _ef_10() -> FreezeAttestation:
     """The freeze principle: freeze the certified state, do not improve it."""
-    changed = _changed(CERTIFIED_COMMIT, None, "platform")
+    changed = _changed(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "platform")
     violations = [
         f"{p}: the freeze changed a production path ({s})"
         for s, p in changed

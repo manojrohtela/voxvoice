@@ -1,0 +1,77 @@
+{
+  "milestone": "M11.16.6",
+  "title": "ICE Policy Ratification, Stage-2 Readiness & Live Execution Gate",
+  "date": "2026-09-20",
+  "verdict": "PARTIALLY_READY",
+  "live_conversation_executed": false,
+  "entry_state": {
+    "head": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "main": "c3c7397af5d9713565ed2772f91a6cb488582b06",
+    "v5_0_0_tag_object": "9d60ee894e53636f76987fc7824cd14df2a32e39",
+    "branch": "feat/m10.2-durable-event-foundation",
+    "v6_tags": 0,
+    "stashes": 0,
+    "packages": 53,
+    "epic9_certification_digest": "c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6",
+    "epic10_certification_digest": "7e57bc14764201b123c49b9321f15d9c41f0ee7015e6879c64c0307e56db3d0d",
+    "epic10_freeze_digest": "d3d4858d5f18b7f6d583f4d34caeec52933acc262e36d4f8b343e2e8b6a00d38",
+    "epic11_certification_digest": "25c9f1527cbba91cd943e41580926c8ea1d35f20a0a66fd21ef29253ab3933ba"
+  },
+  "r71": {
+    "status": "CLOSED",
+    "adr": "ADR-0054",
+    "library_behaviour": "aiortc 1.15.0 substitutes RTCIceServer('stun:stun.l.google.com:19302') when iceServers is None",
+    "measured_before": ["host", "srflx"],
+    "measured_after_default_policy": ["host"],
+    "selected_policy": "explicit at composition root; default explicitly no ICE servers; STUN configurable; TURN refused",
+    "stun_config_key": "VOXVOICE_ICE_STUN_URLS",
+    "turn_implemented": false,
+    "turn_disposition": "deployment prerequisite; turn:/turns: URLs refused at startup",
+    "focused_tests": 16
+  },
+  "gates": {
+    "G1_a1_host": {"status": "BLOCKED", "detail": "not provisioned (distinct from provisioned-but-unreachable); no oci CLI, no ~/.oci, no Terraform, no Ansible"},
+    "G2_public_ip_dns": {"status": "BLOCKED", "detail": "downstream of G1; no address invented"},
+    "G3_https": {"status": "BLOCKED", "detail": "downstream of G1/G2"},
+    "G4_udp_media_range": {"status": "BLOCKED", "detail": "downstream of G1"},
+    "G5_deepgram": {"status": "BLOCKED", "detail": "ABSENT via CredentialProvider (presence only)"},
+    "G6_groq": {"status": "BLOCKED", "detail": "ABSENT via CredentialProvider (presence only)"},
+    "G7_cartesia": {"status": "BLOCKED", "detail": "ABSENT via CredentialProvider (presence only)"},
+    "G8_tts_voice_id": {"status": "BLOCKED", "detail": "VOXVOICE_TTS_VOICE_ID ABSENT"},
+    "G9_operator_browser": {"status": "BLOCKED", "detail": "browser environment exists; no operator at a microphone; synthetic substitutes forbidden and not built"},
+    "G10_deployed_application": {"status": "BLOCKED", "detail": "no deployment target exists"}
+  },
+  "forbidden_substitutions_used": {
+    "e2_micro_1gb": false, "local_providers": false, "fake_browser": false,
+    "scripted_aiortc_peer_as_live": false, "synthetic_audio": false
+  },
+  "live_execution": {"status": "NOT_EXECUTED", "events_observed": [], "metric_turn_produced": false},
+  "adr_0053": {
+    "status": "PROPOSED — not ratified, not applied, not edited",
+    "applicable_stt_semantics": "endpoint_decided -> stt_final (unchanged)",
+    "stt_measurement": "UNAVAILABLE — no session ran",
+    "e11_12_implication": "remains INCONCLUSIVE"
+  },
+  "risks": {
+    "R-33": "OPEN", "R-34": "OPEN", "R-54": "OPEN", "R-58": "OPEN",
+    "R-63": "OPEN", "R-66": "OPEN", "R-68": "OPEN", "R-69": "OPEN",
+    "R-71": "CLOSED — ADR-0054 accepted, implemented, tested, documented"
+  },
+  "certification_impact": {
+    "E11-12": "INCONCLUSIVE — unchanged",
+    "E11-15": "NOT EXECUTED — unchanged",
+    "controls_satisfied": "14 / 16",
+    "catalogue_modified": false
+  },
+  "production_code_changed": true,
+  "production_code_change_summary": "ICE policy made explicit: new providers/transport/ice.py; RTCConfiguration now always passed; policy threaded through bootstrap and the WebRTC composition root",
+  "remaining_prerequisites": [
+    "Provision Oracle Ampere A1 (2 OCPU / 12 GB) with public IPv4; open ports at BOTH Oracle security list and host iptables",
+    "DNS + HTTPS for that host",
+    "Inbound UDP on the media range",
+    "VOXVOICE_SECRET_DEEPGRAM_API_KEY, VOXVOICE_SECRET_GROQ_API_KEY, VOXVOICE_SECRET_CARTESIA_API_KEY on the host only",
+    "VOXVOICE_TTS_VOICE_ID",
+    "An operator at a browser to grant the microphone and speak the utterance",
+    "Choose the ICE policy for that host: set VOXVOICE_ICE_STUN_URLS if its public IPv4 is NAT-mapped"
+  ]
+}

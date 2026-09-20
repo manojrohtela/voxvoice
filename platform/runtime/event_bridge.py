@@ -91,6 +91,33 @@ class RuntimeEventBridge:
             EventType.PROVIDER_CONNECTED, {"capability": capability, "provider": name}
         )
 
+    def transport_reality(self, kind: str, detail: str) -> None:
+        """One AR-6 transport-reality fact (M11.5).
+
+        The **only** place `TransportEventKind` is mapped onto the event vocabulary, so the
+        transport plugin never imports `core.events` and the runtime never learns a library's
+        state machine. Payloads carry the kind and a short reason and nothing else — no SDP, no
+        token, no vendor object (ADR-0049 CR5)."""
+        mapping = {
+            "connected": EventType.TRANSPORT_CONNECTED,
+            "media_ready": EventType.TRANSPORT_MEDIA_READY,
+            "disconnected": EventType.TRANSPORT_DISCONNECTED,
+            "failed": EventType.TRANSPORT_FAILED,
+        }
+        event_type = mapping.get(kind)
+        if event_type is None:  # pragma: no cover — a new kind must be mapped deliberately
+            return
+        self._provider.publish(event_type, {"detail": detail})
+
+    def provider_degraded(self, payload: dict[str, str]) -> None:
+        """One declared degradation (M11.4, AR-24).
+
+        Reuses `PROVIDER_DISCONNECTED` rather than minting a new `EventType`: AR-32 permits
+        additive vocabulary, but a degradation *is* the runtime reporting that a capability is
+        not operating as declared, and `payload["kind"]` already carries which way. Adding a type
+        would also mean a second producer question under AR-2 for no new information."""
+        self._provider.publish(EventType.PROVIDER_DISCONNECTED, dict(payload))
+
     def provider_disconnected(self, capability: str, name: str) -> None:
         self._provider.publish(
             EventType.PROVIDER_DISCONNECTED, {"capability": capability, "provider": name}

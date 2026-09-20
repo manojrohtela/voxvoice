@@ -634,12 +634,17 @@ def test_the_durable_log_contract_is_unchanged():
 
 
 def test_no_production_wiring_was_introduced():
-    """SV5/SI1 — asserted component by component, because "we didn't wire anything" is exactly the
-    kind of claim that decays silently."""
+    """SV5/SI1, **retargeted at M11.12** — the milestone that introduces the production wiring.
+
+    "We didn't wire anything" was true of M10.11 and is deliberately no longer true: M11.12 is
+    authorized to supply the sink. What SV5/SI1 protect beyond that is unchanged and still
+    asserted — shadow validation introduced no wiring of its own, the runtime acquires no storage,
+    and there is still exactly one bus."""
     runtime_root = REPO_ROOT / "platform" / "runtime" / "orchestrator"
     orchestrator = (runtime_root / "orchestrator.py").read_text()
-    assert "InProcessEventBus()" in orchestrator  # still a bare bus: no durable sink
-    assert "durable=" not in orchestrator
+    assert orchestrator.count("InProcessEventBus(") == 1  # one bus, now given an injected sink
+    for token in ("SqlDurableEventSpine", "EventDatabase", "sqlmodel", "sqlalchemy"):
+        assert token not in orchestrator
 
     production = [
         path
@@ -648,6 +653,11 @@ def test_no_production_wiring_was_introduced():
         and ".venv" not in path.parts
         and "__pycache__" not in path.parts
     ]
+    # The metric producer and the metric buffer may now be constructed — that *is* M11.12 — but
+    # only by the **composition root**. Anywhere else would mean a plane wiring itself, which is
+    # the property SV5/SI1 were really protecting: `runtime/`, `events/`, `observability/` and
+    # `billing/` must each still be unable to reach the others.
+    permitted = {"platform/bootstrap.py"}
     for name in ("TurnLatencyTap", "MetricTurnBuffer"):
         callers = []
         for path in production:
@@ -660,7 +670,7 @@ def test_no_production_wiring_was_introduced():
             )
             if constructs:
                 callers.append(str(path.relative_to(REPO_ROOT)))
-        assert callers == [], (name, callers)
+        assert set(callers) <= permitted, (name, callers)
 
     billing_app = REPO_ROOT / "platform" / "billing" / "application" / "application.py"
     application = billing_app.read_text()

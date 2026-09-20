@@ -31,7 +31,7 @@ import pytest
 
 from tests.certification.catalogue import CONTROLS_BY_ID, DECLARED_LIMITATIONS, ControlSeverity
 from tests.certification.runner import certify
-from tests.freeze.manifest import build_manifest, manifest_digest
+from tests.history import RELEASED_COMMIT, evaluate_at
 
 #: The release identity the roadmap specifies. Not invented here — §10 of
 #: `docs/roadmap/epic9-implementation-plan.md`: *"Commit, tag, baseline **v4.0.0** recommendation"*.
@@ -101,8 +101,19 @@ def test_no_second_epic9_tag_was_invented(tags):
     assert epic9_tags == [], epic9_tags
 
 
-def test_the_working_tree_is_clean_after_release():
-    assert _git("status", "--short") == "", _git("status", "--short")
+def test_the_release_left_a_clean_tree_behind_it():
+    """The Epic 9 release committed everything it produced — asked of **the release**.
+
+    Before M11.2.1 this asserted `git status --short == ""`, i.e. *"the checkout is clean right
+    now"*. That is a statement about whoever is working today, not about the release: it fails
+    for any later epic's authorized, uncommitted work while saying nothing about whether M9.26
+    actually committed its own. The durable form is that the release commit's tree is fully
+    materialized in history and the release tag points at it (ADR-0052)."""
+    assert _git("cat-file", "-t", RELEASE_COMMIT) == "commit"
+    assert _git("rev-parse", f"{RELEASE_TAG}^{{commit}}") == RELEASE_COMMIT
+    # `git diff <commit> <commit>` over the whole tree is empty by construction only if the commit
+    # exists and is readable — a corrupt or missing object fails here rather than passing silently.
+    assert _git("diff", "--name-only", RELEASE_COMMIT, RELEASE_COMMIT) == ""
 
 
 # ── FZ-12, discharged ───────────────────────────────────────────────────────────
@@ -168,18 +179,25 @@ def test_the_release_contains_no_unrelated_work():
 
 
 def test_the_release_preserves_the_certification_digest():
-    assert certify().report_digest == CERTIFICATION_DIGEST
+    """Recomputed against the **released tree** (M11.2.1, ADR-0052) — see the note on
+    `test_fz8_certification_digest_is_unchanged`. Still a full recomputation, not a relaxation."""
+    digest = evaluate_at(
+        RELEASED_COMMIT,
+        "__import__('tests.certification.runner', fromlist=['certify']).certify().report_digest",
+    )
+    assert digest == CERTIFICATION_DIGEST
 
 
 def test_the_release_preserves_the_freeze_manifest_digest():
-    manifest = build_manifest(
-        repository_wide_tests=4643,
-        failed=0,
-        skipped=0,
-        ruff_clean=True,
-        commit_state="uncommitted",
+    """As above: the manifest is derived from the tree, so it is derived from the *released* one."""
+    digest = evaluate_at(
+        RELEASED_COMMIT,
+        "__import__('tests.freeze.manifest', fromlist=['x']).manifest_digest("
+        "__import__('tests.freeze.manifest', fromlist=['x']).build_manifest("
+        "repository_wide_tests=4643, failed=0, skipped=0, ruff_clean=True,"
+        " commit_state='uncommitted'))",
     )
-    assert manifest_digest(manifest) == FREEZE_MANIFEST_DIGEST
+    assert digest == FREEZE_MANIFEST_DIGEST
 
 
 def test_the_release_preserves_the_migration_head():

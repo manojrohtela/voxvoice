@@ -33,6 +33,7 @@ from tests.freeze.epic10 import (
     EPIC10_FREEZE_CONTROLS,
     EPIC10_FREEZE_VERSION,
     EPIC10_MIGRATION_HEAD,
+    FREEZE_BOUNDARY_COMMIT,
     FREEZE_CONTROLS_BY_ID,
     FREEZE_EVALUATORS,
     FREEZE_PASSING_OUTCOMES,
@@ -104,6 +105,16 @@ def _v5_existed_at_the_freeze_boundary() -> bool:
 def _release_artifacts_in(paths) -> list[str]:
     """Which of `paths` are release artifacts. Used against the freeze boundary, never the tree."""
     return [p for p in paths if p.startswith("docs/releases/")]
+
+
+def _adr_inventory_at(commit: str) -> tuple[str, ...]:
+    """The ADR filenames present in `commit`'s tree — history, never the checkout.
+
+    Read with `ls-tree` rather than globbing the filesystem so the answer describes the commit
+    under test and cannot be changed by a later epic adding the ADRs its own gates require
+    (ADR-0052)."""
+    listing = _git("ls-tree", "-r", "--name-only", commit, "--", "docs/adr")
+    return tuple(sorted(line.rsplit("/", 1)[-1] for line in listing.splitlines() if line.strip()))
 
 
 def _tracked_at_the_freeze_boundary(path: str) -> bool:
@@ -307,7 +318,8 @@ def test_epic9s_freeze_implementation_is_unchanged():
     from tests.freeze.manifest import FREEZE_MANIFEST_VERSION
 
     assert (
-        _git("diff", "--name-only", CERTIFIED_COMMIT, "--", "platform/tests/freeze/manifest.py")
+        _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT,
+             "--", "platform/tests/freeze/manifest.py")
         == ""
     )
 
@@ -316,7 +328,8 @@ def test_epic9s_freeze_implementation_is_unchanged():
 
 
 def test_epic9_freeze_and_release_artifacts_are_unchanged():
-    touched = _git("diff", "--name-only", CERTIFIED_COMMIT, "--", *freeze.EPIC9_FREEZE_ARTIFACTS)
+    touched = _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT,
+                   "--", *freeze.EPIC9_FREEZE_ARTIFACTS)
     assert touched == "", touched
 
 
@@ -357,7 +370,7 @@ def test_the_migration_head_remains_0036(manifest):
 
 def test_no_m10_14_migration_was_created():
     for root in ("events", "api", "billing"):
-        assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--",
+        assert _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "--",
                     f"platform/{root}/persistence/migrations") == "", root
 
 
@@ -690,7 +703,7 @@ def test_epic10_never_recomputes_an_epic9_digest(manifest):
 
 
 def test_the_epic9_release_record_is_not_modified_by_the_freeze():
-    assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--",
+    assert _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "--",
                 "docs/releases/epic9-billing-platform-v1.0.md") == ""
 
 
@@ -715,7 +728,8 @@ def test_the_certification_digest_is_not_recomputed_by_the_freeze(manifest):
 
 
 def test_the_m10_13_surface_is_untouched():
-    assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--", *freeze.M10_13_ARTIFACTS) == ""
+    assert _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT,
+                "--", *freeze.M10_13_ARTIFACTS) == ""
 
 
 def test_all_thirteen_certification_results_are_recorded(manifest):
@@ -855,7 +869,9 @@ def test_the_freeze_does_not_commit_anything():
     )
     # A later release commit is an authorized *descendant*, never a rewrite of the boundary.
     assert freeze._is_ancestor(CERTIFIED_COMMIT, _git("rev-parse", "HEAD"))
-    assert _git("diff", "--cached", "--name-only") == ""
+    # …and the freeze itself staged nothing: asked between the two pinned commits, not of whatever
+    # a later epic happens to have in its index (ADR-0052).
+    assert freeze._is_ancestor(CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT)
 
 
 # ── 11. ruff scope, recorded exactly (R-7) ─────────────────────────────────────
@@ -875,15 +891,51 @@ def test_the_manifest_makes_no_repository_wide_ruff_claim(manifest):
 
 
 def test_voicebot_is_outside_scope_and_unmodified():
-    assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--", "platform/voicebot") == ""
+    assert _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT,
+                "--", "platform/voicebot") == ""
 
 
 # ── 12. the M10.14 boundary ────────────────────────────────────────────────────
 
 
+def test_the_freeze_range_is_a_real_history():
+    """Both ends of the freeze range resolve, and the range runs forward (ADR-0052).
+
+    Asserted against **real git** rather than through `freeze._is_ancestor`, which is a documented
+    monkeypatch seam EF-11's later-tag scenario stubs out. A range whose ends did not resolve, or
+    that ran backwards, would make every comparison below vacuous."""
+    assert _git("cat-file", "-t", CERTIFIED_COMMIT) == "commit"
+    assert _git("cat-file", "-t", FREEZE_BOUNDARY_COMMIT) == "commit"
+    assert CERTIFIED_COMMIT != FREEZE_BOUNDARY_COMMIT
+    assert (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT],
+            capture_output=True, text=True, cwd=REPO_ROOT, check=False,
+        ).returncode
+        == 0
+    )
+
+
+def test_the_freeze_boundary_is_the_epic10_release_commit():
+    """The far end is `v5.0.0` — the commit that discharged M10.14's deferred commit (DL-0146 R-2).
+
+    Pinned as a literal *and* cross-checked against the tag, so a moved tag is caught rather than
+    silently followed."""
+    assert _git("rev-parse", f"{freeze.RELEASE_TAG}^{{commit}}") == FREEZE_BOUNDARY_COMMIT
+
+
 def test_the_freeze_changes_no_production_code():
+    """What **the freeze** changed, over the pinned range — not what anyone changed since.
+
+    Before M11.2.1 this compared the certified commit against the **working tree**, so it reported
+    a frozen-plane violation for any later epic's authorized work. Epic 11 legitimately modifies
+    `platform/core` and `platform/runtime` under ADR-0044, and that says nothing whatever about
+    whether M10.14 was a clean freeze (ADR-0052)."""
     for plane in freeze.FROZEN_PLANES:
-        assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--", plane) == "", plane
+        assert (
+            _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "--", plane)
+            == ""
+        ), plane
 
 
 def test_the_freeze_creates_no_release_notes_or_v5_artifact():
@@ -897,14 +949,31 @@ def test_the_freeze_creates_no_release_notes_or_v5_artifact():
     assert [p for p in _release_docs_at_the_freeze_boundary() if "epic10" in p] == []
 
 
-def test_no_adr_0044_was_created():
-    """R-3 — M10.14 is governance evidence; DL-0146 carries it."""
-    assert not list((REPO_ROOT / "docs" / "adr").glob("ADR-0044*"))
-    assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--", "docs/adr") == ""
+def test_the_freeze_authored_no_adr():
+    """R-3 — M10.14 is governance evidence, carried by DL-0146, so it wrote no ADR.
+
+    Asked of **history**, not of the live checkout. The original form globbed the working tree for
+    `ADR-0044*` and asserted absence, which silently encoded a second claim M10.14 was never
+    entitled to make: *that ADR numbering would never advance past 0043*. It did advance —
+    `docs/adr/README.md` states numbering is sequential and never reused, so 0044 was simply the
+    next free number, and Epic 11 consumed 0044–0051 legitimately at M11.1.
+
+    The durable fact is that **no ADR existed at the freeze boundary that did not exist at the
+    certified commit**. That stays true forever and cannot be falsified by a later epic writing the
+    ADRs its own gates require (ADR-0052)."""
+    at_boundary = _adr_inventory_at(FREEZE_BOUNDARY_COMMIT)
+    assert at_boundary, "no ADR inventory at the freeze boundary — the evidence is unreadable"
+    assert [name for name in at_boundary if name.startswith("ADR-0044")] == []
+    assert _adr_inventory_at(CERTIFIED_COMMIT) == at_boundary
+    assert (
+        _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT, "--", "docs/adr")
+        == ""
+    )
 
 
 def test_the_roadmap_is_unmodified():
-    assert _git("diff", "--name-only", CERTIFIED_COMMIT, "--", "docs/roadmap") == ""
+    assert _git("diff", "--name-only", CERTIFIED_COMMIT, FREEZE_BOUNDARY_COMMIT,
+                "--", "docs/roadmap") == ""
 
 
 def test_dl_0146_records_the_freeze_and_dl_0139_stays_resolved():

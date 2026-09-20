@@ -12,8 +12,23 @@ and (optional) Voice Activity silence — never provider objects. It replaces th
 pipeline's STT-final completion heuristic: the *decision* to finish a turn now
 flows through this framework. M3.3 is deterministic, policy-driven endpointing —
 no semantic/LLM endpointing, interruptions, or double-talk (M3.4+).
+
+**M11.8 (ADR-0047 ME1)** adds `AudioEndpointDetector`: the audio-driven half, which turns per-frame
+voice-activity verdicts into `speech_start` / `speech_end` boundaries using duration-based
+hysteresis. **VAD is speech detection; endpointing decides when a speech turn ends.** The detector
+stays provider-neutral — booleans and milliseconds in, boundaries out — and the decision *record*
+remains the `EndpointEngine`'s, reached through the new neutral `note_speech_end` signal.
 """
 
+from .audio import (
+    AUDIO_ENDPOINT_TRANSITIONS,
+    AudioEndpointDetector,
+    AudioEndpointKind,
+    AudioEndpointPolicy,
+    AudioEndpointSignal,
+    AudioEndpointState,
+    frame_duration_ms,
+)
 from .context import EndpointContext, EndpointTiming
 from .coordinator import EndpointCoordinator
 from .decision import (
@@ -26,6 +41,13 @@ from .events import EndpointEvent, EndpointObserver
 from .policy import EndpointPolicy
 
 __all__ = [
+    "AUDIO_ENDPOINT_TRANSITIONS",
+    "AudioEndpointDetector",
+    "AudioEndpointKind",
+    "AudioEndpointPolicy",
+    "AudioEndpointSignal",
+    "AudioEndpointState",
+    "frame_duration_ms",
     "EndpointEngine",
     "EndpointPolicy",
     "EndpointCoordinator",

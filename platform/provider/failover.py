@@ -1,6 +1,13 @@
 """FailoverController (M5.6B-2) — deterministic failover. No retry loops.
 
-Given a `RoutingDecision`'s ordered candidate chain and the set of names already attempted,
+**M11.4 (ADR-0046 FT-D3):** the `decision` parameter is annotated with `core.failover.
+CandidateChain`, a structural Protocol over the single attribute this controller reads.
+`RoutingDecision` satisfies it unchanged, so the Provider Runtime behaves **exactly** as before;
+what the widening buys is that the media path can now reuse this controller without importing
+`provider.router` and, through it, half the Provider Runtime's domain model. Additive and
+behaviour-preserving — no logic below is touched.
+
+Given an ordered candidate chain and the set of names already attempted,
 selects the next candidate — **provider selection only**, never a retry loop (no backoff, no
 repeated attempts against the same candidate, no sleeping). The caller (the runtime's
 intelligence path) drives the bounded walk down the chain; this controller only answers "what
@@ -12,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from .router import RoutingDecision
+from core.failover import CandidateChain
 
 
 class FailoverReason(StrEnum):
@@ -34,7 +41,7 @@ class FailoverController:
         self._stats = {"selections": 0, "failovers": 0, "exhausted": 0}
 
     def next(
-        self, decision: RoutingDecision, *, attempted: tuple[str, ...], reason: FailoverReason,
+        self, decision: CandidateChain, *, attempted: tuple[str, ...], reason: FailoverReason,
     ) -> FailoverOutcome:
         """The next untried candidate in `decision.candidates`, or exhausted if none remain.
         Pure selection — no side effects beyond the local selection/failover/exhaustion

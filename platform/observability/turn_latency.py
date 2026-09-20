@@ -70,8 +70,8 @@ log = logging.getLogger("voxvoice.observability.turn_latency")
 #: stage without a tap fails against this list rather than against someone's memory.
 STAGE_BOUNDARIES: tuple[str, ...] = (
     "speech_end",
-    "stt_final",
     "endpoint_decided",
+    "stt_final",
     "llm_first_token",
     "tts_first_audio",
     "first_audio_out",
@@ -80,17 +80,43 @@ STAGE_BOUNDARIES: tuple[str, ...] = (
 #: Recorded, but not a latency stage — it marks the turn, and no duration is derived across it.
 LIFECYCLE_MARKERS: tuple[str, ...] = ("playback_start",)
 
+#: Boundaries recorded **outside** the voice-to-voice chain (M11.8). `speech_start` is the instant
+#: the caller began the utterance, which is *before* `speech_end` and therefore before the chain
+#: starts: it is evidence about the turn, not a stage of responding to it. Keeping it out of
+#: `STAGE_BOUNDARIES` is what preserves the chain's summation property (below).
+AUDIO_BOUNDARIES: tuple[str, ...] = ("speech_start",)
+
 #: Every boundary name this tap accepts.
-KNOWN_BOUNDARIES: frozenset[str] = frozenset(STAGE_BOUNDARIES + LIFECYCLE_MARKERS)
+KNOWN_BOUNDARIES: frozenset[str] = frozenset(
+    STAGE_BOUNDARIES + LIFECYCLE_MARKERS + AUDIO_BOUNDARIES
+)
 
 #: Derived stage → (from, to). A contiguous chain over the six boundaries, so when all six are
 #: present the stages sum to `voice_to_voice_ms` up to integer rounding.
+#:
+#: **M11.8 remap (ADR-0047 ME1, completing ADR-0038 TP3a).** The chain now follows §A8's ordering —
+#: *"endpoint decision ≤ 250 ms after true end-of-speech · STT final ≤ 150 ms after endpoint"* —
+#: because endpointing is audio-driven: true end-of-speech comes from the voice-activity signal,
+#: not from an STT `Final`. **Every key name is preserved** (`stt`, `endpoint`, `llm`, `tts`,
+#: `egress`); what changed is which instants they span, which is an accuracy gain, not a contract
+#: change (ME2: additive; ME4: `voice_to_voice_ms` frozen).
+#:
+#: A segment-driven profile (no audio endpointing) reaches `stt_final` *before* `endpoint_decided`,
+#: so its `stt` interval would be negative and is **dropped, never emitted** (ME6/TP5) — the
+#: honest outcome ADR-0038 TP3a anticipated for exactly this transition.
 STAGE_INTERVALS: tuple[tuple[str, str, str], ...] = (
-    ("stt", "speech_end", "stt_final"),
-    ("endpoint", "stt_final", "endpoint_decided"),
-    ("llm", "endpoint_decided", "llm_first_token"),
+    ("endpoint", "speech_end", "endpoint_decided"),
+    ("stt", "endpoint_decided", "stt_final"),
+    ("llm", "stt_final", "llm_first_token"),
     ("tts", "llm_first_token", "tts_first_audio"),
     ("egress", "tts_first_audio", "first_audio_out"),
+)
+
+#: Derived stages **outside** the chain (M11.8, ME2's additive limb). `user_speech` is how long the
+#: caller actually spoke; it precedes the chain, so it is deliberately not part of the sum that
+#: makes up `voice_to_voice_ms`.
+ADDITIVE_INTERVALS: tuple[tuple[str, str, str], ...] = (
+    ("user_speech", "speech_start", "speech_end"),
 )
 
 #: Terminal outcomes (ADR-0038 TP6).
@@ -134,12 +160,23 @@ class TurnLatencyTap:
 
     # ── LatencyObserver ─────────────────────────────────────────────────────
 
-    def record(self, session_id: str, turn_index: int, boundary: str) -> None:
-        """Note that `boundary` was reached, now.
+    def record(
+        self, session_id: str, turn_index: int, boundary: str, *, backdate_ms: float = 0.0
+    ) -> None:
+        """Note that `boundary` was reached, now — or `at` an explicitly supplied instant.
 
         The **first** occurrence wins: a boundary is the instant a stage was *first* reached, and
         a re-record would move a measurement backwards in the middle of a turn.
+
+        `backdate_ms` exists for audio-derived boundaries (M11.8). Endpointing can only
+        *recognise* the end of speech once its silence hold has elapsed, so stamping the clock at
+        recognition time would place `speech_end` a few hundred milliseconds after the caller
+        actually stopped — silently **understating** every `voice_to_voice_ms` derived from it. The
+        caller reports how much audio ago the boundary really was and this tap subtracts it from
+        its own clock, so TP7 holds: the instant is still monotonic and still from one clock.
         """
+        if backdate_ms < 0:
+            raise ValueError(f"backdate_ms must be >= 0, got {backdate_ms}")
         if boundary not in KNOWN_BOUNDARIES:
             # Loud, because an unknown boundary means AR-42's enumeration and the pipeline have
             # drifted — exactly what the written list exists to catch. The pipeline isolates
@@ -148,12 +185,12 @@ class TurnLatencyTap:
                 f"unknown stage boundary {boundary!r}; "
                 f"expected one of {sorted(KNOWN_BOUNDARIES)}"
             )
-        at = self._turns.setdefault((session_id, turn_index), {})
+        instants = self._turns.setdefault((session_id, turn_index), {})
         # Membership first, then the clock: `setdefault(k, self._clock())` would read the clock
         # even when the key exists, which is a wasted read in production and a *moved* instant
         # under any clock with side effects.
-        if boundary not in at:
-            at[boundary] = self._clock()
+        if boundary not in instants:
+            instants[boundary] = self._clock() - backdate_ms / 1000
 
     def complete(self, session_id: str, turn_index: int, status: str) -> None:
         """The turn is terminal: emit at most one `metric.turn` and release its state.
@@ -187,7 +224,7 @@ class TurnLatencyTap:
         is a second thing that can disagree (ED3).
         """
         ms: dict[str, int] = {}
-        for stage, start, end in STAGE_INTERVALS:
+        for stage, start, end in STAGE_INTERVALS + ADDITIVE_INTERVALS:
             if start in at and end in at:
                 value = _ms(at[start], at[end])
                 if value is None:

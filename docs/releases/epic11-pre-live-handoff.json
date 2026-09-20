@@ -1,0 +1,98 @@
+{
+  "milestone": "M11.16.8",
+  "title": "Pre-Live Owner Handoff & Certification Readiness",
+  "date": "2026-09-20",
+  "verdict": "READY_FOR_OWNER_PROVISIONING",
+  "production_code_changed": false,
+  "note": "Operational handoff only. No secret, transcript, audio or model output appears here or may be added.",
+  "entry_state": {
+    "head": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "main": "c3c7397af5d9713565ed2772f91a6cb488582b06",
+    "v5_0_0_tag_object": "9d60ee894e53636f76987fc7824cd14df2a32e39",
+    "branch": "feat/m10.2-durable-event-foundation",
+    "v6_tags": 0, "stashes": 0, "packages": 53,
+    "epic9_certification_digest": "c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6",
+    "epic10_certification_digest": "7e57bc14764201b123c49b9321f15d9c41f0ee7015e6879c64c0307e56db3d0d",
+    "epic10_freeze_digest": "d3d4858d5f18b7f6d583f4d34caeec52933acc262e36d4f8b343e2e8b6a00d38",
+    "epic11_certification_digest": "25c9f1527cbba91cd943e41580926c8ea1d35f20a0a66fd21ef29253ab3933ba"
+  },
+  "handoff_findings": [
+    {
+      "id": "F1",
+      "summary": "All three deployment runbooks are Dograh-era and SUPERSEDED",
+      "detail": "platform/DEPLOY.md, platform/ORACLE_DEPLOY.md and platform/scripts/oracle_setup.sh deploy the retired engine plus coturn. Oracle/host/TLS knowledge is reusable (ORACLE_DEPLOY Phases 1-5); bring-up is not. Stop before Phase 6.",
+      "owner_action": true
+    },
+    {
+      "id": "F2",
+      "summary": "The media UDP port range cannot be pinned from configuration",
+      "detail": "aioice 0.10.2 binds local_addr=(address, 0) at aioice/ice.py:984 - the OS chooses the port - and neither aioice nor aiortc exposes a port-range option. The firewall must permit the host ephemeral UDP range, or the operator narrows net.ipv4.ip_local_port_range first. The old 49152-49200 range is coturn's and does not apply.",
+      "owner_action": true,
+      "engineering_blocker": false
+    },
+    {
+      "id": "F3",
+      "summary": "No systemd unit and no TLS wiring exist for the first-party application",
+      "detail": "certbot produces a certificate; nothing connects it to the app. Choose uvicorn --ssl-keyfile/--ssl-certfile or a TLS-terminating reverse proxy. No reverse-proxy architecture is mandated by any existing deployment document.",
+      "owner_action": true,
+      "engineering_blocker": false
+    },
+    {
+      "id": "F4",
+      "summary": "No smoke-test utterance was documented anywhere; one is now defined",
+      "detail": "The SPEC's Hinglish phrases are a Phase-2 evaluation concept, not a pipeline smoke. A short deterministic English utterance is defined in the handoff and labelled as the smoke-test utterance.",
+      "owner_action": false
+    }
+  ],
+  "verified_repository_commands": {
+    "sync": "uv sync --locked --extra dev",
+    "lock_check": "uv lock --check",
+    "start_webrtc_app": "uv run uvicorn \"api.webrtc.app:build_webrtc_app\" --factory --host 0.0.0.0 --port 8000",
+    "provision_org": "uv run python -m api.bootstrap \"<org name>\"",
+    "health": "GET /health",
+    "browser_client": "GET /v1/webrtc/client",
+    "create_agent": "POST /v1/agents (x-api-key)"
+  },
+  "owner_action_required": [
+    "Python 3.12+ and uv installation on the host",
+    "TLS termination wiring (no repo mechanism exists)",
+    "systemd unit for service supervision (none exists)",
+    "UDP ephemeral range decision (see F2)"
+  ],
+  "health_check": {
+    "endpoint": "/health",
+    "new_endpoint_added": false,
+    "proves": ["application running", "database reachable", "webrtc capability configured", "ice policy in force", "provider configuration present (by startup-refusal inference)"],
+    "does_not_prove": ["providers reachable", "media path works", "a conversation would succeed"],
+    "credential_inference": "The WebRTC app refuses to start without all three credentials and the voice id, so a /health that answers with transport=webrtc proves they resolved at startup."
+  },
+  "credentials": {
+    "VOXVOICE_SECRET_DEEPGRAM_API_KEY": "ABSENT",
+    "VOXVOICE_SECRET_GROQ_API_KEY": "ABSENT",
+    "VOXVOICE_SECRET_CARTESIA_API_KEY": "ABSENT",
+    "VOXVOICE_TTS_VOICE_ID": "ABSENT",
+    "values_recorded": false,
+    "no_fallback_verified": true
+  },
+  "certification_unblock_matrix": {
+    "E11-12": {"current": "INCONCLUSIVE", "required": "approved measurement definition (ADR-0053 decision) AND qualifying live evidence against a real recognizer"},
+    "E11-15": {"current": "NOT EXECUTED", "required": "Stage-2 + real browser + real providers + one scripted spoken call"},
+    "R-33": {"current": "OPEN", "required": "real external peer/media evidence"},
+    "R-34": {"current": "OPEN", "required": "actual browser execution"},
+    "R-54": {"current": "OPEN", "required": "real Deepgram behaviour observed"},
+    "R-58": {"current": "OPEN", "required": "real Cartesia execution"},
+    "R-63": {"current": "OPEN", "required": "real WebRTC with real providers"},
+    "R-66": {"current": "OPEN", "required": "the measurement decision; not merely a transcript arriving"},
+    "R-68": {"current": "OPEN", "required": "genuinely multi-provider deployment; one live call proves mechanism, not deployed failover"},
+    "R-69": {"current": "OPEN", "required": "in-session recovery semantics actually exercised"},
+    "R-71": {"current": "CLOSED", "required": "-"}
+  },
+  "adr_0053": {"status": "PROPOSED", "self_ratified": false, "decision_owed": "whether speech_end -> stt_final becomes the authoritative reading of the A8 STT budget", "note": "SM5: ratification alone does not unblock E11-12"},
+  "live_gate": {
+    "items": 15,
+    "all_must_be_true": true,
+    "currently_satisfied": 0,
+    "rule": "If any item is false, DO NOT START LIVE EXECUTION; the correct state is BLOCKED"
+  },
+  "next_milestone": "M11.16.9 - Live Conversation Execution, only after the owner supplies the external prerequisites"
+}

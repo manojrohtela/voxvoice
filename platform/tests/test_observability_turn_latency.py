@@ -82,11 +82,15 @@ def drive(t: TurnLatencyTap, boundaries, *, session="s-1", turn=1) -> None:
 
 def test_the_six_ar42_boundaries_are_exactly_these():
     """(1) AR-42 is a merge gate — *"a new stage without a tap doesn't merge"* — so the list it
-    gates against is pinned here, as an exact tuple in real pipeline order (ADR-0038 TP3/TP3a)."""
+    gates against is pinned here, as an exact tuple in real pipeline order (ADR-0038 TP3/TP3a).
+
+    **M11.8 (ADR-0047 ME1):** the order is now §A8's — *endpoint decision after true end-of-speech,
+    STT final after the endpoint* — because endpointing is audio-driven. The names are unchanged;
+    only their order is, which is what TP3a said this transition would do."""
     assert STAGE_BOUNDARIES == (
         "speech_end",
-        "stt_final",
         "endpoint_decided",
+        "stt_final",
         "llm_first_token",
         "tts_first_audio",
         "first_audio_out",
@@ -174,11 +178,11 @@ def test_voice_to_voice_is_none_when_either_endpoint_is_missing():
 def test_a_negative_interval_is_dropped_rather_than_emitted():
     """ADR-0038 TP5 — a negative latency is evidence of a defect, not a measurement."""
     t, publisher = tap(StepClock(start=0.0, step=-0.010))  # clock runs backwards
-    drive(t, ("speech_end", "stt_final"))
+    drive(t, ("speech_end", "endpoint_decided"))
     t.complete("s-1", 1, "completed")
 
     payload = publisher.published[0][1]
-    assert "stt" not in payload["ms"]
+    assert "endpoint" not in payload["ms"]
     assert payload["voice_to_voice_ms"] is None
 
 
@@ -188,13 +192,13 @@ def test_a_negative_interval_is_dropped_rather_than_emitted():
 def test_an_unreached_boundary_is_an_absent_key_not_zero():
     """(7) A fabricated 0 ms is indistinguishable from a real one."""
     t, publisher = tap(StepClock(start=0.0, step=0.010))
-    drive(t, ("speech_end", "stt_final"))  # LLM/TTS never reached
+    drive(t, ("speech_end", "endpoint_decided"))  # STT/LLM/TTS never reached
     t.complete("s-1", 1, "completed")
 
     payload = publisher.published[0][1]
-    assert set(payload["at"]) == {"speech_end", "stt_final"}
-    assert set(payload["ms"]) == {"stt"}
-    for absent in ("llm", "tts", "egress"):
+    assert set(payload["at"]) == {"speech_end", "endpoint_decided"}
+    assert set(payload["ms"]) == {"endpoint"}
+    for absent in ("stt", "llm", "tts", "egress"):
         assert absent not in payload["ms"]
 
 
@@ -203,10 +207,10 @@ def test_the_first_record_of_a_boundary_wins():
     t, publisher = tap(StepClock(start=0.0, step=0.010))
     t.record("s-1", 1, "speech_end")  # 0.000
     t.record("s-1", 1, "speech_end")  # ignored
-    t.record("s-1", 1, "stt_final")  # 0.010
+    t.record("s-1", 1, "endpoint_decided")  # 0.010
     t.complete("s-1", 1, "completed")
 
-    assert publisher.published[0][1]["ms"]["stt"] == 10
+    assert publisher.published[0][1]["ms"]["endpoint"] == 10
 
 
 # ── 8-11. emission semantics ────────────────────────────────────────────────
@@ -314,11 +318,16 @@ def test_metric_turn_remains_the_only_metric_event_type():
 
 
 def test_existing_event_type_values_are_unchanged():
-    """(22)"""
+    """(22) Nothing M10.9 touched was renamed, revalued or removed.
+
+    The count is a **floor**, not an equality (M11.5): the claim is that no member disappeared,
+    and an exact total additionally asserted *"no later epic may ever add one"* — which is not
+    M10.9's to say, and is the live-count shape ADR-0052 Amendment 1 **HC9** removed from the
+    certification controls. The named assertions above carry the substance."""
     assert EventType.COST_UPDATED.value == "cost.updated"
     assert EventType.TURN_STARTED.value == "turn.started"
     assert EventType.TOOL_METRICS_UPDATED.value == "tool.metrics.updated"
-    assert len(list(EventType)) == 104
+    assert len(list(EventType)) >= 104, "an EventType member was removed"
 
 
 def test_attribution_is_not_duplicated_in_the_payload():
@@ -361,7 +370,7 @@ class Recorder:
         self.boundaries: list[str] = []
         self.terminals: list[str] = []
 
-    def record(self, session_id, turn_index, boundary):
+    def record(self, session_id, turn_index, boundary, *, backdate_ms=0.0):
         self.boundaries.append(boundary)
 
     def complete(self, session_id, turn_index, status):
@@ -370,7 +379,7 @@ class Recorder:
 
 def build_pipeline(observer, *, tokens=("hi",), frames=2):
     """A `RuntimePipeline` over stub providers — no vendor, no network, no audio hardware."""
-    from core.audio import AudioFrame
+    from core.audio import DEFAULT_SAMPLE_RATE, AudioFrame
     from core.providers.llm import TokenDelta
     from core.providers.stt import Final
     from runtime.pipeline.pipeline import RuntimePipeline
@@ -384,7 +393,10 @@ def build_pipeline(observer, *, tokens=("hi",), frames=2):
     class LLM:
         name = "stub-llm"
 
-        async def stream(self, *, context):
+        async def stream(self, *, context, tools=None, model=None):
+            # `tools`/`model` added at M11.4 — the LLM contract's additive arguments
+            # (AR-25). A stub accepts them like any implementation; no assertion in this
+            # file changes and the boundaries it measures are untouched.
             for token in tokens:
                 yield TokenDelta(text=token)
 
@@ -415,6 +427,7 @@ def build_pipeline(observer, *, tokens=("hi",), frames=2):
         tts=TTS(),
         session_id="s-1",
         system_prompt="be brief",
+        sample_rate=DEFAULT_SAMPLE_RATE,  # M11.2: the session declares its rate (AR-41)
         latency=observer,
     )
 

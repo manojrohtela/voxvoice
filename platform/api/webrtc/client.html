@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoxVoice WebRTC client</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { margin: 0; padding: 24px; max-width: 760px; }
+  h1 { font-size: 1.1rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; opacity: .7; font-size: .85rem; }
+  label { display: block; font-size: .8rem; margin: 12px 0 4px; opacity: .8; }
+  input { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
+  button { margin-top: 16px; padding: 10px 18px; font: inherit; cursor: pointer; }
+  button[disabled] { opacity: .5; cursor: default; }
+  #state { margin-top: 20px; font-weight: bold; }
+  #log { margin-top: 12px; font-size: .78rem; line-height: 1.6; white-space: pre-wrap;
+         border-top: 1px solid currentColor; padding-top: 12px; opacity: .85; }
+</style>
+</head>
+<body>
+<h1>VoxVoice WebRTC client</h1>
+<p class="sub">Microphone in, assistant audio out. Nothing else.</p>
+
+<label for="key">Org API key (<code>x-api-key</code>)</label>
+<input id="key" type="password" autocomplete="off" placeholder="vf_…" />
+
+<label for="agent">Agent id</label>
+<input id="agent" type="text" autocomplete="off" placeholder="agt_…" />
+
+<button id="go">Connect</button>
+<button id="stop" disabled>Hang up</button>
+
+<div id="state">idle</div>
+<div id="log"></div>
+<audio id="remote" autoplay></audio>
+
+<script>
+// The whole client. It does four things: get a microphone, reserve a signalling rendezvous,
+// answer the runtime's offer, and play what comes back. There is no room, no roster and no
+// reconnect logic, because this page exists to prove the media path, not to be a product.
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $("log").textContent += m + "\n"; };
+const setState = (s) => { $("state").textContent = s; };
+
+let pc = null, micStream = null, sessionId = null, apiKey = null;
+
+async function connect() {
+  $("go").disabled = true;
+  apiKey = $("key").value.trim();
+  const agentId = $("agent").value.trim();
+  if (!apiKey || !agentId) { setState("need an API key and an agent id"); $("go").disabled = false; return; }
+
+  try {
+    setState("requesting microphone");
+    // Microphone only. No camera is requested, so the browser never prompts for one.
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    log("microphone granted");
+
+    setState("reserving rendezvous");
+    const rdv = await postJson("/v1/webrtc/rendezvous", { "x-api-key": apiKey }, null);
+    log("rendezvous " + rdv.rendezvous_id);
+    const token = rdv.signalling_token;
+
+    pc = new RTCPeerConnection();
+    for (const track of micStream.getTracks()) pc.addTrack(track, micStream);
+    pc.ontrack = (e) => { $("remote").srcObject = e.streams[0]; log("inbound audio track attached"); };
+    pc.onconnectionstatechange = () => { setState("peer: " + pc.connectionState); log("peer " + pc.connectionState); };
+
+    // The session-create call and the signalling exchange run **concurrently**: create does not
+    // return until the peer connection is usable, and it cannot become usable until this page
+    // has answered the offer that call produces.
+    setState("starting session");
+    const started = postJson("/v1/webrtc/sessions", { "x-api-key": apiKey },
+      { agent_id: agentId, channel: "web", rendezvous_id: rdv.rendezvous_id });
+
+    const offer = await pollOffer(rdv.rendezvous_id, token);
+    log("offer received (" + offer.length + " bytes)");
+    await pc.setRemoteDescription({ type: "offer", sdp: offer });
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitForIceGathering(pc);
+    await postJson("/v1/webrtc/rendezvous/" + rdv.rendezvous_id + "/answer",
+      { "x-signalling-token": token }, { sdp: pc.localDescription.sdp });
+    log("answer sent (" + pc.localDescription.sdp.length + " bytes)");
+
+    const session = await started;
+    sessionId = session.session_id;
+    log("session " + sessionId);
+    setState("connected");
+    $("stop").disabled = false;
+  } catch (err) {
+    setState("failed: " + err.message);
+    log("failed: " + err.message);
+    await hangup();
+    $("go").disabled = false;
+  }
+}
+
+async function pollOffer(id, token) {
+  // 204 means "not yet"; the server bounds each wait, so this is a handful of polls, not a spin.
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch("/v1/webrtc/rendezvous/" + id + "/offer", { headers: { "x-signalling-token": token } });
+    if (r.status === 200) return (await r.json()).sdp;
+    if (r.status !== 204) throw new Error("offer poll: HTTP " + r.status);
+  }
+  throw new Error("no offer was published");
+}
+
+function waitForIceGathering(peer) {
+  // aiortc does not trickle, and neither do we: the answer is sent once gathering is complete,
+  // so the single SDP carries every candidate and no second channel is needed.
+  if (peer.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const check = () => { if (peer.iceGatheringState === "complete") { peer.removeEventListener("icegatheringstatechange", check); resolve(); } };
+    peer.addEventListener("icegatheringstatechange", check);
+  });
+}
+
+async function postJson(url, headers, body) {
+  const init = { method: body === null ? "POST" : "POST", headers: { ...headers } };
+  if (body !== null) { init.headers["content-type"] = "application/json"; init.body = JSON.stringify(body); }
+  const r = await fetch(url, init);
+  if (r.status === 204) return null;
+  if (!r.ok) throw new Error(url + ": HTTP " + r.status);
+  return await r.json();
+}
+
+async function hangup() {
+  $("stop").disabled = true;
+  if (sessionId && apiKey) {
+    try { await fetch("/v1/sessions/" + sessionId + "/end", { method: "POST", headers: { "x-api-key": apiKey } }); } catch (_) {}
+  }
+  if (pc) { pc.close(); pc = null; }
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+  sessionId = null;
+  setState("idle");
+  $("go").disabled = false;
+}
+
+$("go").addEventListener("click", connect);
+$("stop").addEventListener("click", hangup);
+</script>
+</body>
+</html>

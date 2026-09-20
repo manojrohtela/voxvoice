@@ -1,0 +1,380 @@
+{
+  "authority": "ADR-0051 CE1-CE12",
+  "base_release": {
+    "commit": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "tag": "v5.0.0"
+  },
+  "blocker_resolution_attempt": {
+    "E11-12": {
+      "derived_stt_ms": -46.5,
+      "meaning": "the transcript was ready 46.5 ms before anything needed it; the recognizer runs concurrently with the trailing-silence hold and is not on the critical path",
+      "proposed_resolution": "ADR-0053 (PROPOSED, not ratified): derive stt from speech_end -> stt_final",
+      "r66_diagnosis": "measurement-definition issue, not a runtime bug",
+      "status": "INCONCLUSIVE",
+      "timeline_ms_from_true_end_of_speech": {
+        "endpoint_decided": 240.1,
+        "llm_first_token": 240.3,
+        "speech_end": 0.0,
+        "stt_final": 193.6
+      },
+      "why_still_blocked": "ADR-0053 SM4/SM5 \u2014 even once ratified, a hermetic profile measures harness frame pacing, not a recognizer; a certifying number requires live Deepgram"
+    },
+    "E11-15": {
+      "blockers": [
+        "no Oracle Ampere A1 Stage-2 host provisioned (DL-0153 records the prerequisite as open)",
+        "no Deepgram/Groq/Cartesia credential present in any environment variable or .env",
+        "WebRTC signalling has no implementation (R-34); building one is forbidden by scope"
+      ],
+      "status": "NOT EXECUTED"
+    },
+    "milestone": "M11.16.1",
+    "outcome": "BLOCKED \u2014 neither blocker resolved; no evidence fabricated"
+  },
+  "branch": "feat/m10.2-durable-event-foundation",
+  "certification": "voxvoice.epic11",
+  "certification_version": "m11.16.1",
+  "controls": [
+    {
+      "examined": 6535,
+      "family": "governance",
+      "id": "E11-1",
+      "method": "pytest --collect-only -q  +  AST scan for pytest.mark.skip/skipif/xfail",
+      "observed": "6535 collected; no skip/skipif/xfail marker present",
+      "passed": true,
+      "requirement": "the regression floor holds: >= 5447 tests collected, and no test is skipped, xfailed or otherwise weakened",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#1",
+        "TESTING_POLICY rules 1-3",
+        "DEFINITION_OF_DONE"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 159,
+      "family": "architecture",
+      "id": "E11-2",
+      "method": "AST import-graph over core/ runtime/ provider/ providers/",
+      "observed": "runtime -> provider edge present in 1 module(s); no provider -> runtime edge; core imports no upper layer",
+      "passed": true,
+      "requirement": "import boundaries hold: the authorized runtime -> provider edge exists and no provider -> runtime edge does",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#2",
+        "AR-10",
+        "AR-11",
+        "AR-12",
+        "AR-13",
+        "AR-14",
+        "AR-15",
+        "ADR-0046 FT-V3/FT-V5"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 234,
+      "family": "architecture",
+      "id": "E11-3",
+      "method": "AST identifier+compare scan over core/ runtime/ (identifiers) and core/ runtime/ api/ (branches)",
+      "observed": "no vendor branch in core/runtime/api (234 modules); no vendor identifier among 8 tokens in core/ or runtime/ (98 modules). api/adapters/ is the designated translation layer (M8.14), imports no SDK, and is unchanged by Epic 11 \u2014 CE12 scope.",
+      "passed": true,
+      "requirement": "vendor neutrality holds: no vendor identifier appears in core/**, runtime/** or api/**",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#3",
+        "AR-21"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 10,
+      "family": "architecture",
+      "id": "E11-4",
+      "method": "capability declarations in providers/**; conformance suites in tests/",
+      "observed": "10 provider module(s) declare capabilities; 2 conformance suite(s) present",
+      "passed": true,
+      "requirement": "every registered provider declares its capabilities truthfully and passes its capability contract suite",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#4",
+        "Constitution A6.3",
+        "ADR-0045 SD9"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 1,
+      "family": "resilience",
+      "id": "E11-5",
+      "method": "AST call scan of runtime/pipeline/pipeline.py for unguarded capability calls",
+      "observed": "every capability call in the pipeline is reached through _guard(...)",
+      "passed": true,
+      "requirement": "every media-path provider call passes through ProviderGuard; no direct raw call remains",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#5",
+        "AR-23",
+        "ADR-0046 FT-D1/FT-D4"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 2,
+      "family": "resilience",
+      "id": "E11-6",
+      "method": "symbol presence in runtime/faults/{degradation,guard}.py",
+      "observed": "failover, declared degraded mode, typed terminus and AR-24 recording are all present",
+      "passed": true,
+      "requirement": "the A10 degradation ladder is deterministic and hermetic; every declared degradation is evented and recorded in session metadata",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#6",
+        "AR-24",
+        "Constitution A10",
+        "ADR-0046 FT-D6"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 3,
+      "family": "governance",
+      "id": "E11-7",
+      "method": "field reads in runtime/service.py + runtime/orchestrator/orchestrator.py",
+      "observed": "allow_interruptions, llm_model and first_message are all read; a validator refuses impossible configuration",
+      "passed": true,
+      "requirement": "no accepted-but-ignored configuration field remains: allow_interruptions, llm_model and first_message all act",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#7",
+        "AR-25",
+        "GOVERNANCE 4"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 2,
+      "family": "media",
+      "id": "E11-8",
+      "method": "AST normalize() call-site count; unbounded Queue scan on media paths",
+      "observed": "exactly one ingress and one egress conversion; no unbounded media queue",
+      "passed": true,
+      "requirement": "audio invariants hold: exactly one ingress and one egress conversion point, no unbounded queue on a media path, declared overflow policy enforced",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#8",
+        "AR-40",
+        "AR-41",
+        "ADR-0044 AD4/AD6/AD7"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 3,
+      "family": "media",
+      "id": "E11-9",
+      "method": "clause/scheduler/pipeline streaming path presence",
+      "observed": "clause detection, routing and the playback response path are all present",
+      "passed": true,
+      "requirement": "streaming invariants hold: no wait-for-whole-input step remains in the conversation loop",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#9",
+        "AR-43",
+        "ADR-0048 PB1/PB2"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 1,
+      "family": "observability",
+      "id": "E11-10",
+      "method": "AST scan for publish(EventType.METRIC_TURN, ...) producers",
+      "observed": "exactly one metric.turn producer; voice_to_voice_ms unchanged; terminal statuses closed",
+      "passed": true,
+      "requirement": "telemetry holds: one producer for metric.turn, additive vocabulary, voice_to_voice_ms name and unit unchanged, an unreached boundary is an absent key and never 0",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#10",
+        "AR-2",
+        "AR-32",
+        "AR-42",
+        "ADR-0038 TP2/TP5/TP6"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 1,
+      "family": "observability",
+      "id": "E11-11",
+      "method": "git diff v5.0.0 -- platform/events platform/billing; events->billing import scan",
+      "observed": "events/ and billing/ unchanged since v5.0.0; no events -> billing edge",
+      "passed": true,
+      "requirement": "the Epic 10 boundary holds: no Epic 10 module modified by Epic 11, and no events -> billing edge exists",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#11",
+        "ADR-0050 SW1",
+        "ADR-0052"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 110,
+      "family": "performance",
+      "id": "E11-12",
+      "method": "read docs/performance/i1-baseline.json against A8 budgets",
+      "observed": "voice_to_voice p50 241.0 ms / p95 242.0 ms are within budget over 110 warm turns, and every measured stage holds \u2014 but stt: NOT MEASURED (R-66), so 'each A8 per-stage budget held' cannot be asserted",
+      "passed": false,
+      "requirement": "I1 is measured through the production taps against a reproducible baseline: p50 <= 1000 ms, p95 <= 1800 ms, and each A8 per-stage budget held",
+      "requires_live_evidence": false,
+      "result": "inconclusive",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#12",
+        "ADR-0051 CE6",
+        "Constitution A8",
+        "PERFORMANCE_POLICY 1/4",
+        "GOVERNANCE 10"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 1,
+      "family": "governance",
+      "id": "E11-13",
+      "method": "pyproject warning-filter inspection (no blanket ignore)",
+      "observed": "no blanket warning filter; the CI-parity gate runs -W error with exactly three enumerated third-party ignores (starlette, ResourceWarning, PytestUnraisable)",
+      "passed": true,
+      "requirement": "zero warnings originate in platform code; any third-party warning is enumerated and attributed",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#13",
+        "ADR-0051 CE8",
+        "DEFINITION_OF_DONE"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 524,
+      "family": "supply_chain",
+      "id": "E11-14",
+      "method": "uv.lock presence; DECISION_LOG dependency entries; credential-literal scan",
+      "observed": "uv.lock present; 5 Epic 11 dependencies each carry a DECISION_LOG entry; no credential literal in 524 platform sources",
+      "passed": true,
+      "requirement": "the lockfile is present and pinned, every Epic 11 dependency carries a DECISION_LOG entry with purpose, licence and blast radius, and no secret is committed",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#14",
+        "SECURITY_POLICY 6",
+        "GOVERNANCE 10"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 0,
+      "family": "performance",
+      "id": "E11-15",
+      "method": "read stage2_host + live_providers from docs/performance/i1-baseline.json",
+      "observed": "Stage-2 host: NOT EXECUTED \u2014 no Oracle A1 class host provisioned; live providers not executed: ['cartesia', 'deepgram', 'groq']. No scripted spoken call was made on a Stage-2 host with real transport and real providers, so this control's evidence does not exist.",
+      "passed": false,
+      "requirement": "Stage-2 live-ish verification: one scripted spoken call on the Stage-2 host, with real transport and real providers",
+      "requires_live_evidence": true,
+      "result": "not_executed",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#15",
+        "TESTING_POLICY runtime tier",
+        "Constitution A9 Stage 2"
+      ],
+      "violations": []
+    },
+    {
+      "examined": 6,
+      "family": "history",
+      "id": "E11-16",
+      "method": "git diff v5.0.0 -- predecessor artifacts; reproduce Epic 10 digests",
+      "observed": "Epic 10 certification digest 7e57bc147642\u2026 and freeze digest d3d4858d5f18\u2026 both reproduce; authorized historical changes: platform/tests/certification/epic10.py (ADR-0052 (M11.2.1, Amendment 1 HC9 at M11.5.1)), platform/tests/freeze/epic10.py (ADR-0052 (M11.2.1))",
+      "passed": true,
+      "requirement": "Epic 9 and Epic 10 certification and freeze artifacts are unchanged and their digests remain reproducible as historical state",
+      "requires_live_evidence": false,
+      "result": "satisfied",
+      "severity": "blocking",
+      "sources": [
+        "ADR-0051 CE5#16",
+        "ADR-0052",
+        "ADR-0043 CD16"
+      ],
+      "violations": []
+    }
+  ],
+  "declared_limitations": [
+    {
+      "id": "E11-LIM-1",
+      "milestone": "M11.16",
+      "owner": "Technical Owner",
+      "self_administered": true,
+      "statement": "Epic 11's certification is self-administered: written and executed by the same party that implemented Epic 11 (ADR-0051 CE9). No independent auditor reviewed these controls."
+    },
+    {
+      "id": "E11-LIM-2",
+      "milestone": "M11.16",
+      "owner": "Technical Owner",
+      "self_administered": false,
+      "statement": "Every structural and behavioural control here is hermetic. No control executed a live Deepgram, Groq or Cartesia call, and none exercised a real WebRTC peer. Provider certification is therefore structural and hermetic, never live (R-54, R-58, R-63)."
+    },
+    {
+      "id": "E11-LIM-3",
+      "milestone": "M11.16",
+      "owner": "Technical Owner",
+      "self_administered": false,
+      "statement": "The I1 baseline E11-12 reads was produced with deterministic in-process providers and no network. It measures the runtime's own cost, not a conversation with a vendor, and the stt stage is structurally unmeasurable in the current turn shape (R-66)."
+    },
+    {
+      "id": "E11-LIM-4",
+      "milestone": "M11.16",
+      "owner": "Technical Owner",
+      "self_administered": false,
+      "statement": "No Stage-2 host is provisioned, so E11-15's evidence was never produced. This is an absence of evidence recorded as such, not a defect discovered and not a risk accepted."
+    }
+  ],
+  "live_evidence": {
+    "cartesia": "NOT EXECUTED",
+    "deepgram": "NOT EXECUTED",
+    "groq": "NOT EXECUTED",
+    "real_webrtc_peer": "NOT EXECUTED",
+    "stage2_host": "NOT EXECUTED"
+  },
+  "milestone": "M11.16, re-examined at M11.16.1",
+  "namespace": "E11-*",
+  "report_digest": "25c9f1527cbba91cd943e41580926c8ea1d35f20a0a66fd21ef29253ab3933ba",
+  "repository_revision": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+  "self_administered": true,
+  "timestamp_utc": "2026-09-19T14:59:16Z",
+  "verdict": "not_certified"
+}

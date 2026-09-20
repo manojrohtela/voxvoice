@@ -16,6 +16,8 @@ logging framework. Imports `core` and stdlib only.
 """
 
 from .turn_latency import (
+    ADDITIVE_INTERVALS,
+    AUDIO_BOUNDARIES,
     KNOWN_BOUNDARIES,
     LIFECYCLE_MARKERS,
     STAGE_BOUNDARIES,
@@ -28,6 +30,8 @@ from .turn_latency import (
 __all__ = [
     "TurnLatencyTap",
     "MetricPublisher",
+    "ADDITIVE_INTERVALS",
+    "AUDIO_BOUNDARIES",
     "STAGE_BOUNDARIES",
     "LIFECYCLE_MARKERS",
     "KNOWN_BOUNDARIES",

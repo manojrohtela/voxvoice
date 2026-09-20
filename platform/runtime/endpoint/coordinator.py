@@ -50,6 +50,12 @@ class EndpointCoordinator:
         endpoint once the policy's silence hold is satisfied."""
         return self._notify(self._engine.note_silence(confidence))
 
+    def on_speech_end(self, confidence: float = 1.0) -> EndpointDecision | None:
+        """True end-of-speech was detected from audio (M11.8). Confirms the turn and notifies the
+        Turn Engine through the one existing pathway — the coordinator remains the only link, and
+        the Turn Engine remains the sole writer of turn state."""
+        return self._notify(self._engine.note_speech_end(confidence))
+
     def on_segment(self, confidence: float = 1.0) -> EndpointDecision | None:
         """A completed transcript segment (an STT Final) — the primary completion
         trigger. Returns the resulting decision; a final decision has already

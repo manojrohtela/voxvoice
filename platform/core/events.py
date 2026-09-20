@@ -190,6 +190,21 @@ class EventType(StrEnum):
     #   two would be exactly the silent mutation AR-32 forbids. `metric.billing.*` is reserved
     #   to Billing (ADR-0031 IR9, ADR-0033 MS9, OD-9) and Epic 10 defines none.
     METRIC_TURN = "metric.turn"
+    # transport reality (producer: `providers/transport/**` via the runtime event bridge — M11.5,
+    # AR-6) — additive vocabulary extension (no existing member changed; AR-32).
+    #
+    #   **AR-6** requires that *"any component learning of a real-world lifecycle fact (hangup,
+    #   connect, failure) must emit the event that drives the state machine — status may never be
+    #   inferred-only from API calls."* These four are that emission, and they are deliberately
+    #   **not** folded into an existing type: `SESSION_*` describes conversation lifecycle the
+    #   Orchestrator requests, while these describe what the transport *actually did*. Collapsing
+    #   them would destroy exactly the requested-versus-real distinction AR-6 exists to protect,
+    #   and `PROVIDER_DISCONNECTED` already carries two meanings (registry resolution, M11.4
+    #   degradation) without acquiring a third.
+    TRANSPORT_CONNECTED = "transport.connected"
+    TRANSPORT_MEDIA_READY = "transport.media_ready"
+    TRANSPORT_DISCONNECTED = "transport.disconnected"
+    TRANSPORT_FAILED = "transport.failed"
 
 
 class EventSource(StrEnum):

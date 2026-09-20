@@ -2,7 +2,7 @@
 name = "voxvoice-platform"
 version = "0.1.0"
 description = "Self-hostable, context-driven voice-agent platform (Vapi alternative). Phase 1: API in front."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -11,6 +11,11 @@ dependencies = [
     "pydantic-settings>=2.2",
     "httpx>=0.27",
     "python-dotenv>=1.0",
+    "aiortc>=1.15.0",
+    "deepgram-sdk>=7.8.1",
+    "pysilero-vad>=3.4.0",
+    "groq>=1.7.0",
+    "cartesia>=4.2.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +39,12 @@ where = ["."]
 include = ["core*", "api*", "runtime*", "providers*", "events*", "observability*", "billing*"]
 exclude = ["tests*", "voicebot*"]
 
+# The reference WebRTC browser client is served by the API, so it has to travel with the package
+# (M11.16.4). It is static, credential-free and referenced by exactly one route; nothing else in
+# the tree is package data.
+[tool.setuptools.package-data]
+"api.webrtc" = ["client.html"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -42,6 +53,10 @@ testpaths = ["tests"]
 norecursedirs = ["voicebot", ".venv", "*.egg-info", ".git", ".ruff_cache", ".pytest_cache"]
 
 [tool.ruff]
+# Deliberately *behind* `requires-python` (M11.3, DL-0161). The interpreter floor is 3.12
+# (P-ADR-0002 §6); this is a lint target, and raising it to `py312` turns on 3.12-only
+# modernisation rules that report 22 findings across planes Epic 9/10 froze. Raising it is a
+# separate, scoped cleanup — not something to smuggle into a packaging change.
 target-version = "py311"
 line-length = 100
 

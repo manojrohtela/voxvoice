@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from core.audio import AudioFrame
+from core.audio import DEFAULT_SAMPLE_RATE, AudioFrame
 from providers.llm.echo import EchoLLM
 from providers.stt.local import LocalSTT
 from providers.transport.local import LocalTransport
@@ -28,6 +28,7 @@ def _pipeline(transport, transcripts, session_id="ses_1"):
         tts=LocalTTS(),
         session_id=session_id,
         system_prompt="be helpful",
+        sample_rate=DEFAULT_SAMPLE_RATE,  # M11.2: the session declares its rate (AR-41)
         on_transcript=lambda sid, role, text, final: transcripts.append((role, text, final)),
     )
 
@@ -92,7 +93,7 @@ async def test_pipeline_propagates_stt_failure():
     transport = LocalTransport()
     pipe = RuntimePipeline(
         transport=transport, stt=BoomSTT(), llm=EchoLLM(), tts=LocalTTS(),
-        session_id="ses_1", system_prompt="x",
+        session_id="ses_1", system_prompt="x", sample_rate=DEFAULT_SAMPLE_RATE,
     )
     await pipe.start()
     with pytest.raises(RuntimeError, match="stt boom"):

@@ -207,11 +207,22 @@ def test_runtime_acquired_no_database_or_transaction():
             assert token not in source, f"{path} mentions {token} — runtime must stay in-memory"
 
 
-def test_the_orchestrator_is_not_wired_to_a_durable_sink():
-    """DW10 — M10.6 proves the capability; it does not make the production runtime durable."""
+def test_the_orchestrator_builds_exactly_one_bus_and_acquires_no_storage():
+    """DW10, **retargeted at M11.12** — the milestone authorized to wire the durable sink.
+
+    The original form asserted `"durable" not in source`, i.e. *"M10.6 proves the capability; it
+    does not make the production runtime durable"*. That was a statement about **when**, and
+    M11.12 is the when: the Orchestrator now passes an injected sink to the bus it already built.
+
+    What DW10 actually protects is unchanged and still asserted here: the runtime **acquires**
+    no storage — it never imports a database library, never names a storage class, never opens a
+    transaction, and builds exactly one bus. The sink arrives as an opaque injected object from
+    the composition root, which is the whole point of DW2's `durable=` parameter existing."""
     source = pathlib.Path("runtime/orchestrator/orchestrator.py").read_text()
-    assert "InProcessEventBus()" in source, "the orchestrator still constructs a plain bus"
-    assert "durable" not in source
+    assert source.count("InProcessEventBus(") == 1, "the orchestrator builds more than one bus"
+    for token in ("SqlDurableEventSpine", "SqlDurableEventLog", "EventDatabase", "UnitOfWork",
+                  "create_engine", "sqlmodel", "sqlalchemy"):
+        assert token not in source, f"the orchestrator acquired {token}"
 
 
 # ── M10.12 hardening (ADR-0042) ─────────────────────────────────────────────────

@@ -94,9 +94,19 @@ def test_the_pre_m108a_vocabulary_is_unchanged():
         assert getattr(EventType, name).value == value, f"{name} changed value"
 
 
-def test_m108a_added_exactly_one_member():
-    """The M10.8 baseline had 103 members; M10.8a is a single additive extension."""
-    assert len(list(EventType)) == 104
+def test_m108a_added_exactly_one_metric_member():
+    """M10.8a is a **single** additive extension: it introduced the `metric.*` vocabulary and
+    exactly one member in it.
+
+    Stated as *"exactly one `metric.*` member"* rather than *"the enum totals 104"* (M11.5). The
+    total was never M10.8a's claim — it is a measurement of the whole repository, so any later
+    epic's legitimate additive event broke it while M10.8a's own scope was untouched. This is the
+    same live-count shape ADR-0052 Amendment 1 **HC9** removed from the certification controls,
+    and the sharper form here actually tests what the name says: the guard above already proves no
+    baseline member was removed or altered."""
+    metric_members = sorted(m.name for m in EventType if m.value.startswith("metric."))
+    assert metric_members == ["METRIC_TURN"]
+    assert EventType.METRIC_TURN.value == "metric.turn"
 
 
 def test_event_source_gained_only_observability():

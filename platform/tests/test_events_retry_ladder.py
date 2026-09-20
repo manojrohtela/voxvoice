@@ -831,9 +831,14 @@ def test_webhooks_is_untouched_and_has_no_retry_mechanism():
 
 
 def test_runtime_acquired_nothing_from_m107():
-    """ADR-0036 RL17 — the production runtime is still not wired to the durable sink."""
+    """RL17, **retargeted at M11.12** — the milestone authorized to wire the durable sink.
+
+    `"durable"` leaves the list because the runtime now holds an injected, opaque attachment;
+    every other token stays, and together they are the real property: the runtime acquired no
+    retry ladder, no delivery outcome vocabulary, no storage class and no retry policy. M11.12
+    added **no retry strategy of its own** — reusing Epic 10's is the whole point."""
     for token in ("OutboxLadder", "DeliveryOutcome", "SqlDurableEventSpine", "EventDatabase",
-                  "durable", "RetryPolicy("):
+                  "RetryPolicy("):
         for path in pathlib.Path("runtime").rglob("*.py"):
             assert token not in path.read_text(), f"{path} mentions {token}"
 

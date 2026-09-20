@@ -91,6 +91,18 @@ class EndpointEngine:
         subsequent silence."""
         return self._step("segment", confidence)
 
+    def note_speech_end(self, confidence: float = 1.0) -> EndpointDecision | None:
+        """**True end-of-speech, detected from audio** (M11.8, ADR-0047 ME1).
+
+        The audio-driven completion trigger: the `AudioEndpointDetector` observed that the caller
+        stopped speaking for the configured hold, which §A8 calls *true end-of-speech*. It confirms
+        the turn directly — a pending `POTENTIAL_ENDPOINT` included — because the silence evidence
+        the hold represents is exactly what a silence hold was waiting for.
+
+        Neutral by construction: the engine is told *that* speech ended, never by which provider or
+        from what model output."""
+        return self._step("speech_end", confidence)
+
     def note_silence(self, confidence: float = 1.0) -> EndpointDecision | None:
         """A silence observation (a VAD SILENCE_CONFIRMED). Counts down a pending
         endpoint's silence hold; does nothing while merely listening."""
@@ -138,6 +150,8 @@ class EndpointEngine:
             self._on_segment(confidence)
         elif kind == "silence":
             self._on_silence(confidence)
+        elif kind == "speech_end":
+            self._on_speech_end(confidence)
 
         # A turn may not run forever: once the configured budget is exceeded and no
         # final decision was reached, force a timeout (deterministic close-out).
@@ -162,6 +176,8 @@ class EndpointEngine:
     def _on_segment(self, confidence: float) -> None:
         # A completed transcript segment implies speech occurred.
         self._speech_run += 1
+        if self._policy.audio_driven:
+            return  # ME1: audio ends the turn; a transcript is evidence, not a decision
         if confidence < self._policy.confidence_threshold:
             return  # low-confidence segment → keep listening (do not endpoint)
         if self._context.decision is not EndpointDecision.CONTINUE_LISTENING:
@@ -173,6 +189,15 @@ class EndpointEngine:
         else:
             self._silence_run = 0
             self._transition(EndpointDecision.POTENTIAL_ENDPOINT, confidence)
+
+    def _on_speech_end(self, confidence: float) -> None:
+        # Audio said the utterance is over. Confirm from either resting state; the detector has
+        # already applied the temporal policy, so there is nothing left to hold for.
+        if self._context.decision is EndpointDecision.CONTINUE_LISTENING:
+            self._speech_run += 1  # end-of-speech implies speech occurred
+            self._transition(EndpointDecision.ENDPOINT_CONFIRMED, confidence)
+        elif self._context.decision is EndpointDecision.POTENTIAL_ENDPOINT:
+            self._transition(EndpointDecision.ENDPOINT_CONFIRMED, confidence)
 
     def _on_silence(self, confidence: float) -> None:
         if self._context.decision is not EndpointDecision.POTENTIAL_ENDPOINT:

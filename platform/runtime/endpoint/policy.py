@@ -23,6 +23,13 @@ class EndpointPolicy:
     before while the *decision* now flows through this framework.
     """
 
+    #: M11.8 (ADR-0047 ME1): the turn is ended by **audio** (a detected end-of-speech), not by a
+    #: transcript segment. When True, `note_segment` records speech evidence but never confirms —
+    #: otherwise an STT Final and the audio boundary would each finish the same turn, which is the
+    #: duplicate `USER_FINISHED` this flag exists to prevent. Default False keeps the M3.3
+    #: segment-driven behaviour of every existing profile exactly as it was.
+    audio_driven: bool = False
+
     min_speech_frames: int = 1  # minimum speech observations before an endpoint may confirm
     min_silence_frames: int = 0  # minimum silence observations required to confirm via silence
     silence_hold_frames: int = 0  # silence to hold after a potential endpoint before confirming
@@ -33,4 +40,6 @@ class EndpointPolicy:
     def confirms_on_segment(self) -> bool:
         """True when a completed transcript segment can confirm immediately (no
         silence hold / minimum-silence gate) — the default local behaviour."""
+        if self.audio_driven:
+            return False
         return self.silence_hold_frames <= 0 and self.min_silence_frames <= 0

@@ -845,36 +845,53 @@ def test_recording_allocates_no_unbounded_state(buffer):
 # ── M. boundaries: CV5, Billing, dependency direction ───────────────────────
 
 
+#: **The M10.10 commit and its parent** — the range that *is* this milestone.
+#:
+#: Every boundary claim below is a claim about **what M10.10 did**, so it is asked between two
+#: pinned commits (M11.2.1, **ADR-0052**). The original form compared `HEAD` against the working
+#: tree, which answers *"is the checkout dirty right now?"* — a question about today's editor, not
+#: about M10.10, and one that fails for any later epic's authorized work.
+M10_10_COMMIT = "3ca738e5308d7bdf2f07ba831fec663a77d4d87d"
+M10_10_PARENT = "57c41eda776029f721a4ebd9856a4303577d2f20"
+
+
+def _m10_10_changes(pathspec: str) -> list[tuple[str, str]]:
+    """`(status, path)` pairs M10.10 itself produced under `pathspec`."""
+    raw = _git("diff", "--name-status", M10_10_PARENT, M10_10_COMMIT, "--", pathspec)
+    return [
+        (line.split("\t")[0].strip(), line.split("\t")[-1].strip())
+        for line in raw.splitlines()
+        if line.strip()
+    ]
+
+
+def test_the_m10_10_range_is_a_real_history():
+    """Both pinned ends resolve and stand in the stated parent/child relation (ADR-0052)."""
+    assert _git("cat-file", "-t", M10_10_COMMIT) == "commit"
+    assert _git("rev-parse", f"{M10_10_COMMIT}^") == M10_10_PARENT
+
+
 def test_no_pre_existing_api_file_was_modified():
     """**CV5.** The whole reason M10.10 is a *new package*: every file that existed under
-    `platform/api/` before this milestone must be byte-for-byte unchanged."""
-    changed = [
-        line
-        for line in _git("diff", "--name-only", "HEAD", "--", "platform/api").splitlines()
-        if line
-    ]
-    assert changed == [], changed
+    `platform/api/` before this milestone is byte-for-byte unchanged by it.
+
+    Additions are not violations — ADR-0043 **CD7** reads *"no pre-existing `api/` file modified"*
+    as modification or deletion — so the range is filtered to exactly those statuses, which is
+    strictly sharper than the old live-tree form that could not tell the two apart."""
+    modified = [(s, p) for s, p in _m10_10_changes("platform/api") if not s.startswith("A")]
+    assert modified == [], modified
 
 
 def test_the_new_package_is_the_only_api_addition():
-    untracked = [
-        line
-        for line in _git(
-            "ls-files", "--others", "--exclude-standard", "--", "platform/api"
-        ).splitlines()
-        if line
-    ]
-    assert all(line.startswith("platform/api/metering/") for line in untracked), untracked
+    added = [p for s, p in _m10_10_changes("platform/api") if s.startswith("A")]
+    assert added, "M10.10 added no api file; the evidence is missing, not clean"
+    assert all(p.startswith("platform/api/metering/") for p in added), added
 
 
 def test_billing_is_unchanged_apart_from_the_authorized_enum_member():
     """CV1-CV3 — the single additive `MeterSource.OBSERVABILITY` is the only Billing change M10.10
     was ever authorized to rely on."""
-    changed = [
-        line
-        for line in _git("diff", "--name-only", "HEAD", "--", "platform/billing").splitlines()
-        if line
-    ]
+    changed = [p for _s, p in _m10_10_changes("platform/billing")]
     assert changed in ([], ["platform/billing/foundation/catalog.py"]), changed
 
 

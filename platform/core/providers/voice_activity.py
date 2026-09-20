@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Protocol, runtime_checkable
 
 from core.audio import AudioFrame
 
@@ -63,3 +64,20 @@ class VoiceActivityProvider(ABC):
     @abstractmethod
     def detect(self, frame: AudioFrame, *, session_id: str) -> VoiceActivitySample:
         """Classify one audio frame as speech or silence for a session."""
+
+
+@runtime_checkable
+class ReportsDroppedAudio(Protocol):
+    """Optional: a provider whose bounded analysis buffer can overflow reports what it dropped
+    (M11.7, AR-24, AR-40).
+
+    A windowed provider buffers audio between `detect()` (which must stay O(1)) and its own
+    background inference. The buffer is bounded, so when inference falls behind, the oldest audio
+    is discarded. That is correct behaviour — and it must never be *silent*. The runtime drains
+    this counter after each observation and records a degradation when it is non-zero.
+
+    Additive and structural: providers that never drop (the local profile) simply do not
+    implement it, and nothing about `VoiceActivityProvider` changes."""
+
+    def drain_dropped_ms(self, session_id: str) -> float:
+        """Milliseconds of audio discarded since the last call for this session; resets to 0."""

@@ -727,9 +727,10 @@ def test_e10_10_detects_a_historical_digest_that_does_not_reproduce(monkeypatch)
 
 
 def test_e10_10_detects_an_epic9_artifact_modified_by_m10_13(monkeypatch):
+    """The guard still fires — renaming the seam at M11.2.1 did not disarm it (ADR-0052)."""
     monkeypatch.setattr(
         epic10,
-        "_changed_since_head",
+        "_changed_by_the_certification",
         lambda *p: ("platform/tests/certification/catalogue.py",),
     )
     assert "catalogue.py" in _violation_of(epic10._e10_10())
@@ -877,16 +878,44 @@ def test_dl_0139_records_the_epic9_release_assertions_as_unresolved():
 
 # ── 15. the M10.13 boundary (CV8, CV18, CV20, CV21) ────────────────────────────
 
+#: **The M10.13 certification commit and its parent** — the range that *is* M10.13.
+#:
+#: Every "M10.13 did not modify X" question below is a question about **that commit**, and is
+#: therefore asked between two pinned literals. Before M11.2.1 these compared `HEAD` against the
+#: **working tree**, which asked something else entirely — *"is the checkout dirty right now?"* —
+#: and so reported an M10.13 violation for any later epic's authorized, uncommitted work. M10.13
+#: has no authority over Epic 11's tree and cannot be falsified by it (ADR-0052).
+CERTIFICATION_COMMIT = "db8c50828c91567aa9a7c518e58f804593a592f9"
+CERTIFICATION_PARENT = "8ee7d3c1bf57ae862307c357c75e4c2008665e0f"
+
+
+def _changed_by_the_certification(*pathspecs: str) -> str:
+    """Paths the M10.13 certification commit itself changed under `pathspecs`."""
+    return _git(
+        "diff", "--name-only", CERTIFICATION_PARENT, CERTIFICATION_COMMIT, "--", *pathspecs
+    )
+
+
+def test_the_certification_range_is_a_real_history():
+    """Both pinned ends resolve and stand in the stated parent/child relation (ADR-0052)."""
+    assert _git("cat-file", "-t", CERTIFICATION_COMMIT) == "commit"
+    assert _git("rev-parse", f"{CERTIFICATION_COMMIT}^") == CERTIFICATION_PARENT
+
 
 def test_no_epic9_certification_freeze_or_release_artifact_was_modified():
-    """CV8 — measured against HEAD, so the authorized M10.10 re-baseline is not re-litigated."""
-    touched = _git("diff", "--name-only", "HEAD", "--", *epic10.EPIC9_FROZEN_ARTIFACTS)
+    """CV8 — measured across the certification commit, so the authorized M10.10 re-baseline is
+    not re-litigated and no later epic can be mistaken for M10.13."""
+    touched = _changed_by_the_certification(*epic10.EPIC9_FROZEN_ARTIFACTS)
     assert touched == "", touched
 
 
 def test_the_decision_log_was_not_modified():
-    """CV18 — DL-0139 stays discharged at M10.10; M10.13 records, it does not reopen."""
-    assert _git("diff", "--name-only", "HEAD", "--", ".voxvoice/DECISION_LOG.md") == ""
+    """CV18 — DL-0139 stays discharged at M10.10; M10.13 records, it does not reopen.
+
+    The claim is that **the certification commit** added no decision-log entry (ADR-0043 CD11's
+    *"no decision-log entry accompanies this ratification"*). Later epics appending their own
+    entries — as M11.1 did — is normal governance, not an M10.13 violation."""
+    assert _changed_by_the_certification(".voxvoice/DECISION_LOG.md") == ""
 
 
 def test_dl_0139_is_still_resolved():
@@ -897,7 +926,7 @@ def test_dl_0139_is_still_resolved():
 
 def test_billing_and_migrations_were_not_modified_by_m10_13():
     for pathspec in ("platform/billing", "platform/replay"):
-        assert _git("diff", "--name-only", "HEAD", "--", pathspec) == "", pathspec
+        assert _changed_by_the_certification(pathspec) == "", pathspec
 
 
 def test_no_production_module_imports_the_epic10_certification():

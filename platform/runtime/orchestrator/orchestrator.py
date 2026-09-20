@@ -42,18 +42,28 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from core.events import EventMetadata, EventSource
+from core.providers.transport import ObservableTransport, TransportEvent
 from core.states import SessionState
 from events import InProcessEventBus
 
 from ..contracts import RuntimeContext
 from ..conversation import ConversationStateMachine, TransitionObserver, TransitionRecord
-from ..endpoint import EndpointCoordinator, EndpointEngine
+from ..endpoint import (
+    AudioEndpointDetector,
+    EndpointCoordinator,
+    EndpointEngine,
+    EndpointPolicy,
+)
 from ..errors import OrchestrationError, OrchestrationStartupError
 from ..event_bridge import RuntimeEventBridge
+from ..faults import Degradation, DegradationKind, DegradationRecorder, ProviderGuard
 from ..interrupt import InterruptCoordinator, InterruptEngine
+from ..observability_plane import UNWIRED
 from ..pipeline.pipeline import RuntimePipeline
 from ..registry import CapabilityKind
 from ..smart_turn import SmartTurnCoordinator, SmartTurnEngine
+from ..speech import GreetingUnavailable, PlaybackEngine, PlaybackScheduler
 from ..turn import TurnCoordinator, TurnEngine
 from ..voice_activity import VoiceActivityCoordinator, VoiceActivityEngine
 
@@ -80,8 +90,15 @@ class ConversationOrchestrator:
         # events publish exactly once.
         self._event_bus: InProcessEventBus | None = None
         self._bridge: RuntimeEventBridge | None = None
+        # M11.12: the session's `metric.turn` producer and the metric buffer's subscription
+        # handle. Both are per session and both are released in `_close_providers`.
+        self._latency = None
+        self._metrics_subscription = None
         self._session_started = False
         self._lifecycle_closed = False
+        # M11.14: providers are released from both terminal paths, so the release must be a
+        # once-only fact rather than a once-only *call site*.
+        self._providers_closed = False
         # Turn Engine (M3.1): owns turn lifecycle for this conversation. The
         # orchestrator creates it and exposes it read-only; it never manipulates
         # turn state (the pipeline drives it via the coordinator).
@@ -90,6 +107,17 @@ class ConversationOrchestrator:
         # when a VAD provider is registered (graceful fallback otherwise). Exposed
         # read-only; driven by the pipeline via the coordinator, never here.
         self._voice_activity_engine: VoiceActivityEngine | None = None
+        # AR-23/AR-24 (M11.4): one degradation record per session, and one guard per capability
+        # sharing it — so a breaker opened by the transport and a degradation recorded by STT
+        # land in the same place a reader can inspect afterwards.
+        self._degradations = DegradationRecorder(
+            session_id=self._context.session.session_id,
+            sink=self._on_degradation,
+        )
+        self._guards: dict[str, ProviderGuard] = {
+            capability: ProviderGuard(capability=capability, degradations=self._degradations)
+            for capability in ("transport", "stt", "llm", "tts", "voice_activity")
+        }
         # Endpoint Intelligence Framework (M3.3): owns endpoint-decision state,
         # ALWAYS created (it replaces the STT-final completion heuristic). Exposed
         # read-only; driven by the pipeline/VAF via the coordinator, never here.
@@ -103,6 +131,42 @@ class ConversationOrchestrator:
         # decisions, created only when the agent opts in. Blends an optional
         # registered semantic evaluator. Exposed read-only; the pipeline drives it.
         self._smart_turn_engine: SmartTurnEngine | None = None
+
+    # ── AR-6: transport reality, reported by the transport, never inferred ──
+
+    def _on_transport_event(self, event: TransportEvent) -> None:
+        """Publish one transport-reality fact onto the existing in-process seam.
+
+        The runtime **relays** what the transport observed; it never synthesises a fact from an
+        API call it made itself, which is the inversion AR-6 exists to prevent."""
+        bridge = self._bridge
+        if bridge is None:
+            return
+        try:
+            bridge.transport_reality(event.kind.value, event.detail)
+        except Exception as exc:  # noqa: BLE001 — observability never breaks a conversation
+            log.warning("transport reality publish failed (ignored): %s", exc)
+
+    # ── AR-24: degradations are declared, evented and recorded ──────────────
+
+    def _on_degradation(self, degradation: Degradation) -> None:
+        """Publish one declared degradation onto the existing in-process event seam.
+
+        The **existing** seam, deliberately: ADR-0050 SW1 keeps the Epic 10 event spine unwired
+        until M11.12, and AR-2 gives each event type one producer. Nothing here creates a second
+        telemetry path."""
+        bridge = self._bridge
+        if bridge is None:
+            return
+        try:
+            bridge.provider_degraded(degradation.as_payload())
+        except Exception as exc:  # noqa: BLE001 — observability never breaks a conversation
+            log.warning("degradation publish failed (ignored): %s", exc)
+
+    @property
+    def degradations(self) -> DegradationRecorder:
+        """Read-only access to this session's degradation record (AR-24)."""
+        return self._degradations
 
     # ── read-only exposure ──────────────────────────────────────────────────
     @property
@@ -172,13 +236,38 @@ class ConversationOrchestrator:
         # The Event Bus is the single internal communication mechanism (M4.1). Create
         # it first so startup facts (runtime started, providers connected) are events.
         session = self._context.session
-        self._event_bus = InProcessEventBus()
+        # M11.12: the session's bus is built **through** Epic 10's own extension points — a
+        # durable sink and its failure hook — rather than beside them. `plane` is `UNWIRED` by
+        # default, in which case this is byte-for-byte the M4.1 bus the runtime has always had.
+        plane = getattr(self._context.config, "observability", UNWIRED)
+        self._event_bus = InProcessEventBus(
+            durable=plane.durable, on_durable_error=plane.on_durable_error
+        )
+        # The metric buffer subscribes **itself**, for `metric.turn` only (ADR-0039 MB1): the
+        # runtime never decodes a metric, never builds a signal, and never reaches the
+        # commercial plane.
+        if plane.metrics is not None:
+            self._metrics_subscription = plane.metrics.subscribe(self._event_bus)
         self._bridge = RuntimeEventBridge(
             self._event_bus,
             session_id=session.session_id,
             org_id=session.org_id,
             conversation_id=session.session_id,
         )
+        # The `metric.turn` producer (ADR-0038 TP2, ADR-0033 MS8). One tap per session, holding
+        # that session's turn state, publishing as `observability` — the sole authorized producer
+        # of runtime `metric.*` (AR-2). Built here because it needs the session's bus.
+        if plane.telemetry is not None:
+            self._latency = plane.telemetry(
+                self._event_bus.publisher(
+                    EventMetadata(
+                        session_id=session.session_id,
+                        source=EventSource.OBSERVABILITY,
+                        org_id=session.org_id,
+                        conversation_id=session.session_id,
+                    )
+                )
+            )
         self._bridge.runtime_started()
         try:
             self._sm.transition(
@@ -222,6 +311,13 @@ class ConversationOrchestrator:
         try:
             await self._pipeline.run()
         except Exception as exc:  # noqa: BLE001 — routed through the state machine
+            # Providers are released **before** the state machine terminalizes (M11.14). `fail()`
+            # is synchronous — it has to be, because `SessionWorker._cleanup` calls it from a
+            # `finally` — so it can close no async resource, and until this line a session that
+            # failed mid-conversation left its transport connected, its pipeline unstopped, its
+            # playback engine running and its metric subscription registered on a discarded bus.
+            # A clean session failure is §A10's last rung; a *leaking* one is not on the ladder.
+            await self._close_providers()
             self.fail(reason=f"pipeline_error:{type(exc).__name__}")
             return
         # The transport's inbound stream ended (caller hangup) — end the conversation.
@@ -231,6 +327,11 @@ class ConversationOrchestrator:
     async def end(self, *, reason: str = "completed", source: str = "orchestrator") -> None:
         """Coordinate graceful shutdown: → ENDING → ENDED. Idempotent once terminal."""
         if self._sm.is_terminal:
+            # Still release providers (M11.14): a conversation that terminalized through `fail()`
+            # reaches here already terminal, and returning without closing would make the stop
+            # that follows a failure the one stop that cleans nothing up. `_close_providers` is
+            # idempotent, so the ordinary "ended twice" path costs nothing.
+            await self._close_providers()
             self._close_lifecycle(reason=reason)
             self._end_event.set()
             return
@@ -305,6 +406,11 @@ class ConversationOrchestrator:
                 ("transport", transport), ("stt", stt), ("llm", llm), ("tts", tts),
             ):
                 bridge.provider_connected(cap, getattr(prov, "name", "?"))
+        # AR-6 (M11.5): a transport that knows real facts reports them. Structural, not inherited
+        # — `LocalTransport` does not implement `ObservableTransport` and emits nothing, so the
+        # local profile is byte-for-byte unchanged and no reality is ever fabricated for it.
+        if bridge is not None and isinstance(transport, ObservableTransport):
+            transport.observe(session_id, self._on_transport_event)
         self._turn_engine = TurnEngine(
             session_id, on_event=bridge.turn_observer if bridge else None
         )
@@ -313,8 +419,14 @@ class ConversationOrchestrator:
         # completion (replacing the STT-final heuristic). The default policy confirms
         # a completed segment immediately, so the conversation behaves as before. It
         # notifies the same Turn Engine (via `turns`) when a turn should finish.
+        # M11.8 (ADR-0047 ME1): with audio endpointing the turn is ended by detected
+        # end-of-speech, so the policy stops letting a transcript segment confirm — otherwise the
+        # audio boundary and the Final would each finish the same turn.
+        audio_endpointing = bool(getattr(agent, "audio_endpointing", False))
         self._endpoint_engine = EndpointEngine(
-            session_id, on_event=bridge.endpoint_observer if bridge else None
+            session_id,
+            policy=EndpointPolicy(audio_driven=True) if audio_endpointing else None,
+            on_event=bridge.endpoint_observer if bridge else None,
         )
         endpoint = EndpointCoordinator(
             engine=self._endpoint_engine, session_id=session_id, turns=turns
@@ -356,6 +468,18 @@ class ConversationOrchestrator:
                 endpoint=endpoint,
                 interrupt=interrupt,
             )
+        # Audio-driven endpointing (M11.8, ADR-0047 ME1): wired only when the agent opts in AND a
+        # VAD provider is registered. The pair is already guaranteed by validation, which refuses
+        # the session otherwise (AR-25) — the second half of the condition is a belt-and-braces
+        # guard, not a silent fallback. The detector is provider-neutral: it is handed booleans and
+        # durations, and the VAD provider's declared `frame_ms` only supplies the duration to
+        # credit a frame whose own format declares none (an OPAQUE local-profile frame).
+        audio_endpoint = None
+        vad_frame_ms = 0.0
+        if audio_endpointing and voice_activity is not None:
+            audio_endpoint = AudioEndpointDetector()
+            vad_frame_ms = float(getattr(va_provider.capabilities, "frame_ms", 0) or 0)
+
         # Smart Turn Intelligence (M3.5): wired only when the agent opts in
         # (`smart_turn`). It arbitrates the endpoint/interrupt decisions via its
         # adaptive policy; an optional registered `SEMANTIC_TURN` evaluator is
@@ -377,6 +501,14 @@ class ConversationOrchestrator:
             smart_turn = SmartTurnCoordinator(
                 engine=self._smart_turn_engine, session_id=session_id
             )
+        # Playback (M11.11, ADR-0048 PB1/PB5/PB7). Wired only when the composition root selected
+        # the streaming-playback path. When absent the pipeline runs the M11.9 whole-utterance
+        # response exactly as before — no existing deployment changes behaviour by this code
+        # existing. There is no vendor branch here: the Scheduler is handed the resolved `tts`
+        # capability, whatever it is (AR-21).
+        playback = None
+        if bool(getattr(self._context.config, "streaming_playback", False)):
+            playback = self._build_playback(tts, agent)
         self._pipeline = RuntimePipeline(
             transport=transport,
             stt=stt,
@@ -384,6 +516,8 @@ class ConversationOrchestrator:
             tts=tts,
             session_id=session_id,
             system_prompt=agent.system_prompt,
+            sample_rate=agent.sample_rate,  # session property, never ambient (AR-41)
+            llm_model=agent.llm_model,  # AR-25 (M11.4): accepted config now acts
             language=agent.language,
             tts_voice=agent.tts_voice,
             on_transcript=self._context.on_transcript,
@@ -392,12 +526,101 @@ class ConversationOrchestrator:
             endpoint=endpoint,
             interrupt=interrupt,
             smart_turn=smart_turn,
+            guards=self._guards,
+            audio_endpoint=audio_endpoint,
+            vad_frame_ms=vad_frame_ms,
+            playback=playback,
+            latency=self._latency,
         )
         await self._pipeline.start()
+        await self._play_greeting(playback, agent)
+
+    def _build_playback(self, tts, agent) -> PlaybackScheduler:
+        """Assemble the Playback Engine + Scheduler for this session (M11.11).
+
+        The Scheduler synthesizes through the **guarded** TTS call, so the breaker, per-item
+        deadline and typed-error translation stay exactly where AR-23 put them rather than being
+        re-implemented one layer up. Its degradation callback records the `streaming_input=False`
+        adaptation through the same `DegradationRecorder` every other capability uses (AR-24).
+
+        The Engine's route to the transport is attached by the pipeline at `start()`, because the
+        guarded transport behind the single egress normalizer is a pipeline-owned detail."""
+        guard = self._guards.get("tts")
+
+        def synthesize(text: str, *, voice=None, language="en"):
+            source = tts.synthesize(text, voice=voice, language=language)
+            if guard is None:
+                return source
+            return guard.stream(tts.name, source, what="synthesize")
+
+        def on_degraded(provider: str) -> None:
+            if self._degradations is not None:
+                self._degradations.record(
+                    Degradation(
+                        capability="tts",
+                        kind=DegradationKind.NOT_STREAMING,
+                        provider=provider,
+                        detail="the provider declares no streaming text input",
+                        fallback="synthesizing one clause per request",
+                    )
+                )
+
+        return PlaybackScheduler(
+            tts,
+            PlaybackEngine(),
+            voice=agent.tts_voice,
+            language=agent.language,
+            synthesize=synthesize,
+            on_degraded=on_degraded,
+        )
+
+    async def _play_greeting(self, playback, agent) -> None:
+        """Speak the agent's `first_message`, once, at session start (ADR-0048 PB8, D-11).
+
+        Session-initiated by construction: this runs inside session startup, never at import or
+        bootstrap. A greeting that cannot be synthesized is **not** fatal — the caller simply is
+        not greeted and the conversation proceeds, which is why `GreetingUnavailable` is caught
+        here rather than allowed to fail the session.
+
+        `first_message` has been accepted and unspoken since M2C.2; this is where AR-25 is
+        actually discharged for it — but only for sessions that run the playback path, which is
+        why `GreetingState` keeps its existing vocabulary (R-62)."""
+        if playback is None or not agent.first_message:
+            return
+        try:
+            await playback.precache_greeting(agent.first_message)
+            await playback.engine.start()
+            await playback.play_greeting()
+        except asyncio.CancelledError:
+            raise
+        except GreetingUnavailable as exc:
+            log.warning(
+                "session %s: greeting unavailable (%s)",
+                self._context.session.session_id, exc,
+            )
 
     async def _close_providers(self) -> None:
+        """Release everything the conversation opened. **Idempotent** (M11.14).
+
+        Called from both terminal paths now — the graceful `end()` and the failure routed through
+        `run()` — and a session that fails and is then stopped reaches it twice. Tearing a
+        transport down twice is not merely wasteful: `provider_disconnected` would be published
+        again, and §16 requires no duplicate terminal event."""
+        if self._providers_closed:
+            return
+        self._providers_closed = True
         if self._pipeline is not None:
             await self._pipeline.stop()
+        # M11.12: release the per-session observability attachments. The metric buffer is
+        # process-wide and long-lived, so leaving a dead session's handler registered on a bus
+        # that is about to be discarded would be the leak this milestone must not introduce.
+        subscription, self._metrics_subscription = self._metrics_subscription, None
+        if subscription is not None and self._event_bus is not None:
+            # `bus.subscribe` returns a `Subscription`; the bus owns removal, and removal is
+            # idempotent — so a second close is harmless.
+            self._event_bus.unsubscribe(subscription)
+        # The tap holds this session's in-flight turn state; it is discarded with the session.
+        self._latency = None
         registry = self._context.registry
         agent = self._context.agent
         if self._bridge is not None and registry is not None and agent is not None:

@@ -13,10 +13,69 @@ versioned break (Constitution §A6 describes essence, not signatures).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from core.audio import AudioFrame
+
+
+class TransportEventKind(StrEnum):
+    """What the transport actually did (M11.5, **AR-6**).
+
+    AR-6: *"Any component learning of a real-world lifecycle fact (hangup, connect, failure) must
+    emit the event that drives the state machine — status may never be inferred-only from API
+    calls."* These four kinds are the transport's half of that rule, and each names a **fact**,
+    never a request:
+
+    * `CONNECTED` — the transport session is genuinely established. Not *"start() was called"*.
+    * `MEDIA_READY` — media is genuinely usable. Distinct from `CONNECTED` because a connection
+      can complete with no media flowing, and a runtime that treated the two as one would report
+      a working call before a single frame existed.
+    * `DISCONNECTED` — the transport went away. The real-world hangup.
+    * `FAILED` — the transport could not be established, or died in a way that ends usability.
+      Separate from `DISCONNECTED` because a clean hangup and a broken transport are different
+      facts and lead to different session outcomes.
+
+    Deliberately small: only the states the VoxVoice contract needs. A transport implementation's
+    own state machine stays inside that implementation."""
+
+    CONNECTED = "connected"
+    MEDIA_READY = "media_ready"
+    DISCONNECTED = "disconnected"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class TransportEvent:
+    """One transport-reality fact. Data only — no vendor object, no credential, no SDP.
+
+    `detail` is a short human-readable reason. It must never carry a token, a secret or raw
+    connection internals (ADR-0049 CR5); the payload that reaches the event bus is built from
+    these fields alone."""
+
+    kind: TransportEventKind
+    session_id: str
+    detail: str = ""
+
+
+#: How a transport reports reality. Declared on the `core` floor so a plugin can emit without
+#: importing `runtime` (AR-11); the runtime maps these onto `EventType.TRANSPORT_*`.
+TransportObserver = Callable[[TransportEvent], None]
+
+
+@runtime_checkable
+class ObservableTransport(Protocol):
+    """A transport that can report AR-6 reality for a session.
+
+    **Optional by design.** `TransportProvider` is unchanged, so `LocalTransport` — which has no
+    real connection to report — neither implements this nor emits anything, and the local profile
+    behaves exactly as before. A transport that *does* know real facts advertises it structurally,
+    and the Orchestrator registers per session."""
+
+    def observe(self, session_id: str, observer: TransportObserver) -> None:
+        """Register the observer for one session's transport-reality facts."""
 
 
 @dataclass(frozen=True, slots=True)

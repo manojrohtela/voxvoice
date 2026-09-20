@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import logging
 
+from core.providers.voice_activity import ReportsDroppedAudio
+
 from ..errors import VoiceActivityProviderError
 from .engine import VoiceActivityEngine
 from .state import VoiceActivityState
@@ -55,6 +57,8 @@ class VoiceActivityCoordinator:
         # speech/silence during assistant playback so barge-in can be detected; it
         # never decides interruption itself.
         self._interrupt = interrupt
+        #: The latest raw verdict (M11.8). One object, replaced per frame — never a history.
+        self._last_sample = None
 
     @property
     def engine(self) -> VoiceActivityEngine:
@@ -83,6 +87,7 @@ class VoiceActivityCoordinator:
                 f"voice-activity provider '{getattr(self._provider, 'name', '?')}' "
                 f"detect failed: {exc}"
             ) from exc
+        self._last_sample = sample
         changed = self._engine.observe(sample)
         if changed is VoiceActivityState.SPEAKING:
             # Speech confirmed → the caller's turn has begun. `on_user_speech` is
@@ -107,6 +112,29 @@ class VoiceActivityCoordinator:
             else:
                 self._interrupt.on_user_silence(sample.confidence)
         return changed
+
+    @property
+    def last_sample(self):
+        """The most recent per-frame provider verdict, or `None` before the first.
+
+        Exposed for M11.8: endpointing is a temporal policy over *per-frame* verdicts, while
+        `observe()` returns only net **state** changes (which the engine's own hysteresis already
+        smoothed). Read-only and additive — nothing about `observe()` changed."""
+        return self._last_sample
+
+    @property
+    def provider_name(self) -> str:
+        return str(getattr(self._provider, "name", "voice_activity"))
+
+    def drain_dropped_ms(self) -> float:
+        """Audio the provider discarded from its bounded buffer since the last call (M11.7).
+
+        `0.0` for a provider that cannot drop (it does not implement `ReportsDroppedAudio`). The
+        coordinator only relays the fact; recording it as a degradation is the pipeline's, which
+        owns the fault-tolerance guards (AR-24)."""
+        if not isinstance(self._provider, ReportsDroppedAudio):
+            return 0.0
+        return self._provider.drain_dropped_ms(self._session_id)
 
     async def stop(self) -> None:
         """Release the provider's session resources. Best-effort — a shutdown

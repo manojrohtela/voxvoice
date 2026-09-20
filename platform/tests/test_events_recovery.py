@@ -783,17 +783,26 @@ def test_aa_webhooks_is_still_byte_for_byte_unchanged():
 
 
 def test_ab_the_runtime_acquired_nothing_from_m108():
-    """(25) ADR-0035 DW10 / ADR-0036 RL17 / ADR-0037 RC16 — the runtime is still unwired."""
-    for token in ("OutboxRecovery", "events.recovery", "durable", "DeliveryTransport",
+    """(25) DW10 / RL17 / RC16, **retargeted at M11.12** — the milestone that wires the sink.
+
+    `"durable"` was dropped from the forbidden list because M11.12 legitimately gives the runtime
+    an injected, opaque durable *attachment*; every other token is kept, and they are the ones
+    that matter. The property is *the runtime acquired nothing* — no recovery machinery, no
+    delivery transport, no outbox, no database — and that is still true: it holds a reference it
+    was handed and knows the name of none of them."""
+    for token in ("OutboxRecovery", "events.recovery", "DeliveryTransport",
                   "EventDatabase", "DurableOutbox"):
         for path in pathlib.Path("runtime").rglob("*.py"):
             assert token not in path.read_text(), f"{path} mentions {token}"
 
 
-def test_the_orchestrator_still_constructs_a_plain_bus():
+def test_the_orchestrator_constructs_exactly_one_bus():
+    """**Retargeted at M11.12**: the bus is no longer plain — it carries the injected sink this
+    milestone was authorized to supply. That there is still exactly **one** bus, and that the
+    runtime names no storage class, is what this guard now pins (see `test_events_boundary`)."""
     source = pathlib.Path("runtime/orchestrator/orchestrator.py").read_text()
-    assert "InProcessEventBus()" in source
-    assert "durable" not in source
+    assert source.count("InProcessEventBus(") == 1
+    assert "EventDatabase" not in source
 
 
 def test_ac_m108_added_no_migration(spine):

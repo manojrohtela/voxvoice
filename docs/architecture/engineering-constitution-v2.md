@@ -278,16 +278,17 @@ One responsibility per folder. Anything that fits none of these is a design smel
 
 | Part-A role | Current selection | Notes / replacement path |
 |---|---|---|
-| Backend language & concurrency | Python 3.12, asyncio | Rewrite-in-place per module if ever profiled as bottleneck (unlikely: network + inference dominate) |
+| Backend language & concurrency | Python **3.12+** (floor 3.12; the exact release interpreter is pinned by the lockfile and named by the CI matrix), asyncio | Clarified by **P-ADR-0002** (M11.1) to resolve an observed drift between this row, `pyproject.toml` (`>=3.11`) and the environment (3.13); `pyproject` is tightened to `>=3.12` at M11.2. Rewrite-in-place per module if ever profiled as bottleneck (unlikely: network + inference dominate) |
 | Control Plane HTTP framework | FastAPI + Pydantic v2 | Any async HTTP framework satisfying §A11.4 |
-| Pipeline substrate (§A6.4) | Pipecat ≥ 1.4 | Confined to `runtime/pipeline/`; replaceable with any frame-pipeline library or in-house |
+| Pipeline substrate (§A6.4) | **None — first-party `RuntimePipeline`** (Pipecat ≥ 1.4 binding **retired** by **P-ADR-0002**, M11.1) | ADR-0002's *"may"* is exercised in the negative; **AR-13 is retained**, so any future substrate stays confined to `runtime/pipeline/`. Commodity work is rented narrowly instead: a vendor SDK inside its own plugin (AR-12), a resampling library inside the single resampler module (ADR-0044 AD4) |
 | System of Record | Postgres (managed: Supabase) — prod; SQLite — unit tests | Any transactional RDBMS; outbox pattern is plain SQL |
 | Event Bus (Stage 1–2 / Stage 3+) | in-process async pub/sub / Redis pub-sub | Any distributed pub/sub broker behind the `EventBus` interface |
 | Streaming STT plugins | Deepgram (streaming); Sarvam for Hinglish (verify streaming; else declared degraded mode) | Any vendor passing the STT contract suite |
 | Streaming TTS plugins | Cartesia; Sarvam (Hinglish) | Any vendor passing the TTS contract suite |
 | LLM plugins | Groq (low-latency); Anthropic (quality) | Any vendor passing the LLM contract suite |
-| Real-time Transport plugins | WebRTC via substrate's small-WebRTC transport; hosted-room vendor optional; SIP/telephony later | Any duplex media transport implementing the contract |
+| Real-time Transport plugins | **First-party WebRTC Provider Plugin** (the substrate-backed selection **retired** by **P-ADR-0002**, M11.1); hosted-room vendor optional; SIP/telephony later | Any duplex media transport implementing the contract. The WebRTC library is confined to that plugin under **AR-12** — which is what lets AR-11, AR-12 and AR-13 hold simultaneously |
 | Storage plugin | Supabase storage | Any object store |
+| Dependency tooling & lockfile | **`uv`**; the committed lockfile is the release artifact | Bound by **P-ADR-0002** (M11.1). `pyproject.toml` may keep ranges; the lockfile pins resolved versions. Every dependency carries a DECISION_LOG entry (purpose, licence, blast radius — CODING_STANDARDS §7) and a CI vulnerability audit failing on high/critical (SECURITY_POLICY §6) |
 | Client SDK | TypeScript core + React binding | Additional language bindings additive |
 | ORM / models | SQLModel | Implementation detail of `api/` + persistence |
 | Deploy Stage 2 target | One cloud VM (current: Oracle A1 class) + systemd + managed Postgres | Any host with a public IP for media relay |

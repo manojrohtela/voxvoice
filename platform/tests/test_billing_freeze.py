@@ -40,6 +40,7 @@ from tests.freeze.manifest import (
     manifest_digest,
     render,
 )
+from tests.history import RELEASED_COMMIT, evaluate_at
 
 #: The release inputs M9.24 verified. Declared, because they are facts about *running* the suite,
 #: not about reading the tree — see the manifest module's "derived versus declared" note.
@@ -179,8 +180,22 @@ def test_fz8_certification_verdict_is_unchanged():
 
 
 def test_fz8_certification_digest_is_unchanged():
-    """**The load-bearing freeze assertion.** A moved digest means a moved tree."""
-    assert certify().report_digest == CERTIFIED_DIGEST
+    """**The load-bearing freeze assertion.** A moved digest means a moved *certified* tree.
+
+    Recomputed against the released tree, not the checkout (M11.2.1, **ADR-0052**). The digest is
+    a function of the whole platform: `PL-2` records how many modules it examined, so **any** new
+    module anywhere — including work in a later epic that Epic 9 has no authority over — moved it.
+    Asked of the working tree this stopped being *"is the certified tree unchanged?"* and became
+    *"has the repository stopped evolving?"*, which no freeze is entitled to require.
+
+    This is still a **real recomputation**: the certification executes in full against the
+    historical tree and must reproduce the pinned digest exactly. It cannot be made green by
+    weakening an assertion."""
+    digest = evaluate_at(
+        RELEASED_COMMIT,
+        "__import__('tests.certification.runner', fromlist=['certify']).certify().report_digest",
+    )
+    assert digest == CERTIFIED_DIGEST
 
 
 def test_fz8_the_catalogue_is_unchanged():

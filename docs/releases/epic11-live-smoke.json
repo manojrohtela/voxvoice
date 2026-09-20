@@ -1,0 +1,96 @@
+{
+  "milestone": "M11.16.5",
+  "title": "Live Environment Bring-Up & Real Browser Smoke",
+  "date": "2026-09-20",
+  "verdict": "BLOCKED",
+  "live_conversation_executed": false,
+  "note": "No browser ran the path, no provider was called, no media crossed a network. Local read-only evidence only; this is NOT E11-15 evidence.",
+  "entry_state": {
+    "head": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "main": "c3c7397af5d9713565ed2772f91a6cb488582b06",
+    "v5_0_0_tag_object": "9d60ee894e53636f76987fc7824cd14df2a32e39",
+    "v5_0_0_commit": "3779e932182ed06ec5411c83ba53f0c2b585b8b8",
+    "branch": "feat/m10.2-durable-event-foundation",
+    "v6_tags": 0,
+    "stashes": 0,
+    "working_tree": "intentionally uncommitted",
+    "packages": 53,
+    "epic9_certification_digest": "c044b3f6a23066df4ed97c8b7d0992d8419490ed68dd1b3633b22717f7cab6e6",
+    "epic10_certification_digest": "7e57bc14764201b123c49b9321f15d9c41f0ee7015e6879c64c0307e56db3d0d",
+    "epic10_freeze_digest": "d3d4858d5f18b7f6d583f4d34caeec52933acc262e36d4f8b343e2e8b6a00d38",
+    "epic11_certification_digest": "25c9f1527cbba91cd943e41580926c8ea1d35f20a0a66fd21ef29253ab3933ba"
+  },
+  "gates": {
+    "G1_stage2_a1_host": {
+      "status": "BLOCKED",
+      "evidence": "No Oracle Ampere A1 provisioned; DL-0153 still NOT VERIFIED with no IP/DNS/instance id. No OCI CLI, no ~/.oci config, no Terraform, no Ansible on this machine.",
+      "forbidden_substitute_used": false,
+      "forbidden_substitute": "1 GB E2 micro (140.245.10.153) — excluded by DL-0153, not deployed to"
+    },
+    "G2_public_https": {"status": "BLOCKED", "evidence": "Downstream of G1: no host, no DNS name, no certificate. Nothing invented."},
+    "G3_public_udp": {"status": "BLOCKED", "evidence": "Downstream of G1: no host interface, no cloud security list to inspect."},
+    "G4_deepgram_credential": {"status": "BLOCKED", "evidence": "deepgram_api_key ABSENT via CredentialProvider (presence only)"},
+    "G5_groq_credential": {"status": "BLOCKED", "evidence": "groq_api_key ABSENT via CredentialProvider (presence only)"},
+    "G6_cartesia_credential_and_voice": {"status": "BLOCKED", "evidence": "cartesia_api_key ABSENT; VOXVOICE_TTS_VOICE_ID ABSENT"},
+    "G7_real_browser_execution": {"status": "BLOCKED", "evidence": "Chrome and Safari installed, but nothing to point them at (G1-G3), no provider to reach (G4-G6), and no operator at a microphone. Synthetic browser substitute forbidden and not built."}
+  },
+  "live_path": {
+    "browser": "NOT_EXECUTED",
+    "webrtc_inbound": "NOT_EXECUTED",
+    "deepgram_stt": "NOT_EXECUTED",
+    "silero_vad": "NOT_EXECUTED",
+    "audio_endpointing": "NOT_EXECUTED",
+    "groq_llm": "NOT_EXECUTED",
+    "clause_pipeline": "NOT_EXECUTED",
+    "cartesia_tts": "NOT_EXECUTED",
+    "playback_engine": "NOT_EXECUTED",
+    "webrtc_outbound": "NOT_EXECUTED",
+    "browser_playback": "NOT_EXECUTED"
+  },
+  "events_observed": [],
+  "metric_turn": {
+    "produced": false,
+    "adr_0053_status": "PROPOSED — not ratified, not applied, not edited",
+    "applicable_stt_semantics": "endpoint_decided -> stt_final (unchanged)",
+    "stt_measurement": "UNAVAILABLE — no session ran",
+    "stt_budget_claim": "none; absence was not converted to zero"
+  },
+  "local_read_only_evidence": {
+    "real_provider_profile": {"transport": "webrtc", "stt": "deepgram", "voice_activity": "silero", "llm": "groq", "tts": "cartesia", "streaming_playback": true, "modified": false},
+    "no_silent_fallback": "VERIFIED — build_real_session_controller raises rather than downgrading to the local transcriber",
+    "ice_candidates_gathered": {"host_private": 1, "srflx_public": 1}
+  },
+  "risks": {
+    "R-33": "OPEN — unchanged; no real peer or media endpoint evidence was added",
+    "R-34": "OPEN — no browser executed the path",
+    "R-54": "OPEN — unchanged",
+    "R-58": "OPEN — unchanged",
+    "R-63": "OPEN — unchanged",
+    "R-66": "OPEN — unchanged; ADR-0053 still PROPOSED",
+    "R-68": "OPEN — unchanged",
+    "R-69": "OPEN — unchanged",
+    "R-71": "NEW, OPEN — aiortc defaults to stun:stun.l.google.com:19302 when iceServers is None; undeclared third-party dependency at every call setup, not configurable through the composition root"
+  },
+  "certification_impact": {
+    "E11-12": "INCONCLUSIVE — unchanged",
+    "E11-15": "NOT EXECUTED — unchanged",
+    "controls_satisfied": "14 / 16",
+    "catalogue_modified": false
+  },
+  "security": {
+    "credential_literal_scan": "1418 tracked files scanned; 10 identifier matches, 0 credential values",
+    "credentials_printed": false,
+    "transcript_persisted": false,
+    "audio_persisted": false,
+    "model_output_persisted": false
+  },
+  "production_code_changed": false,
+  "remaining_prerequisites": [
+    "Provision Oracle Ampere A1 (2 OCPU / 12 GB) with public IPv4; open ports at BOTH Oracle security list and host iptables",
+    "DNS + HTTPS for that host (browser microphone requires a secure context)",
+    "Inbound UDP on the media range",
+    "VOXVOICE_SECRET_DEEPGRAM_API_KEY, VOXVOICE_SECRET_GROQ_API_KEY, VOXVOICE_SECRET_CARTESIA_API_KEY on the host only",
+    "VOXVOICE_TTS_VOICE_ID",
+    "An operator at a browser to grant the microphone and speak the smoke utterance"
+  ]
+}
