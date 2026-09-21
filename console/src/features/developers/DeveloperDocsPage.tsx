@@ -47,6 +47,21 @@ const ERRORS: [string, string][] = [
   ["502 · 503", "The runtime could not start the session, or none is configured."],
 ];
 
+const SDK = `import { VoxVoiceClient, VoxVoiceError } from "@voxvoice/sdk";
+
+const client = new VoxVoiceClient({
+  apiKey: process.env.VOXVOICE_API_KEY!, // <YOUR_API_KEY>, from your server's environment
+  baseUrl: "http://localhost:8000",      // without /v1
+});
+
+const agent = await client.agents.create({ name: "Support", system_prompt: "Be brief.", language: "en" });
+const { session_id } = await client.sessions.create({ agent_id: agent.id });
+try {
+  await client.sessions.get("ses_missing");
+} catch (error) {
+  if (error instanceof VoxVoiceError) console.error(error.status, error.message); // 404
+}`;
+
 const CURL = `export VOXVOICE_API_KEY="<YOUR_API_KEY>"
 
 curl -sS -X POST http://localhost:8000/v1/agents \\
@@ -169,7 +184,7 @@ export function DeveloperDocsPage() {
 
       <nav aria-label="On this page" className="docs__toc">
         <a href="#auth">Authentication</a> · <a href="#agents">Agents</a> · <a href="#sessions">Sessions</a> ·{" "}
-        <a href="#webrtc">Connecting a caller</a> · <a href="#errors">Errors</a> · <a href="#examples">Examples</a> ·{" "}
+        <a href="#webrtc">Connecting a caller</a> · <a href="#errors">Errors</a> · <a href="#examples">Examples</a> · <a href="#sdk">TypeScript SDK</a> ·{" "}
         <a href="#unavailable">Not available yet</a> · <a href="#reference">Reference</a>
       </nav>
 
@@ -264,6 +279,25 @@ export function DeveloperDocsPage() {
         <pre className="code">{TYPESCRIPT}</pre>
       </Section>
 
+      <Section id="sdk" title="TypeScript SDK">
+        <p>
+          <code>@voxvoice/sdk</code> is a thin, typed client for exactly this API, for Node.js 20.3+ on your server.
+          It returns the same fields and <code>null</code>s, and every failure is a <code>VoxVoiceError</code> with
+          the status and the server&apos;s detail. It is not on a registry yet: install it from the repository&apos;s{" "}
+          <code>sdk/</code> directory.
+        </p>
+        <pre className="code">{SDK}</pre>
+        <ul>
+          <li>
+            <code>client.agents</code>, <code>client.sessions</code> and <code>client.webrtc</code> use your API key.{" "}
+            <code>SignallingClient</code> from <code>@voxvoice/sdk/signalling</code> is for the browser and holds only
+            the signalling token.
+          </li>
+          <li>It does not implement WebRTC: the browser&apos;s RTCPeerConnection does. It never retries a request.</li>
+          <li>Everything under &ldquo;Not available yet&rdquo; applies to the SDK as well.</li>
+        </ul>
+      </Section>
+
       <Section id="unavailable" title="Not available yet">
         <ul>
           <li>Conversation history and analytics through the API; they are in this console only.</li>
@@ -271,7 +305,7 @@ export function DeveloperDocsPage() {
           <li>Pagination and session listing.</li>
           <li>Interrupting the agent while it speaks (barge-in).</li>
           <li>Cost, token or usage figures, and end reasons.</li>
-          <li>Phone channels, the VoxVoice SDK, and a hosted service.</li>
+          <li>Phone channels, a high-level voice-call helper in the SDK, and a hosted service.</li>
         </ul>
       </Section>
 

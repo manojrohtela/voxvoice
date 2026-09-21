@@ -1,0 +1,36 @@
+{
+  "name": "@voxvoice/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client for the VoxVoice developer API (v1)",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./signalling": {
+      "types": "./dist/signalling.d.ts",
+      "import": "./dist/signalling.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:package": "npm run build && node test/package-smoke.mjs"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

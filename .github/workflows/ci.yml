@@ -185,3 +185,25 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --audit-level=high
+
+  sdk:
+    name: sdk (typecheck, test, package, audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: sdk/package-lock.json
+      # Epic 12 M12.9 (ADR-0055 DP14). Unit and contract tests mock HTTP at fetch; the package test
+      # builds and imports the package by name. The contract file's freshness is checked by the
+      # platform suite (tests/test_developer_contract.py).
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:package
+      - run: npm audit --audit-level=high

@@ -264,3 +264,34 @@ routes.**
   [`docs/apis/developer-api.md`](../apis/developer-api.md) is the human contract. A test holds its
   endpoint list equal to the OpenAPI developer surface, and the console's docs page generates its
   reference from `/openapi.json`. Conversations and analytics remain console-only.
+
+## Amendment 4 — one SDK package, faithful to the v1 contract (M12.9, 2026-09-21)
+
+**Status:** Accepted 2026-09-21 (M12.9). It is **additive**. It **supersedes LLD §9's package plan**
+(`@voxvoice/client` with a high-level `Call`, `@voxvoice/server`, `@voxvoice/react`, and a Python
+helper).
+
+**DP14 — `@voxvoice/sdk` is a thin client of the developer API as it exists, and nothing more.**
+* **One package** at `sdk/`, with two entry points. **`@voxvoice/sdk`** (server-side, API key):
+  `agents`, `sessions`, and `webrtc.createRendezvous/startSession`. **`@voxvoice/sdk/signalling`**
+  (browser-safe, signalling token only): `getOffer`/`sendAnswer`. It is TypeScript, ESM, has type
+  declarations, runs on Node ≥ 20.3 (built-in `fetch`, `AbortSignal.any`), and has **no runtime
+  dependency**. Version `0.1.0`, `private` (not published). SemVer applies from 1.0.
+* **WebRTC scope: low-level primitives only** (option A). The SDK carries the offer and answer. It
+  does not implement WebRTC, VAD, playback or any runtime behaviour. The high-level browser `Call`,
+  the React hook and the Python helper are **deferred**. The console's `VoiceCall` stays the
+  console's. A `Call` would need a browser-safe way to start a session, which the v1 API lacks
+  (starting a session requires the API key).
+* **Contract, one source of truth:** the server's OpenAPI. `api.console.developer_contract`
+  extracts the developer and signalling operations and their schemas into
+  `sdk/contract/developer-openapi.json`. A platform test fails if that file is stale. The SDK's
+  contract tests hold every method (operation, path, credential, body) and every type (exactly the
+  schema's fields) to it. Types are hand-written, not generated, and bound by those tests.
+* **No semantics added:** no retries (the API has no idempotency keys), no pagination (the API has
+  none), no default timeout, no caching of authentication, no logging. `null` and timestamp strings
+  are returned unchanged. Errors are one `VoxVoiceError {status, detail, message}`, with no code or
+  request id, because the developer API returns neither.
+* **One deliberate narrowing, with the defect recorded:** `AgentUpdate` in the SDK allows `null` only
+  for `first_message`, `tts_voice` and `llm_model`. The server schema accepts `null` for every field,
+  but storing it in a non-nullable column fails with `500` (verified). The server defect is left for a
+  future API fix, not changed here.

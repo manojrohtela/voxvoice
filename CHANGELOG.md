@@ -147,6 +147,21 @@ platform-baseline level (see `docs/releases/`).
     dropped on switch.
   - No runtime, provider, analytics-definition or frozen-file change. No dependency added.
 
+- **M12.9 — Developer SDK** (DL-0246, ADR-0055 Amendment 4). `sdk/`: `@voxvoice/sdk` `0.1.0`
+  (private, not published).
+  - `VoxVoiceClient({apiKey, baseUrl})`: `agents.create/list/get/update/delete`,
+    `sessions.create/get/transcript/end`, `webrtc.createRendezvous/startSession`. And
+    `@voxvoice/sdk/signalling`'s `SignallingClient` for the browser (signalling token only).
+  - Typed exactly as the server schemas. Values are returned unchanged (`null`s, offset-less UTC
+    timestamps). One `VoxVoiceError {status, detail, message}`. No retries, no default timeout,
+    `AbortSignal` support, no runtime dependency. Node ≥ 20.3, ESM with declarations.
+  - `sdk/contract/developer-openapi.json` is the server's developer OpenAPI
+    (`python -m api.console.developer_contract`). Platform tests fail if it is stale, and SDK
+    contract tests hold every method and type to it.
+  - README, plus a "TypeScript SDK" section in the developer contract and the console docs. CI job
+    `sdk`.
+  - No API, runtime, provider or frozen-file change.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),

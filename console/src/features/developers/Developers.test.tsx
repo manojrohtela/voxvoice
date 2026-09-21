@@ -206,6 +206,9 @@ describe("Developer docs", () => {
     for (const section of ["Agents", "Sessions", "Connecting a caller (WebRTC)", "Errors", "Examples", "Not available yet"]) {
       expect(screen.getByRole("article", { name: section })).toBeTruthy();
     }
+    const sdk = screen.getByRole("article", { name: "TypeScript SDK" });
+    expect(within(sdk).getByText(/process\.env\.VOXVOICE_API_KEY/)).toBeTruthy();
+    expect(within(sdk).getByText(/holds only/)).toBeTruthy();
     const unavailable = screen.getByRole("article", { name: "Not available yet" });
     expect(within(unavailable).getByText(/barge-in/)).toBeTruthy();
     const agents = screen.getByRole("article", { name: "Agents" });

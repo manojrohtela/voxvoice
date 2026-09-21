@@ -286,6 +286,44 @@ if (!res.ok) throw new Error(`VoxVoice ${res.status}: ${JSON.stringify(await res
 const { session_id } = await res.json();
 ```
 
+## 8a. Using the TypeScript SDK
+
+`@voxvoice/sdk` (in [`sdk/`](../../sdk/README.md)) is a thin, typed client for exactly the API on
+this page: the same endpoints, fields, `null`s and timestamps, and the same errors as a
+`VoxVoiceError`. It is for **Node.js 20.3+ on your server**, and it holds your API key. It is not
+published to a registry yet: `npm install /path/to/VoxVoice/sdk`.
+
+```ts
+import { VoxVoiceClient, VoxVoiceError } from "@voxvoice/sdk";
+
+const client = new VoxVoiceClient({
+  apiKey: process.env.VOXVOICE_API_KEY!, // never hard-code it, never send it to a browser
+  baseUrl: "http://localhost:8000",      // without /v1
+});
+
+const agent = await client.agents.create({ name: "Support", system_prompt: "Be brief.", language: "en" });
+const { session_id } = await client.sessions.create({ agent_id: agent.id });
+try {
+  await client.sessions.get("ses_missing");
+} catch (error) {
+  if (error instanceof VoxVoiceError) console.error(error.status, error.message); // 404 Session not found
+}
+await client.sessions.end(session_id);
+```
+
+| SDK | API |
+|---|---|
+| `agents.create / list / get / update / delete` | §4 |
+| `sessions.create / get / transcript / end` | §5 |
+| `webrtc.createRendezvous / startSession` (API key, your server) | §6 steps 1–2 |
+| `SignallingClient.getOffer / sendAnswer` from `@voxvoice/sdk/signalling` (signalling token, the browser) | §6 step 3 |
+
+* The SDK **does not implement WebRTC**. The browser's `RTCPeerConnection` does, and the SDK only
+  carries the offer and answer.
+* **Nothing is retried** (the API has no idempotency keys), and there is no default timeout.
+  Every method accepts `{signal, timeoutMs}`.
+* Everything in §11 applies to the SDK too. It adds no capability the API lacks.
+
 ## 9. Conversations and analytics
 
 Conversation history (transcript, per-turn latency, timeline) and analytics are available **in the
@@ -307,7 +345,7 @@ Stated plainly, so nothing here is assumed:
 * interrupting the agent while it speaks (barge-in); `allow_interruptions`, the endpointing delays
   and `tools` have no effect yet
 * phone channels (`phone` is always `null`)
-* the VoxVoice SDK (planned; until then, use plain HTTP as above)
+* a high-level voice-call helper in the SDK (it carries signalling only; §8a)
 * a hosted VoxVoice service: today you run the server yourself
 
 ## 12. Reference
