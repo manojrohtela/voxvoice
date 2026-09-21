@@ -234,3 +234,33 @@ DP6 precise for analytics.
   (not recorded), and barge-in rates (F-1 is unresolved).
 * **Frozen boundary noted, not crossed.** The indexes that would bound the turn read on large logs
   belong to frozen schemas (M11 `session`, Epic 10 `evt_event`). None is added at M12.6.
+
+## Amendment 3 — developer API keys and the developer contract (M12.7, 2026-09-21)
+
+**Status:** Accepted 2026-09-21 (M12.7). It is **additive**: DP1–DP12 are unchanged, and it
+**supersedes one design detail** (LLD §8, DB design §3.5): the `dp_api_key_meta` table is not
+built.
+
+**DP13 — One key model (M11's), a console lifecycle around it, and a contract derived from the
+routes.**
+* **Keys.** A developer API key is an M11 `apikey` row, minted by the frozen `generate_api_key`,
+  stored only as `hash_key` (SHA-256) and authenticated by the frozen `get_org` on `x-api-key`,
+  which looks the hash up on every request with no cache. `api/console/api_keys/` adds a
+  lifecycle (**create** returns the raw key once, with `Cache-Control: no-store`; **list** returns
+  id, label, `created_at` and `last_used_at`, never the hash or any part of the key; **revoke**
+  deletes the row, so the next request is `401`). There is no second key table, hash, middleware or
+  lifecycle. Owner and admin only, for list as well (LLD §3). Mutations need the CSRF header.
+* **Why no `dp_api_key_meta`.** The M12.1 design planned it for `created_by`, a display prefix, and
+  a revocation record that outlives the key. None of these is needed to create, list or revoke
+  safely: the label already exists, and the key id (`key_…`) is the non-secret identifier. A prefix
+  of the secret would only add exposure. Building the table would add a migration for audit
+  metadata alone. Instead, creation and revocation are logged (`voxvoice.console.api_keys`, INFO)
+  with key id, organization and acting user, and never key material. The **deferred decision** is
+  whether a durable key audit trail is required. If it is, the table can be added then, additively.
+* **Contract.** The developer API is the unchanged M11 routes (`/v1/agents`, `/v1/sessions`,
+  `/v1/webrtc/*`). The console application's OpenAPI document annotates, at composition, each
+  operation's credential (`ApiKeyAuth`, `SignallingToken`, `ConsoleSession`, or none) and its
+  `x-voxvoice-surface` (`developer`, `signalling`, `console`, `public`). No frozen router changes.
+  [`docs/apis/developer-api.md`](../apis/developer-api.md) is the human contract. A test holds its
+  endpoint list equal to the OpenAPI developer surface, and the console's docs page generates its
+  reference from `/openapi.json`. Conversations and analytics remain console-only.

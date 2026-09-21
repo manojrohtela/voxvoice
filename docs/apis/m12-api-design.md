@@ -62,11 +62,16 @@ session-creation contract. It resolves a console identity to an org and calls th
 | GET | `/v1/console/analytics/latency` | viewer | **M12.6 ✅** | same parameters. For `voice_to_voice` and each stage: `turns`, `samples`, `missing`, `avg/min/p50/p95/max_ms` (nearest-rank; all null without samples) |
 | GET | `/v1/console/analytics/timeseries` | viewer | **M12.6 ✅** | same parameters. One bucket per UTC day, including empty days: conversations, turns, avg duration, voice-to-voice samples and p50 |
 | GET | `/v1/console/analytics/agents` | viewer | **M12.6 ✅** | same parameters. Per agent with conversations in range: counts, avg duration, avg turns, voice-to-voice stats, `archived` |
-| GET/POST | `/v1/console/api-keys` | admin | M12.7 | list / create (raw key returned once) |
-| POST | `/v1/console/api-keys/{id}/revoke` | admin | M12.7 | |
+| GET/POST | `/v1/console/api-keys` | admin | **M12.7 ✅** | GET → `{data: [{id, label, created_at, last_used_at}]}` (no key material). POST `{label}` (1–100 chars) → `201` with `key`, the raw key **returned once**, `Cache-Control: no-store` |
+| POST | `/v1/console/api-keys/{id}/revoke` | admin | **M12.7 ✅** | `204`. The key stops authenticating immediately (its `apikey` row is deleted). Another org's or a missing key → 404 |
 
 Collection responses use `{"data": [...], "next_cursor": "…" | null}`. Single resources return
-the object directly. Analytics responses are computed reports, not collections: each carries the
+the object directly.
+
+**Developer API contract (M12.7):** the external `/v1/agents`, `/v1/sessions` and `/v1/webrtc/*`
+API, its credentials, errors and examples, are documented for developers in
+[`developer-api.md`](developer-api.md). The OpenAPI document marks every operation's
+`x-voxvoice-surface` and security scheme. Analytics responses are computed reports, not collections: each carries the
 resolved `query` (range + filters) beside its figures, and none is paginated. Their definitions are
 [`m12-analytics-definitions.md`](../architecture/epic12/m12-analytics-definitions.md).
 

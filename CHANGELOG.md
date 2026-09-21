@@ -115,6 +115,22 @@ platform-baseline level (see `docs/releases/`).
   - No table, event, writer, index, migration or dependency added. No pre-`v4.0.0` `api/` file or
     Epic 10 module modified.
 
+- **M12.7 — API keys & developer docs** (DL-0244, ADR-0055 Amendment 3). The external developer
+  contract, built on the one existing M11 key model.
+  - `/v1/console/api-keys` (list/create) and `/{id}/revoke`, owner/admin only, CSRF on mutations.
+    The raw key is returned once (`Cache-Control: no-store`) and only its SHA-256 is stored.
+    Revoking deletes the `apikey` row, so the next developer-API request with it is `401`. No new
+    table, migration or auth path: `dp_api_key_meta` is not built.
+  - The console app's OpenAPI now declares `ApiKeyAuth`, `SignallingToken` and `ConsoleSession`,
+    and marks every operation's credential and `x-voxvoice-surface`.
+  - [`docs/apis/developer-api.md`](docs/apis/developer-api.md): the developer contract, covering
+    credentials, conventions, agents, sessions, the WebRTC flow, errors, examples and what is not
+    available. A test keeps its endpoint list equal to the OpenAPI developer surface.
+  - Console: **API keys & docs** (`/developers`) with a one-time key display and copy, and
+    **Developer docs** (`/developers/docs`) with a reference generated from `/openapi.json`.
+    Navigation honours the server's declared capabilities.
+  - No runtime, provider, analytics or frozen-file change. No dependency added.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),

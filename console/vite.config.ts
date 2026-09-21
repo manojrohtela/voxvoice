@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/v1": apiOrigin,
         "/health": apiOrigin,
+        "/openapi.json": apiOrigin,
       },
     },
     test: {

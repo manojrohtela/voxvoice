@@ -2,7 +2,7 @@
 // (api/console/routers/meta.py and the M11 /health) and nothing more.
 
 /** The console API revision this build was written against (`/v1/console/meta`). */
-export const EXPECTED_CONSOLE_API_REVISION = "m12.6";
+export const EXPECTED_CONSOLE_API_REVISION = "m12.7";
 
 export interface RuntimeDescription {
   transport: string;
@@ -196,6 +196,22 @@ export interface AgentUsage {
 export interface AgentReport {
   query: AnalyticsQuery;
   data: AgentUsage[];
+}
+
+// ── developer API keys (M12.7) ──
+
+/** A key as the console may show it after creation: no key material at all. */
+export interface ApiKeyView {
+  /** Non-secret identifier (`key_…`); it cannot authenticate. */
+  id: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** The create response: the only object that ever carries the key itself. Never persisted. */
+export interface ApiKeyCreated extends ApiKeyView {
+  key: string;
 }
 
 /** `GET /health` — owned by the M11 WebRTC application, read as-is. */

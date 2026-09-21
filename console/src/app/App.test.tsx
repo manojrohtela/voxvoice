@@ -19,6 +19,10 @@ function sentHeaders(call: unknown[] | undefined): Record<string, string> {
   return (init?.headers ?? {}) as Record<string, string>;
 }
 
+
+/** Every capability but one, so a surface this build knows is still "not yet available". */
+const WITHOUT_KEYS = META.capabilities.filter((c) => c !== "api_keys");
+
 describe("Overview", () => {
   it("shows the real runtime status from /health and /v1/console/meta", async () => {
     healthyApi();
@@ -32,7 +36,7 @@ describe("Overview", () => {
   });
 
   it("marks declared steps available and the rest pending with their milestone", async () => {
-    healthyApi();
+    healthyApi({ capabilities: WITHOUT_KEYS });
     renderAt("/");
 
     const journey = await screen.findByRole("article", { name: "Get started" });
@@ -208,15 +212,15 @@ describe("Settings", () => {
 
 describe("Navigation", () => {
   it("routes an undeclared surface to the not-yet-available page, never to sample data", async () => {
-    healthyApi();
+    healthyApi({ capabilities: WITHOUT_KEYS });
     renderAt("/developers");
 
-    expect(await screen.findByRole("heading", { name: "API keys & SDK", level: 1 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "API keys & docs", level: 1 })).toBeTruthy();
     expect(screen.getByText("Not yet available — arrives in M12.7")).toBeTruthy();
   });
 
   it("badges undeclared surfaces as Soon and marks the current page", async () => {
-    healthyApi();
+    healthyApi({ capabilities: WITHOUT_KEYS });
     renderAt("/");
 
     const nav = await screen.findByRole("navigation", { name: "Console" });
@@ -256,5 +260,5 @@ describe("Navigation", () => {
 
 // Keep the fixture honest: the fake metadata is the server's shape at this revision.
 it("the fixture metadata matches this build's revision", () => {
-  expect(META.console_api_revision).toBe("m12.6");
+  expect(META.console_api_revision).toBe("m12.7");
 });

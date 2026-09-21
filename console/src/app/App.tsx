@@ -8,6 +8,8 @@ import { Loading } from "../components/Loading";
 import { AgentEditorPage } from "../features/agents/AgentEditorPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
 import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
+import { ApiKeysPage } from "../features/developers/ApiKeysPage";
+import { DeveloperDocsPage } from "../features/developers/DeveloperDocsPage";
 import { SignInPage } from "../features/auth/SignInPage";
 import { SignUpPage } from "../features/auth/SignUpPage";
 import { CreateOrganizationPage } from "../features/onboarding/CreateOrganizationPage";
@@ -18,17 +20,30 @@ import { PlaygroundPage } from "../features/playground/PlaygroundPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { UnavailablePage } from "../features/unavailable/UnavailablePage";
 import { AuthProvider, useAuth } from "./auth";
-import { MetaProvider } from "./meta";
-import { NAVIGATION } from "./navigation";
+import { hasCapability, MetaProvider, useConsoleMeta } from "./meta";
+import { NAVIGATION, type NavItem } from "./navigation";
 
 /** Implemented surfaces, by path. Everything else in NAVIGATION is "not yet available". */
 const IMPLEMENTED: Record<string, ComponentType> = {
   "/agents": AgentsPage,
   "/analytics": AnalyticsPage,
   "/conversations": ConversationsPage,
+  "/developers": ApiKeysPage,
   "/playground": PlaygroundPage,
   "/settings": SettingsPage,
 };
+
+/**
+ * A navigation surface: its page when this build implements it and the server has not said it
+ * lacks it. A server that declares its capabilities without this one (an older API) gets the
+ * honest "not yet available" page instead of a page whose requests it cannot answer.
+ */
+function Surface({ item }: { item: NavItem }) {
+  const meta = useConsoleMeta();
+  const Page = IMPLEMENTED[item.path];
+  const declined = meta.status === "ready" && !hasCapability(meta, item.capability);
+  return Page && !declined ? <Page /> : <UnavailablePage item={item} />;
+}
 
 /** The console proper: only for a signed-in user who is working in an organization. */
 function Protected() {
@@ -54,15 +69,9 @@ export function App() {
             <Route path="agents/new" element={<AgentEditorPage />} />
             <Route path="agents/:agentId" element={<AgentEditorPage />} />
             <Route path="conversations/:conversationId" element={<ConversationDetailPage />} />
+            <Route path="developers/docs" element={<DeveloperDocsPage />} />
             {NAVIGATION.filter((item) => item.path !== "/").map((item) => {
-              const Page = IMPLEMENTED[item.path];
-              return (
-                <Route
-                  key={item.path}
-                  path={item.path.slice(1)}
-                  element={Page ? <Page /> : <UnavailablePage item={item} />}
-                />
-              );
+              return <Route key={item.path} path={item.path.slice(1)} element={<Surface item={item} />} />;
             })}
             <Route
               path="*"

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🟢 M12.1, M12.1.1, M12.2, M12.3, M12.4, M12.5, M12.6 complete · Living plan |
+| **Status** | 🟢 M12.1, M12.1.1, M12.2, M12.3, M12.4, M12.5, M12.6, M12.7 complete · Living plan |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [HLD](../architecture/epic12/m12-hld.md) · [LLD](../architecture/epic12/m12-lld.md) |
 
@@ -26,7 +26,7 @@ and would otherwise ship empty.
 | **M12.4** ✅ | Real Playground | playground rendezvous/session/end calling the frozen handlers, TS SDK **core** extracted from `client.html`, Playground UI with mic, status and hang-up | a human talks to a console-created agent through the console, with real providers and no API key in the browser |
 | **M12.5** ✅ | Conversations & read API | spine wiring at composition (F-2), transcript ordering from `evt_event.seq` (F-3), conversation list/detail, Conversations UI | cross-org conversation access → 404. Events come from the durable log. |
 | **M12.6** ✅ | Analytics | `metric.turn` projections (sessions, turns, duration, voice-to-voice and stage p50/p95, missing counts, per-day and per-agent usage, outcomes), Analytics UI, [definitions contract](../architecture/epic12/m12-analytics-definitions.md) | missing ≠ 0. No cross-org aggregation. No cost figures. |
-| M12.7 | API keys & developer docs | key list/create/revoke with `dp_api_key_meta`, quickstart and API reference pages | revoked key → 401 on the developer API, and the raw key is shown once |
+| **M12.7** ✅ | API keys & developer docs | key list/create/revoke over the M11 `apikey` model (no `dp_api_key_meta`, ADR-0055 Amendment 3), [developer API contract](../apis/developer-api.md), OpenAPI credential schemes, console key and docs pages | revoked key → 401 on the developer API, and the raw key is shown once |
 | M12.8 | Overview dashboard | agents, recent conversations, latency summary, runtime health, quick actions | every tile is backed by a real endpoint |
 | M12.9 | SDK | `sdk/`: `@voxvoice/client`, `@voxvoice/react`, `@voxvoice/server`, plus a Python helper, examples | an example app integrates with only an API key on its server |
 | M12.10 | End-to-end hardening | the full local journey as an automated E2E test (loopback profile) plus a manual real-voice run, error paths, performance of the read paths | the journey passes from a fresh clone |

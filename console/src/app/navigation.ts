@@ -49,10 +49,10 @@ export const NAVIGATION: readonly NavItem[] = [
   },
   {
     path: "/developers",
-    label: "API keys & SDK",
+    label: "API keys & docs",
     capability: "api_keys",
     milestone: "M12.7",
-    summary: "API keys, the quickstart and the SDK for integrating VoxVoice into your app.",
+    summary: "Developer API keys and the documentation for calling VoxVoice from your server.",
   },
   {
     path: "/settings",

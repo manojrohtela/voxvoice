@@ -32,6 +32,10 @@ sensitive because they carry spend.
 * **S4.** A resource in another org is indistinguishable from a missing one (404).
 * **S5.** Revocation is immediate. A revoked API key's `apikey` row is gone, and a revoked console
   session fails its next request.
+* **S6 (M12.7).** A raw developer API key exists in exactly one HTTP response: the `201` of its
+  creation, marked `Cache-Control: no-store`. The console holds it only in component state until
+  the user dismisses it. It never writes it to storage, a URL or history, and nothing can fetch it
+  again. Key management is owner/admin only, including listing.
 
 ## 3. Authentication details
 
@@ -81,7 +85,7 @@ Provider keys are read only by `EnvCredentialProvider` inside the composition ro
 | A user of org A starts a Playground session on an org B agent → 404, and no session row is created | **M12.4 ✅** (also archived, missing and undeclared-language agents, foreign rendezvous, foreign session end; the browser receives only `{rendezvous_id, signalling_token, expires_in_s}`) |
 | A user of org A reads an org B conversation or events → 404 | **M12.5 ✅** (list and detail; events filed under a foreign `org_id` with the same session id are excluded; raw payloads are never returned) |
 | Analytics never aggregate across orgs | **M12.6 ✅** (all four endpoints: counts, turns, series and per-agent figures of org A exclude org B, including events filed under the wrong `org_id` in either direction. Another org's `agent_id` gets the same 404 as a missing one. An `org_id`/`organization_id` query parameter is ignored. Every role reads, and a signed-out caller gets 401) |
-| A revoked API key → 401 on the developer API | M12.7 |
+| A revoked API key → 401 on the developer API | **M12.7 ✅** (immediately, server-side. Also: the raw key is in no list, error, log or DB column, only its SHA-256 is stored, a foreign key revoke is 404, an org A key reads no org B agent or session in either direction, missing and malformed keys are 401, the console cookie does not open the developer API and a key does not open the console, only owner/admin manage keys, and CSRF is enforced; live HTTP smoke too) |
 | The viewer role cannot mutate. Mutation without the CSRF header → 403 | M12.2 ✅ (org rename, CSRF) → M12.7 |
 
 ## 7. Enforced as of M12.2

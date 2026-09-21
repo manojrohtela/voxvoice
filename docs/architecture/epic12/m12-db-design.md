@@ -102,7 +102,11 @@ Lifecycle metadata for the runtime `agent` row, which the frozen model cannot ca
 | `archived_by` | text FK → `dp_user.id` null | |
 | `created_by` | text FK → `dp_user.id` null | null for agents created via the developer API |
 
-### 3.5 `dp_api_key_meta` (M12.7)
+### 3.5 `dp_api_key_meta` (M12.7) — **not built** (ADR-0055 Amendment 3)
+
+M12.7 manages keys entirely through the M11 `apikey` row (label, created, last used). Revocation
+deletes the row, and creation/revocation are logged. The design below is kept for the deferred
+decision on a durable key audit trail.
 
 Console metadata and the audit trail for developer API keys. This row outlives the `apikey` row it
 describes, which is why there is **no** foreign key on `api_key_id`.

@@ -310,15 +310,31 @@ Code: `api/console/analytics/service.py`, `api/console/routers/analytics.py`. Co
 * If query cost becomes a problem, a `dp_turn_metric` read model can be derived later, with the
   event log remaining the source of truth. That is not planned now.
 
-## 8. API keys (M12.7)
+## 8. API keys and the developer contract (M12.7) — implemented
 
-* **Create** uses the frozen `generate_api_key` + `hash_key`. It inserts `apikey`
-  (org-scoped) and `dp_api_key_meta` (creator, `display_prefix` = first 8 chars, label). The raw
-  key is returned **once**.
-* **List** joins `apikey` ⟕ `dp_api_key_meta`: label, prefix, created, created_by, last_used_at.
-  It never returns a hash.
-* **Revoke** deletes the `apikey` row, so the frozen `get_org` rejects the key on the next request.
-  It records `revoked_at`/`revoked_by` in `dp_api_key_meta`, which survives as the audit record.
+Code: `api/console/api_keys/service.py`, `api/console/routers/api_keys.py`,
+`api/console/openapi.py`. Tests: `tests/test_console_api_keys.py` and
+`console/src/features/developers/`. Contract: [`docs/apis/developer-api.md`](../../apis/developer-api.md).
+
+* **Create** `POST /v1/console/api-keys {label}` (admin+, CSRF) uses the frozen
+  `generate_api_key` + `hash_key` and inserts one `apikey` row. The raw key is returned **once**,
+  with `Cache-Control: no-store`.
+* **List** `GET /v1/console/api-keys` (admin+): `{data: [{id, label, created_at, last_used_at}]}`,
+  newest first. It never returns the hash or any part of the key.
+* **Revoke** `POST /v1/console/api-keys/{id}/revoke` (admin+, CSRF) → 204. It deletes the
+  `apikey` row, so the frozen `get_org` rejects the key on the next request. Another org's or a
+  missing key → 404.
+* **Not built (ADR-0055 Amendment 3):** `dp_api_key_meta`. No creator, display prefix or
+  post-revocation record is stored. Creation and revocation are logged instead (logger
+  `voxvoice.console.api_keys`, INFO: key id, org, user; never key material).
+* **OpenAPI** (`api/console/openapi.py`, installed on the console app): security schemes
+  `ApiKeyAuth` (`x-api-key`), `SignallingToken` (`x-signalling-token`) and `ConsoleSession`
+  (`vv_console` cookie). Every operation gets `security` and `x-voxvoice-surface`
+  (`developer · signalling · console · public`), and credential headers are no longer duplicated as
+  parameters.
+* **Console:** `/developers` (API keys; owner and admin manage, others see the reason and the docs
+  link) and `/developers/docs` (guide + reference generated from `/openapi.json`, for every role).
+  The one-time key lives only in component state until "Done".
 * Provider credentials are **not** API keys and never appear here (security model §5).
 
 ## 9. SDK (M12.4 core → M12.9 release)

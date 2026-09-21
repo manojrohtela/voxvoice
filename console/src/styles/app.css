@@ -329,3 +329,19 @@ code {
 @media (max-width: 480px) {
   .bars__row { grid-template-columns: 52px 1fr auto; gap: var(--space-2); }
 }
+
+/* ── developer API keys & docs (M12.7) ──────────────────────────────── */
+.new-key { border-color: var(--warn); }
+.new-key__value { font-family: var(--font-mono); font-size: 13px; width: 100%; }
+.docs__toc { font-size: 13px; color: var(--text-muted); }
+.doc h3 { margin: var(--space-4) 0 var(--space-2); font-size: 13px; }
+.doc ul, .doc ol { margin: var(--space-2) 0 0; padding-left: var(--space-5); display: grid; gap: var(--space-2); }
+.endpoints { margin: 0; display: grid; gap: var(--space-3); }
+.endpoints dt { font-weight: 600; overflow-wrap: anywhere; }
+.endpoints dd { margin: var(--space-1) 0 0; color: var(--text-muted); }
+.method { display: inline-block; min-width: 52px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
+.method--get { color: var(--ok); }
+.method--post { color: var(--accent); }
+.method--patch { color: var(--warn); }
+.method--delete { color: var(--error); }
+.code { margin: 0; padding: var(--space-3); background: var(--surface-sunken); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; overflow-x: auto; white-space: pre; }

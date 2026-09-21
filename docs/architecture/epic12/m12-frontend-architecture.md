@@ -62,7 +62,10 @@ component → useResource(fetcher) → api/client.ts → fetch('/v1/console/…'
   `x-voxvoice-console: 1`.
 * Capabilities come from `GET /v1/console/meta`, loaded once by the shell. Navigation items whose
   capability is absent render the *not yet available* page. That page names the milestone and
-  never shows sample data.
+  never shows sample data. Until M12.7 the router checked only whether this build implemented a
+  surface. Since M12.7 it also honours the server's declaration, so an older server that does not
+  declare a surface gets that page, not requests it cannot answer. While meta is loading, or if it
+  failed, the page renders as before.
 
 ## 4. UX states (every data view)
 

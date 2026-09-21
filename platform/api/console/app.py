@@ -35,6 +35,7 @@ from ..config import get_settings as get_api_settings
 from ..db import engine as db_engine
 from ..webrtc.app import build_webrtc_app, resolve_ice_policy
 from ..webrtc.config import WebRTCSettings
+from . import openapi
 from .agents.service import AgentOptions
 from .bundle import mount_console_bundle
 from .config import ConsoleSettings
@@ -42,7 +43,16 @@ from .errors import register_console_error_handler
 from .identity.service import purge_sessions
 from .identity.throttle import LoginThrottle
 from .persistence.migrations import upgrade_all
-from .routers import agents, analytics, auth, conversations, meta, organizations, playground
+from .routers import (
+    agents,
+    analytics,
+    api_keys,
+    auth,
+    conversations,
+    meta,
+    organizations,
+    playground,
+)
 from .session_defaults import AudioEndpointingController
 
 
@@ -147,11 +157,13 @@ def build_console_app(
     app.include_router(playground.router)
     app.include_router(conversations.router)
     app.include_router(analytics.router)
+    app.include_router(api_keys.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:
         mount_console_bundle(app, settings.dist_dir)
 
+    openapi.install(app)
     return app
 
 
