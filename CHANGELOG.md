@@ -29,6 +29,16 @@ platform-baseline level (see `docs/releases/`).
 - **No existing behaviour changed.** No pre-`v4.0.0` `platform/api/` file modified (`E10-7`), no
   Epic 10/11 module touched, no migration, no table, no event type, no Python dependency.
 
+### Fixed
+
+- **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),
+  DL-0238). E10-7 derived its `examined` digest input from the **live** count of `api/` changes
+  since `v4.0.0`, so legitimate M11/M12 additions moved the Epic 10 digests (F-6: three tests
+  failed on a clean `m11-local-baseline`). It now reads the certified `v4.0.0..db8c508` diff
+  (2 paths), and violations are still read from the live tree. The certification digest
+  `7e57bc14…` and freeze digest `d3d4858d…` reproduce exactly. **No re-baseline**, no Epic 10
+  runtime change, no control removed.
+
 ## Unreleased — Epic 10 (Durable Event & Telemetry Spine) · 🟢 Implemented (M10.2–M10.12) · ✅ Certified (M10.13) · 🔒 Epic 10 architecture FROZEN (M10.14) · 📦 **RELEASED v5.0.0** (M10.15)
 
 ### Added

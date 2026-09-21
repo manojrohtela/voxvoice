@@ -43,6 +43,12 @@ PUBLISHED_CERTIFICATION_DIGEST = (
 CERTIFIED_EVENT_TYPES = 104
 CERTIFIED_EVT_NAMES = 8
 CERTIFIED_BILLING_MODULES = 240
+#: The `platform/api/` paths the certified commit changed since `v4.0.0` — the E10-7 count
+#: (M12.1.1). Both are the Epic 10 metering seam, added under ADR-0043 CD7.
+CERTIFIED_API_CHANGES = (
+    ("A", "platform/api/metering/__init__.py"),
+    ("A", "platform/api/metering/metric_buffer.py"),
+)
 
 
 def _synthetic_tree(root: pathlib.Path, events_source: str) -> pathlib.Path:
@@ -84,6 +90,17 @@ def test_e10_6_examined_is_the_certified_module_count():
     result = next(r for r in certify_epic10().results if r.control_id == "E10-6")
     assert result.examined == CERTIFIED_BILLING_MODULES
     assert result.outcome is Epic10ControlOutcome.SATISFIED
+
+
+def test_e10_7_examined_is_the_certified_api_change_count():
+    """M12.1.1 — E10-7 was missed by M11.5.1 and counted the live `api/` tree."""
+    result = next(r for r in certify_epic10().results if r.control_id == "E10-7")
+    assert result.examined == len(CERTIFIED_API_CHANGES)
+    assert result.outcome is Epic10ControlOutcome.SATISFIED
+
+
+def test_the_certified_api_changes_are_readable_from_git_not_the_checkout():
+    assert epic10._certified_changes_since_baseline("platform/api") == CERTIFIED_API_CHANGES
 
 
 def test_the_certified_counts_are_readable_from_git_not_the_checkout():
@@ -142,6 +159,59 @@ def test_the_full_digest_is_stable_under_a_legitimate_additive_event_type(
     assert epic10._e10_5().examined == CERTIFIED_EVENT_TYPES
     monkeypatch.undo()
     assert certify_epic10().report_digest == before
+
+
+def test_adding_api_files_to_the_live_tree_does_not_move_the_e10_7_count(monkeypatch):
+    """**The regression that closes F-6** (M12.1.1). CD7 permits additions, so M11's WebRTC
+    surface and M12's console legitimately add `api/` files. Many live additions — and the
+    examined count stays the certified one."""
+    live = CERTIFIED_API_CHANGES + tuple(
+        ("A", f"platform/api/added_later/module_{n}.py") for n in range(25)
+    )
+    monkeypatch.setattr(epic10, "_changed_since_baseline", lambda *p: live)
+
+    result = epic10._e10_7()
+    assert result.examined == len(CERTIFIED_API_CHANGES)
+    assert result.outcome is Epic10ControlOutcome.SATISFIED
+
+
+def test_the_full_digest_is_stable_under_legitimate_api_additions(monkeypatch):
+    """End-to-end: the published digest survives the exact change that broke it at M11/M12."""
+    before = certify_epic10().report_digest
+    real = epic10._changed_since_baseline
+
+    def with_extra_api_file(*pathspecs):
+        # Only the `api/` question gains a file; every other control's evidence is untouched.
+        changes = real(*pathspecs)
+        if pathspecs == ("platform/api",):
+            changes += (("A", "platform/api/added_later/extra.py"),)
+        return changes
+
+    monkeypatch.setattr(epic10, "_changed_since_baseline", with_extra_api_file)
+    assert next(r for r in certify_epic10().results if r.control_id == "E10-7").examined == len(
+        CERTIFIED_API_CHANGES
+    )
+    assert certify_epic10().report_digest == before
+
+
+def test_e10_7_still_detects_a_modified_pre_existing_api_file_among_additions(monkeypatch):
+    """The live half keeps biting: one modification hidden among permitted additions."""
+    live = CERTIFIED_API_CHANGES + (
+        ("A", "platform/api/added_later/new.py"),
+        ("M", "platform/api/main.py"),
+    )
+    monkeypatch.setattr(epic10, "_changed_since_baseline", lambda *p: live)
+
+    result = epic10._e10_7()
+    assert result.outcome is Epic10ControlOutcome.VIOLATED
+    assert any("platform/api/main.py" in v and "modified" in v for v in result.violations)
+    assert result.examined == len(CERTIFIED_API_CHANGES)
+
+
+def test_e10_7_is_inconclusive_without_certified_evidence(monkeypatch):
+    """Absent history is not a pass (ADR-0043 CD4)."""
+    monkeypatch.setattr(epic10, "_certified_changes_since_baseline", lambda *p: ())
+    assert epic10._e10_7().outcome is Epic10ControlOutcome.INCONCLUSIVE
 
 
 # ── C / E / G. the live invariants still bite ───────────────────────────────
@@ -254,6 +324,11 @@ def test_the_repaired_controls_read_both_trees():
         assert "_certified" in source, f"{control.__name__} has no certified-tree input"
         assert "PLATFORM_ROOT" in source, f"{control.__name__} no longer inspects the live tree"
 
+    # E10-7 reads its live half through git (the checkout vs the baseline), not the filesystem.
+    e10_7 = inspect.getsource(epic10._e10_7)
+    assert "_certified_changes_since_baseline" in e10_7, "E10-7 has no certified-tree input"
+    assert "_changed_since_baseline(" in e10_7, "E10-7 no longer inspects the live tree"
+
 
 def _code_without_docstring(function) -> str:
     """A function's source with its docstring removed, read through the AST.
@@ -279,12 +354,18 @@ def _code_without_docstring(function) -> str:
     return "\n".join(lines)
 
 
-@pytest.mark.parametrize("control_id", ["E10-3", "E10-5", "E10-6"])
+@pytest.mark.parametrize("control_id", ["E10-3", "E10-5", "E10-6", "E10-7"])
 def test_examined_never_derives_from_a_live_count(control_id):
     """The specific shape that caused the defect — `len()` over a live-tree scan feeding
     `examined` — must not reappear in the repaired controls."""
 
-    control = {"E10-3": epic10._e10_3, "E10-5": epic10._e10_5, "E10-6": epic10._e10_6}[control_id]
+    control = {
+        "E10-3": epic10._e10_3,
+        "E10-5": epic10._e10_5,
+        "E10-6": epic10._e10_6,
+        "E10-7": epic10._e10_7,
+    }[control_id]
     body = _code_without_docstring(control)
     assert "len(current)" not in body
     assert "len(sources)" not in body
+    assert "len(changes)" not in body

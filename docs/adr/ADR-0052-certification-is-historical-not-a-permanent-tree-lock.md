@@ -227,6 +227,55 @@ As with HC6: there is no allow-list for Epic 11, no `if epic11:`, and no rule th
 "may grow after M11". The repair fixes *what the question is*, so it holds identically for Epic 12
 and every epic after it.
 
+## Amendment 2 — HC9 applied to E10-7, which Amendment 1 missed (M12.1.1, 2026-09-21)
+
+**Status:** Accepted 2026-09-21. **No new rule.** HC1–HC12 are unchanged. This amendment records
+that **HC9 now also governs E10-7** and states the evidence. It is not an Epic 10 redesign.
+
+**What was wrong.** E10-7 (ADR-0043 **CD7**, *"no pre-existing `platform/api/` file modified;
+additions permitted"*) set `examined = len(changes)`, where `changes` is
+`git diff --name-status v4.0.0 -- platform/api` against the **working tree**. `examined` is a
+digest input. Because CD7 *permits* additions, every legitimate later `api/` file moved Epic 10's
+certification digest while E10-7 stayed `satisfied`. This is exactly the defect class HC9 names.
+Amendment 1 repaired E10-3, E10-5 and E10-6 but did not reach E10-7.
+
+**Measured.** Recorded as finding F-6 (DL-0237) and re-verified at M12.1.1:
+
+| Tree | live `api/` changes since `v4.0.0` | E10-7 `examined` (before) | certification / freeze digest (before) |
+|---|---|---|---|
+| certified `db8c508` | 2 | 2 | `7e57bc14…` / `d3d4858d…` |
+| `m11-local-baseline` `d5ae2c1` (clean) | 9 | 9 | `0cf851eb…` / `fa69f933…` |
+| M12.1 `1a03d90` | 16 | 16 | `ed2a9cf9…` / `2df266c2…` |
+
+Three tests failed on the clean `m11-local-baseline` for this reason alone. M11.16.4 (DL-0226)
+appeared to restore `7e57bc14…` only because its new `api/` files were still **untracked**, and
+`git diff` does not list untracked paths.
+
+**The repair (HC9 + HC10, same shape as E10-5).**
+
+* **examined** → `_certified_changes_since_baseline("platform/api")`, which is
+  `git diff --name-status v4.0.0 <CERTIFICATION_COMMIT>`. Both endpoints are pinned (HC2), and the
+  result is the two `api/metering` additions, permanently.
+* **violations** → unchanged: still `_changed_since_baseline("platform/api")` over the live tree.
+  Any modified or deleted pre-existing `api/` file still fails E10-7.
+* Empty historical evidence is `INCONCLUSIVE`, never a pass (ADR-0043 CD4).
+
+The helper reuses the existing `_git`, `_require_baseline` and name-status parsing; no second
+framework was introduced.
+
+**Result.** After the repair, the digest is `7e57bc14764201b123c49b9321f15d9c41f0ee7015e6879c64c0307e56db3d0d`
+and the freeze is `d3d4858d5f18b7f6d583f4d34caeec52933acc262e36d4f8b343e2e8b6a00d38`. Both equal
+the pinned literals exactly, on both `d5ae2c1` and `1a03d90`. **Nothing was re-baselined** (HC11):
+the published values are reproduced, not updated. No control, assertion, verdict or limitation
+changed. No file under `events/`, `observability/`, `api/metering/` or `billing/` was touched.
+Epic 10 runtime semantics are unchanged. No exception names M11, M12 or `console` (HC12).
+
+**Neighbouring controls, surveyed and not changed.** E10-3/5/6 were already historical
+(Amendment 1). E10-4 reads `v4.0.0`, and E10-10 to E10-13 count pinned literals. E10-1, E10-8 and
+E10-9 count live changes, but for those any change is itself a violation, so the count cannot move
+on permitted work. **E10-2** counts the live Epic 10 migration chain: latent, because it moves only
+if a later milestone adds an Epic 10 (`events/`) migration. It is recorded, not repaired (DL-0238).
+
 ---
 
 ## Evidence required later

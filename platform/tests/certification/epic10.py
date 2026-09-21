@@ -592,7 +592,11 @@ def _changed_since_baseline(*pathspecs: str) -> tuple[tuple[str, str], ...]:
     statement about the repository as it currently stands, and an uncommitted violation is still a
     violation."""
     _require_baseline()
-    raw = _git("diff", "--name-status", BASELINE_TAG, "--", *pathspecs)
+    return _name_status(_git("diff", "--name-status", BASELINE_TAG, "--", *pathspecs))
+
+
+def _name_status(raw: str) -> tuple[tuple[str, str], ...]:
+    """Parse `git diff --name-status` output into sorted `(status, path)` pairs."""
     changes = []
     for line in raw.splitlines():
         if not line.strip():
@@ -651,6 +655,18 @@ def _certified_source(path: str) -> str:
     "unchanged since" comparison starts from, whereas this is the tree Epic 10's certification is
     a statement **about** (M11.5.1, ADR-0052 Amendment 1 **HC9**)."""
     return _git("show", f"{CERTIFICATION_COMMIT}:{path}")
+
+
+def _certified_changes_since_baseline(*pathspecs: str) -> tuple[tuple[str, str], ...]:
+    """`(status, path)` for everything under `pathspecs` that differs between the baseline and
+    **the certified commit** — the historical counterpart of `_changed_since_baseline`.
+
+    Both endpoints are pinned (ADR-0052 **HC2**), so the answer is a permanent fact about the tree
+    M10.13 certified, and later additions to the checkout cannot move it (**HC9**, M12.1.1)."""
+    _require_baseline()
+    return _name_status(
+        _git("diff", "--name-status", BASELINE_TAG, CERTIFICATION_COMMIT, "--", *pathspecs)
+    )
 
 
 def _certified_python_sources(prefix: str) -> dict[str, str]:
@@ -1067,8 +1083,27 @@ def _e10_6() -> Epic10ControlResult:
 
 
 def _e10_7() -> Epic10ControlResult:
-    """Pre-existing `api/` files untouched — additions are not modifications (ADR-0043 CD7)."""
+    """Pre-existing `api/` files untouched — additions are not modifications (ADR-0043 CD7).
+
+    **Repaired at M12.1.1** (ADR-0052 Amendment 2, **HC9**). Its examined count was
+    `len(changes)` over the **live** tree, and `examined` is a digest input. CD7 *permits*
+    additions, so every legitimate later `api/` file (M11's WebRTC surface, M12's console) moved
+    Epic 10's certification digest while the control stayed `satisfied` — the same defect M11.5.1
+    repaired in E10-3/5/6 and missed here.
+
+    * **examined** → the `api/` paths the **certified commit** changed since the baseline
+      (stable forever);
+    * **violations** → still read from the **live tree**, because *"no pre-existing `api/` file
+      is modified or deleted"* is an ongoing prohibition, not a historical observation.
+    """
+    historical = _certified_changes_since_baseline("platform/api")
     changes = _changed_since_baseline("platform/api")
+    if not historical:
+        return Epic10ControlResult(
+            "E10-7",
+            Epic10ControlOutcome.INCONCLUSIVE,
+            detail="no api change was readable between the baseline and the certified commit",
+        )
     violations = [
         f"{path}: pre-existing api file {('deleted' if status.startswith('D') else 'modified')}"
         for status, path in changes
@@ -1078,8 +1113,9 @@ def _e10_7() -> Epic10ControlResult:
     return _bad(
         "E10-7",
         violations,
-        len(changes),
-        f"{len(additions)} api addition(s) permitted: {additions}; no pre-existing file modified",
+        len(historical),
+        f"{len(historical)} api change(s) certified; {len(additions)} api addition(s) permitted "
+        f"in the current tree: {additions}; no pre-existing file modified",
     )
 
 

@@ -20,6 +20,7 @@ and would otherwise ship empty.
 | # | Milestone | Delivers | Exit criteria |
 |---|---|---|---|
 | **M12.1** | Foundation & architecture | ADR-0055, Epic 12 docs, `api/console` composition (`build_console_app`, `/v1/console/meta`, scoped error envelope, bundle serving), `console/` shell with real runtime status, CI job | ✅ See the M12.1 report (DL-0237) |
+| **M12.1.1** | E10-7 historical-counting repair | ADR-0052 Amendment 2: E10-7's `examined` reads the certified tree (F-6) | ✅ Epic 10 digests reproduce exactly (DL-0238) |
 | M12.2 | Identity & organizations | `dp_user`, `dp_membership`, `dp_console_session` (migration `0037`), signup/login/logout/me, role dependency, CSRF header, CLI to attach an owner to an existing org, console sign-in and org/account settings | unauthenticated → 401. Session revocation works. Role matrix tested. |
 | M12.3 | Agents | console agent CRUD over the runtime `agent` row, `dp_agent_state` archive, declared-options endpoint, resolution of F-1/F-4/F-5 (composition or ADR), Agents UI | cross-org agent access → 404. Only fields proven to act are exposed. |
 | M12.4 | Real Playground | playground rendezvous/session/end calling the frozen handlers, TS SDK **core** extracted from `client.html`, Playground UI with mic, status and hang-up | a human talks to a console-created agent through the console, with real providers and no API key in the browser |
@@ -34,8 +35,8 @@ and would otherwise ship empty.
 ## Standing gates (every milestone)
 
 Full suite green · ruff clean · `uv lock --check` · `git diff --check` · the Epic 9/10
-historical digests reproduce (E10-10, E11-16), and the live Epic 10 certification stays `certified` with all 13
-control outcomes unchanged (the live *digest* cannot be a gate until F-6 is repaired) · no pre-`v4.0.0` `platform/api/` file modified
+historical digests reproduce (E10-10, E11-16), and the live Epic 10 certification digest `7e57bc14…` and
+freeze digest `d3d4858d…` reproduce exactly (restored at M12.1.1) · no pre-`v4.0.0` `platform/api/` file modified
 (`E10-7`) · no `api/**observability*` path (`E10-9`) · no vendor identifier in `api/**` (`E11-3`) ·
 console typecheck, test and build green · docs and INDEX updated in the same change · no push,
 deploy or tag unless authorized.
