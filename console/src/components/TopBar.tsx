@@ -1,3 +1,5 @@
+import { useLocation, useNavigate } from "react-router";
+
 import { useAuth, useMe } from "../app/auth";
 import { useConsoleMeta } from "../app/meta";
 import { StatusPill } from "./StatusPill";
@@ -11,12 +13,19 @@ export function transportLabel(transport: string): string {
 function OrganizationSwitcher() {
   const me = useMe();
   const { selectOrganization } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   if (me.organization === null) return null;
+  const switchTo = async (organizationId: string) => {
+    await selectOrganization(organizationId);
+    // Filters in the URL (an agent id, say) belong to the previous organization.
+    if (location.search) navigate(location.pathname, { replace: true });
+  };
   if (me.memberships.length < 2) return <span className="topbar__org">{me.organization.name}</span>;
   return (
     <label className="topbar__org">
       <span className="visually-hidden">Organization</span>
-      <select value={me.organization.id} onChange={(e) => void selectOrganization(e.target.value)}>
+      <select value={me.organization.id} onChange={(e) => void switchTo(e.target.value)}>
         {me.memberships.map((org) => (
           <option key={org.id} value={org.id}>
             {org.name}

@@ -16,6 +16,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { Loading } from "../../components/Loading";
 import { StatusPill } from "../../components/StatusPill";
 import { STATUS_TONE } from "../conversations/format";
+import { DailyBars } from "./DailyBars";
 import { analyticsQuery, formatDay, formatSeconds, formatValue, LATENCY_LABELS } from "./format";
 
 const PRESETS = [
@@ -109,30 +110,10 @@ function SummaryPanel({ resource }: { resource: Resource<AnalyticsSummary> & { r
 }
 
 function UsagePanel({ resource }: { resource: Resource<SeriesReport> & { reload: () => void } }) {
-  const buckets = resource.status === "ready" ? resource.data.data : [];
-  const peak = Math.max(0, ...buckets.map((b) => b.conversations));
   return (
     <Panel id="usage" title="Usage over time">
       <PanelState resource={resource} title="usage" />
-      {resource.status === "ready" ? (
-        peak === 0 ? (
-          <EmptyState title="No conversations in this range" />
-        ) : (
-          <ol className="bars" aria-label="Conversations per day (UTC)">
-            {buckets.map((b) => (
-              <li key={b.date} className="bars__row">
-                <span className="bars__label">{formatDay(b.date)}</span>
-                <span className="bars__track" aria-hidden="true">
-                  <span className="bars__fill" style={{ width: `${(b.conversations / peak) * 100}%` }} />
-                </span>
-                <span className="bars__value">
-                  {b.conversations} <span className="muted">· {b.turns} turns</span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        )
-      ) : null}
+      {resource.status === "ready" ? <DailyBars buckets={resource.data.data} /> : null}
     </Panel>
   );
 }

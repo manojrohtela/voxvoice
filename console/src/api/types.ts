@@ -2,7 +2,7 @@
 // (api/console/routers/meta.py and the M11 /health) and nothing more.
 
 /** The console API revision this build was written against (`/v1/console/meta`). */
-export const EXPECTED_CONSOLE_API_REVISION = "m12.7";
+export const EXPECTED_CONSOLE_API_REVISION = "m12.8";
 
 export interface RuntimeDescription {
   transport: string;
@@ -196,6 +196,24 @@ export interface AgentUsage {
 export interface AgentReport {
   query: AnalyticsQuery;
   data: AgentUsage[];
+}
+
+// ── overview (M12.8): a composition of the types above, never new figures ──
+
+export interface OverviewView {
+  query: AnalyticsQuery;
+  /** The organization's agents now — not affected by the range or the agent filter. */
+  agents: { active: number; archived: number; unsupported_language: number };
+  conversations: AnalyticsSummary["conversations"];
+  duration: AnalyticsSummary["duration"];
+  turns: AnalyticsSummary["turns"];
+  usage: SeriesBucket[];
+  latency: LatencyFigure[];
+  agent_activity: AgentUsage[];
+  agent_activity_more: number;
+  /** The latest conversations of any date (agent filter applied). */
+  recent_conversations: ConversationSummary[];
+  attention: { code: string; message: string }[];
 }
 
 // ── developer API keys (M12.7) ──

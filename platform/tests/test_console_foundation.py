@@ -81,6 +81,7 @@ def test_meta_capabilities_are_only_what_is_implemented() -> None:
         "conversations",
         "analytics",
         "api_keys",
+        "overview",
     )
 
 

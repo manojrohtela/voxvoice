@@ -66,6 +66,10 @@ component → useResource(fetcher) → api/client.ts → fetch('/v1/console/…'
   surface. Since M12.7 it also honours the server's declaration, so an older server that does not
   declare a surface gets that page, not requests it cannot answer. While meta is loading, or if it
   failed, the page renders as before.
+* Each view is keyed by **organization and path** (M12.8). Switching organization remounts the
+  view, so every resource reloads for the new organization and nothing of the previous one stays on
+  screen. The switcher also drops URL filters (for example an agent id) that belong to the previous
+  organization.
 
 ## 4. UX states (every data view)
 

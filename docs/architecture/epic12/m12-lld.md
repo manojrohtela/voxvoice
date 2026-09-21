@@ -337,6 +337,43 @@ Code: `api/console/api_keys/service.py`, `api/console/routers/api_keys.py`,
   The one-time key lives only in component state until "Done".
 * Provider credentials are **not** API keys and never appear here (security model §5).
 
+## 8a. Overview (M12.8) — implemented
+
+Code: `api/console/routers/overview.py` (composition only), the shared view builders in
+`api/console/routers/analytics.py` (`summary_figures`, `bucket_views`, `latency_views`,
+`agent_usage_views`) and `routers/conversations.py` (`summary_view`), and
+`agents.service.inventory`. Tests: `tests/test_console_overview.py` and
+`console/src/features/overview/`.
+
+* **One read-only endpoint**, `GET /v1/console/overview` (viewer+, console session only). It
+  takes the analytics `Scope`: `range=today|7d|30d` or `from/to`, and `agent_id`. The same UTC
+  semantics, validation, org resolution and foreign-agent 404 apply. `source` is refused (400),
+  because the recent-conversations panel could not honour it.
+* **Why an endpoint.** The same page composed in the browser takes six requests (summary,
+  timeseries, latency, agents, conversations, agent inventory) and four separate analytics
+  snapshots, which can describe different moments. The endpoint makes **one** snapshot and passes
+  it to the functions `/analytics/*` use. No figure is computed here: a test asserts equality with
+  Analytics for several ranges and agent filters.
+* **Response:** `query`; `agents {active, archived, unsupported_language}` (the organization's
+  inventory **now**, not affected by the range or the agent filter; "unsupported" = the M12.3
+  `language_supported: false` rule); `conversations`, `duration`, `turns` (= `/analytics/summary`);
+  `usage` (= `/analytics/timeseries`); `latency` (= `/analytics/latency`); `agent_activity` (first
+  5 of `/analytics/agents`) and `agent_activity_more`; `recent_conversations` (the M12.5 list's
+  first page with `limit=5` and the agent filter, **any date**, labelled as such); and `attention`,
+  deterministic conditions only: `no_agents`, `unsupported_language`, `no_conversations` (in
+  range, when agents exist). There are no thresholds, scores, "health", cost or generated text.
+* **Queries:** one analytics snapshot (≤ 3 reads, analytics definitions §6), the agents-analytics
+  name and archive reads, 2 inventory reads, and 1 conversation page. None is per-agent or
+  per-conversation.
+* **Console:** the Overview page keeps the runtime status and Get started cards. It adds range
+  and agent filters and the composed panels (summary, attention, usage, latency snapshot with
+  median and sample counts, recent conversations, agent activity), all from one request. It skips
+  the dashboard on a server that does not declare the `overview` capability.
+* **Organization switching** (a defect found here, affecting every view): the shell keyed each
+  view only by path, so switching organization left the previous organization's data on screen.
+  It is now keyed by organization and path, and the switcher drops URL filters, which belong to the
+  previous organization.
+
 ## 9. SDK (M12.4 core → M12.9 release)
 
 * **`@voxvoice/client`** (TypeScript, browser): `connect({rendezvousId, signallingToken, baseUrl})`

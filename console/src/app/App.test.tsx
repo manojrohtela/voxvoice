@@ -233,6 +233,39 @@ describe("Navigation", () => {
     expect(within(nav).getByRole("link", { name: /API keys/ }).textContent).toContain("Soon");
   });
 
+  it("reloads the current view for the new organization when switching (no stale data)", async () => {
+    let org = "org_a";
+    healthyApi({}, ME, {
+      "/v1/console/agents": () =>
+        json({
+          data: [
+            {
+              id: org === "org_a" ? "agt_a" : "agt_b",
+              name: org === "org_a" ? "Agent of A" : "Agent of B",
+              system_prompt: "x",
+              first_message: null,
+              language: "en",
+              language_supported: true,
+              llm_model: null,
+              tts_voice: null,
+              created_at: "2026-09-21T00:00:00",
+              updated_at: "2026-09-21T00:00:00",
+            },
+          ],
+        }),
+      "POST /v1/console/session/organization": () => {
+        org = "org_b";
+        return json({ ...ME, organization: ME.memberships[1] });
+      },
+    });
+    renderAt("/agents");
+
+    expect(await screen.findByText("Agent of A")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Organization"), { target: { value: "org_b" } });
+    expect(await screen.findByText("Agent of B")).toBeTruthy();
+    expect(screen.queryByText("Agent of A")).toBeNull();
+  });
+
   it("shows a not-found page for unknown paths", async () => {
     healthyApi();
     renderAt("/nowhere");
@@ -260,5 +293,5 @@ describe("Navigation", () => {
 
 // Keep the fixture honest: the fake metadata is the server's shape at this revision.
 it("the fixture metadata matches this build's revision", () => {
-  expect(META.console_api_revision).toBe("m12.7");
+  expect(META.console_api_revision).toBe("m12.8");
 });

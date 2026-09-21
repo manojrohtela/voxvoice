@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import func
 from sqlmodel import Session as DBSession
 from sqlmodel import select
 
@@ -119,6 +120,32 @@ def list_agents(db: DBSession, org_id: str) -> list[Agent]:
             .where(Agent.org_id == org_id, Agent.id.not_in(archived))  # type: ignore[attr-defined]
             .order_by(Agent.updated_at.desc(), Agent.id)  # type: ignore[attr-defined]
         ).all()
+    )
+
+
+@dataclass(frozen=True)
+class Inventory:
+    """The organization's agents right now (not range-bound). `active` are the ones the console
+    lists; `archived` are hidden but keep their history; `unsupported` are active agents whose
+    language the recognizer does not declare (the `language_supported: false` of the agent view)."""
+
+    active: int
+    archived: int
+    unsupported: int
+
+
+def inventory(db: DBSession, org_id: str, options: AgentOptions) -> Inventory:
+    active = list_agents(db, org_id)
+    archived = db.exec(
+        select(func.count())
+        .select_from(AgentStateRow)
+        .join(Agent, Agent.id == AgentStateRow.agent_id)  # type: ignore[arg-type]
+        .where(Agent.org_id == org_id, AgentStateRow.archived_at.is_not(None))  # type: ignore[union-attr]
+    ).one()
+    return Inventory(
+        active=len(active),
+        archived=int(archived),
+        unsupported=sum(1 for a in active if a.language not in options.languages),
     )
 
 

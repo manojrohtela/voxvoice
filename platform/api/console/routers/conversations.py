@@ -83,7 +83,10 @@ class ConversationDetail(ConversationSummary):
     events_recorded: bool
 
 
-def _summary(session: Session, agent_name: str | None, message_count: int) -> ConversationSummary:
+def summary_view(
+    session: Session, agent_name: str | None, message_count: int
+) -> ConversationSummary:
+    """One conversation as listed. Shared with the Overview's recent conversations (M12.8)."""
     return ConversationSummary(
         id=session.id,
         agent=AgentRef(id=session.agent_id, name=agent_name),
@@ -110,7 +113,7 @@ def list_conversations(
         db, member.org.id, agent_id=agent_id, status=status, cursor=cursor, limit=limit
     )
     return ConversationPage(
-        data=[_summary(r.session, r.agent_name, r.message_count) for r in rows],
+        data=[summary_view(r.session, r.agent_name, r.message_count) for r in rows],
         next_cursor=next_cursor,
     )
 
@@ -124,7 +127,7 @@ def get_conversation(
     session, agent_name = service.get_conversation(db, member.org.id, session_id)
     items, ordered = service.transcript(db, session.id)
     event_log = service.events(db, member.org.id, session.id)
-    summary = _summary(session, agent_name, len(items))
+    summary = summary_view(session, agent_name, len(items))
     return ConversationDetail(
         **summary.model_dump(),
         transcript=[TranscriptItemView(**vars(i)) for i in items],

@@ -51,6 +51,7 @@ from .routers import (
     conversations,
     meta,
     organizations,
+    overview,
     playground,
 )
 from .session_defaults import AudioEndpointingController
@@ -158,6 +159,7 @@ def build_console_app(
     app.include_router(conversations.router)
     app.include_router(analytics.router)
     app.include_router(api_keys.router)
+    app.include_router(overview.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:

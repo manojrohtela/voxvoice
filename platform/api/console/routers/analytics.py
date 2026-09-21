@@ -137,30 +137,39 @@ class SummaryView(BaseModel):
     turns: TurnFigures
 
 
-@router.get("/summary", response_model=SummaryView)
-def summary(scope: Scope = Depends()) -> SummaryView:
-    snap = scope.load()
+def summary_figures(
+    snap: service.Snapshot,
+) -> tuple[ConversationCounts, DurationFigures, TurnFigures]:
+    """The summary figures of one snapshot. Shared with the Overview (M12.8), so the two surfaces
+    cannot disagree."""
     s = service.summarize(snap.conversations, snap.recorded, snap.turns)
-    return SummaryView(
-        query=scope.query,
-        conversations=ConversationCounts(
+    return (
+        ConversationCounts(
             total=s.conversations,
             by_status=s.by_status,
             by_source=s.by_source,
             recorded=s.recorded,
             not_recorded=s.not_recorded,
         ),
-        duration=DurationFigures(
+        DurationFigures(
             measured=s.with_duration,
             unmeasured=s.without_duration,
             total_s=s.total_duration_s,
             avg_s=s.avg_duration_s,
         ),
-        turns=TurnFigures(
+        TurnFigures(
             total=s.turns,
             by_status=s.turns_by_status,
             avg_per_conversation=s.avg_turns_per_conversation,
         ),
+    )
+
+
+@router.get("/summary", response_model=SummaryView)
+def summary(scope: Scope = Depends()) -> SummaryView:
+    conversations, duration, turns = summary_figures(scope.load())
+    return SummaryView(
+        query=scope.query, conversations=conversations, duration=duration, turns=turns
     )
 
 
@@ -191,13 +200,14 @@ class LatencyReport(BaseModel):
     data: list[LatencyView]
 
 
+def latency_views(turns: list[service.TurnFact]) -> list[LatencyView]:
+    """Every latency measure, in contract order. Shared with the Overview (M12.8)."""
+    return [_latency(service.latency_stats(m, turns)) for m in service.LATENCY_METRICS]
+
+
 @router.get("/latency", response_model=LatencyReport)
 def latency(scope: Scope = Depends()) -> LatencyReport:
-    turns = scope.load().turns
-    return LatencyReport(
-        query=scope.query,
-        data=[_latency(service.latency_stats(m, turns)) for m in service.LATENCY_METRICS],
-    )
+    return LatencyReport(query=scope.query, data=latency_views(scope.load().turns))
 
 
 # ── time series ───────────────────────────────────────────────────────────────
@@ -221,26 +231,24 @@ class SeriesReport(BaseModel):
     data: list[BucketView]
 
 
+def bucket_views(window: DateRange, snap: service.Snapshot) -> list[BucketView]:
+    """One bucket per UTC day of the range. Shared with the Overview (M12.8)."""
+    return [
+        BucketView(
+            date=b.day,
+            conversations=b.conversations,
+            turns=b.turns,
+            avg_duration_s=(round(sum(b.durations) / len(b.durations), 1) if b.durations else None),
+            voice_to_voice_samples=len(b.voice_to_voice),
+            voice_to_voice_p50_ms=service.percentile(sorted(b.voice_to_voice), 50),
+        )
+        for b in service.series(window, snap.conversations, snap.turns)
+    ]
+
+
 @router.get("/timeseries", response_model=SeriesReport)
 def timeseries(scope: Scope = Depends()) -> SeriesReport:
-    snap = scope.load()
-    buckets = service.series(scope.window, snap.conversations, snap.turns)
-    return SeriesReport(
-        query=scope.query,
-        data=[
-            BucketView(
-                date=b.day,
-                conversations=b.conversations,
-                turns=b.turns,
-                avg_duration_s=(
-                    round(sum(b.durations) / len(b.durations), 1) if b.durations else None
-                ),
-                voice_to_voice_samples=len(b.voice_to_voice),
-                voice_to_voice_p50_ms=service.percentile(sorted(b.voice_to_voice), 50),
-            )
-            for b in buckets
-        ],
-    )
+    return SeriesReport(query=scope.query, data=bucket_views(scope.window, scope.load()))
 
 
 # ── agents ────────────────────────────────────────────────────────────────────
@@ -265,24 +273,26 @@ class AgentReport(BaseModel):
     data: list[AgentUsageView]
 
 
+def agent_usage_views(db: DBSession, org_id: str, snap: service.Snapshot) -> list[AgentUsageView]:
+    """Agents with conversations in the snapshot, most first. Shared with the Overview (M12.8)."""
+    return [
+        AgentUsageView(
+            id=u.agent_id,
+            name=u.name,
+            archived=u.archived,
+            conversations=u.conversations,
+            recorded=u.recorded,
+            turns=u.turns,
+            avg_duration_s=u.avg_duration_s,
+            avg_turns_per_conversation=u.avg_turns_per_conversation,
+            voice_to_voice=_latency(u.voice_to_voice),
+        )
+        for u in service.by_agent(db, org_id, snap.conversations, snap.recorded, snap.turns)
+    ]
+
+
 @router.get("/agents", response_model=AgentReport)
 def agents(scope: Scope = Depends()) -> AgentReport:
-    snap = scope.load()
-    usage = service.by_agent(scope.db, scope.org_id, snap.conversations, snap.recorded, snap.turns)
     return AgentReport(
-        query=scope.query,
-        data=[
-            AgentUsageView(
-                id=u.agent_id,
-                name=u.name,
-                archived=u.archived,
-                conversations=u.conversations,
-                recorded=u.recorded,
-                turns=u.turns,
-                avg_duration_s=u.avg_duration_s,
-                avg_turns_per_conversation=u.avg_turns_per_conversation,
-                voice_to_voice=_latency(u.voice_to_voice),
-            )
-            for u in usage
-        ],
+        query=scope.query, data=agent_usage_views(scope.db, scope.org_id, scope.load())
     )

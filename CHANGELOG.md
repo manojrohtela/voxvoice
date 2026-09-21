@@ -131,6 +131,22 @@ platform-baseline level (see `docs/releases/`).
     Navigation honours the server's declared capabilities.
   - No runtime, provider, analytics or frozen-file change. No dependency added.
 
+- **M12.8 — Overview dashboard** (DL-0245). The console's landing page, composed from the
+  existing product data.
+  - `GET /v1/console/overview` (viewer+, console only): one request, one analytics snapshot, and
+    the same view builders as `/v1/console/analytics/*`, so every figure is identical to Analytics
+    (tested). Also the agent inventory (active/archived/unsupported language), the 5 latest
+    conversations from the M12.5 list, and deterministic attention items. No new table, event,
+    metric, score or cost.
+  - Overview page: summary, needs-attention with actions, usage, latency snapshot (median, samples;
+    "not measured"), recent conversations and agent activity (linked to their pages), runtime
+    status and Get started. Range and agent filters.
+  - M12.6's analytics view building was extracted into shared functions, with identical output.
+  - **Fixed across the console:** switching organization left the previous organization's data on
+    screen until you navigated away. Views are now keyed by organization, and URL filters are
+    dropped on switch.
+  - No runtime, provider, analytics-definition or frozen-file change. No dependency added.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),
