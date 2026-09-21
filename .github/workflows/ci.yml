@@ -163,3 +163,25 @@ jobs:
         run: uv export --format requirements-txt --no-emit-project -o /tmp/requirements.txt
       - name: pip-audit
         run: uvx pip-audit --strict --requirement /tmp/requirements.txt
+
+  console:
+    name: console (typecheck, test, build, audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      # Epic 12 (ADR-0055 DP8). The same commands a developer runs locally; the committed
+      # lockfile is the dependency set (DL-0236), and the audit fails on high/critical findings
+      # exactly as the Python job does (SECURITY_POLICY §6).
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --audit-level=high

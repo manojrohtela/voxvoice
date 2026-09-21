@@ -3,6 +3,32 @@
 All notable releases of the VoxVoice platform. Versioning follows SemVer at the
 platform-baseline level (see `docs/releases/`).
 
+## Unreleased — Epic 12 (Developer Platform) · 🟢 M12.1 Foundation & architecture
+
+### Added
+
+- **M12.1 — Developer Platform foundation** ([ADR-0055](docs/adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md),
+  DL-0235…DL-0237). Epic 12 productizes the M11 runtime rather than rebuilding it.
+  - `api.console.app:build_console_app` — one local product application that **wraps**
+    `build_webrtc_app` unchanged and adds `/v1/console/*`. The developer API (`/v1/agents`,
+    `/v1/sessions`, `/v1/webrtc/*`) and `/health` are served exactly as before.
+  - `GET /v1/console/meta` — API version, console API revision, runtime description, and the
+    capabilities implemented now (`runtime.status`). Unauthenticated and secret-free (tested
+    with planted credentials).
+  - Console error envelope `{"error": {"type","message","request_id"}}`, scoped to console errors
+    so M11's `{"detail": …}` bodies cannot change. `x-request-id` is echoed only when safe.
+  - Optional one-process local product mode: `VOXVOICE_CONSOLE_DIST` serves the built console at
+    `/console/`, with SPA fallback and path-traversal refusal. A misconfigured path is a startup
+    error.
+  - `console/` — the React + TypeScript + Vite console: app shell, capability-driven navigation,
+    Overview with **real** runtime status, and an honest "not yet available" surface for every
+    later milestone. 17 tests. Exact-pinned dependencies (DL-0236).
+  - CI job `console` (typecheck, test, build, `npm audit --audit-level=high`).
+  - Epic 12 documentation: product vision, HLD, LLD, DB design, API design, frontend architecture,
+    local development, security model and implementation plan.
+- **No existing behaviour changed.** No pre-`v4.0.0` `platform/api/` file modified (`E10-7`), no
+  Epic 10/11 module touched, no migration, no table, no event type, no Python dependency.
+
 ## Unreleased — Epic 10 (Durable Event & Telemetry Spine) · 🟢 Implemented (M10.2–M10.12) · ✅ Certified (M10.13) · 🔒 Epic 10 architecture FROZEN (M10.14) · 📦 **RELEASED v5.0.0** (M10.15)
 
 ### Added

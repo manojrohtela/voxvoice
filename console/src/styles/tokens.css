@@ -1,0 +1,50 @@
+/* Design tokens. Every colour the console uses is defined here, for both themes. */
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-sunken: #f1f3f6;
+  --border: #e3e6eb;
+  --text: #14171c;
+  --text-muted: #5b6573;
+  --accent: #4338ca;
+  --accent-soft: #eef0ff;
+  --ok: #107a45;
+  --ok-soft: #e6f5ec;
+  --warn: #8a5a00;
+  --warn-soft: #fff5de;
+  --error: #b42318;
+  --error-soft: #fdecea;
+  --focus: #4338ca;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0f13;
+    --surface: #15181e;
+    --surface-sunken: #1b1f26;
+    --border: #2a2f38;
+    --text: #e8ebf0;
+    --text-muted: #9aa4b2;
+    --accent: #a5b4fc;
+    --accent-soft: #23264a;
+    --ok: #5fd08f;
+    --ok-soft: #13291d;
+    --warn: #f0c060;
+    --warn-soft: #2c2413;
+    --error: #ff8a80;
+    --error-soft: #331a18;
+    --focus: #a5b4fc;
+  }
+}
