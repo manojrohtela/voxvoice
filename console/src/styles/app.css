@@ -241,3 +241,47 @@ code {
   .topbar { flex-wrap: wrap; height: auto; padding: var(--space-2) var(--space-4); }
   .topbar__user { display: none; }
 }
+
+/* ── agents (M12.3) ─────────────────────────────────────────────────── */
+.page__header--actions { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.page__header--actions .button { margin-top: 0; text-decoration: none; }
+.breadcrumb { margin: 0 0 var(--space-1); font-size: 13px; }
+.breadcrumb a { color: var(--accent); }
+
+.agent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.agent-list__item { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); }
+.agent-list__main { min-width: 0; }
+.agent-list__name { font-weight: 600; color: var(--text); text-decoration: none; }
+.agent-list__name:hover { color: var(--accent); }
+.agent-list__prompt {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.agent-list__meta { display: grid; justify-items: end; gap: var(--space-2); flex-shrink: 0; }
+.agent-list__id { font-size: 12px; }
+
+.agent-form { margin-top: 0; }
+.agent-form__fields { border: 0; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+.agent-form__fields:disabled { opacity: 0.75; }
+.form__field textarea, .form__field select {
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+}
+.form__field textarea { resize: vertical; line-height: 1.5; }
+.form__actions { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.form__notice { color: var(--ok); font-weight: 600; }
+.button--danger { margin-top: 0; margin-left: auto; background: transparent; color: var(--error); border: 1px solid var(--error); }
+
+@media (max-width: 760px) {
+  .agent-list__item { flex-direction: column; }
+  .agent-list__meta { justify-items: start; }
+}

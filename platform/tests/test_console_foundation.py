@@ -73,7 +73,7 @@ def test_meta_describes_the_running_process(console: TestClient) -> None:
 
 def test_meta_capabilities_are_only_what_is_implemented() -> None:
     # The console renders anything absent as "not yet available"; claiming more would fake it.
-    assert CAPABILITIES == ("runtime.status", "identity")
+    assert CAPABILITIES == ("runtime.status", "identity", "agents")
 
 
 def test_meta_reports_signalling_when_the_wrapped_app_mounts_it() -> None:

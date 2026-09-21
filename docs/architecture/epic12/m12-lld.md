@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.2). §2 (M12.1) and §3 (M12.2) are **implemented**. §4–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
+| **Status** | Living (M12.3). §2–§4 (M12.1–M12.3) are **implemented**. §5–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
 | **Date** | 2026-09-21 |
 | **Related** | [HLD](m12-hld.md) · [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [DB design](m12-db-design.md) · [API design](../../apis/m12-api-design.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -21,6 +21,7 @@ api/console/
 │   ├── organizations.py  me · create · select · read/rename · members                          [M12.2]
 │   ├── views.py       identity response models (no secret is ever a field)                     [M12.2]
 │   ├── agents.py      console agent management over the runtime `agent` row                    [M12.3]
+├── agents/            agent validation + tenant-scoped operations (service.py)                [M12.3]
 │   ├── playground.py  rendezvous + session start/end from a console identity                   [M12.4]
 │   ├── conversations.py  list/detail projections                                               [M12.5]
 │   ├── analytics.py   metric.turn projections                                                  [M12.6]
@@ -150,23 +151,55 @@ Role matrix (enforced server-side):
 | manage members | ✓ | ✓ | — | — |
 | rename/delete organization | ✓ | — | — | — |
 
-## 4. Agents (M12.3)
+## 4. Agents (M12.3) — implemented
 
-The console reads and writes the **runtime `agent` row**. It is the same row `/v1/agents` serves,
-so there is one writer path per field and no copy (§A2.5). Before M12.3 exposes a field, the
-milestone verifies by test that the field **reaches `StartSessionRequest` and acts**. Fields
-known at M12.1:
+Code: `api/console/agents/service.py`, `api/console/routers/agents.py`, `dp_agent_state`
+(migration `0038`), `bootstrap.declared_stt_languages`. Tests: `tests/test_console_agents.py`.
 
-| Field | Reaches runtime today? | Console at M12.3 |
+The console reads and writes the **runtime `agent` row**, the same row `/v1/agents` serves and
+`create_session` starts from. There is one writer path per field and no copy (§A2.5). A test
+drives the frozen `create_session` with a recording `SessionController` and proves that every
+editable field arrives in `StartSessionRequest`. The orchestrator uses each one
+(`orchestrator.py`: model, language, voice).
+
+| Field | Reaches runtime? | Console |
 |---|---|---|
-| name, system_prompt, first_message, llm_model, tts_voice | yes | expose |
-| language | yes, but must be declared by the STT plugin (F-4) | expose, with the declared set as options |
-| allow_interruptions | **no** (F-1) | hidden until fixed by composition/ADR |
-| min/max_endpointing_delay, tools | **no** | hidden |
-| stt_provider/tts_provider | read; only `default` is meaningful under the fixed profile | hidden |
+| name, system_prompt, first_message, llm_model, tts_voice | yes | editable |
+| language | yes; must be declared by the STT plugin (F-4) | select from `GET /v1/console/agents/options` |
+| allow_interruptions | **no** (F-1) | not shown, not written |
+| min/max_endpointing_delay, tools | **no** | not shown, not written |
+| stt_provider/tts_provider | only `default` is meaningful | not shown, not written |
 
-Delete is **archive** (`dp_agent_state.archived_at`). Archived agents are hidden from lists and
-refused by the Playground. This avoids F-5 on Postgres.
+Values set on hidden fields through the developer API survive every console edit (tested).
+
+* **Routes**: `GET /v1/console/agents` (viewer; `{data: [...]}`, newest first, excluding
+  archived), `GET /v1/console/agents/options` (viewer), `POST` (developer), `GET /{id}`
+  (viewer), `PATCH /{id}` (developer; only the fields sent; `null` clears an optional field),
+  `POST /{id}/archive` (developer, 204). Cross-org and archived agents return 404, and every
+  write needs the CSRF header.
+* **Languages (F-4)**: `bootstrap.declared_stt_languages(profile)` reads the STT plugin's own
+  declaration (the local class capabilities; the Deepgram plugin's constructor default, which is
+  what `build_registry` constructs). No provider is built and no credential is read. The console
+  app asks it for the profile `build_controller` selects (real when WebRTC is enabled, local
+  otherwise). New agents default to the first declared language. An undeclared language is refused
+  (400). An existing agent with one (e.g. the developer API's `en-IN` default) is shown with
+  `language_supported: false` and a warning.
+* **Validation**: name 1–100 characters, instructions 1–20,000, greeting ≤ 2,000 (blank →
+  null). Model and voice are opaque identifiers `[A-Za-z0-9][A-Za-z0-9._:/-]*`, ≤ 200 characters.
+* **Archive, not delete (F-5)**: `dp_agent_state.archived_at`/`archived_by`. The row, its
+  sessions and its history remain. Archived agents disappear from the console (and, from M12.4,
+  from the Playground). The developer API still serves them, and its frozen `DELETE` still
+  hard-deletes. `dp_agent_state.agent_id` is `ON DELETE CASCADE`, so it never blocks that delete.
+* **Not in M12.3:** unarchive, agent duplication, versioning, tools, and barge-in (F-1, below).
+
+**F-1 is deliberately still open.** Making `allow_interruptions` act requires carrying it into
+`StartSessionRequest` on the product path. The frozen `create_session` cannot do that, so a
+composition-level controller decorator would have to fill it from the agent row. That would switch
+barge-in **on** for every existing agent (the model default is `True`) on a runtime path that
+cannot be verified without a live voice session. The ADR-0046 interrupt behaviour on speakers
+(self-interruption, `local-run.md` §8) is exactly the risk. It needs an owner decision and a live
+check, so the console hides the field instead of pretending it works (AR-25). `audio_endpointing`
+is not carried either (F-7).
 
 ## 5. Playground (M12.4)
 

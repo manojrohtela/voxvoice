@@ -4,6 +4,6 @@ Only state the M11 runtime model does not already hold (ADR-0055 DP1, DB design 
 agent, session and transcript facts stay in the M11 `org`/`agent`/`session`/`transcript` rows.
 """
 
-from .models import DP_TABLES, ConsoleSessionRow, MembershipRow, UserRow
+from .models import DP_TABLES, AgentStateRow, ConsoleSessionRow, MembershipRow, UserRow
 
-__all__ = ["DP_TABLES", "ConsoleSessionRow", "MembershipRow", "UserRow"]
+__all__ = ["DP_TABLES", "AgentStateRow", "ConsoleSessionRow", "MembershipRow", "UserRow"]

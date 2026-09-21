@@ -7,9 +7,9 @@ developer platform begins at **`0037`**. No earlier migration is read, altered o
 
 from __future__ import annotations
 
-from . import v0037_identity
+from . import v0037_identity, v0038_agent_state
 
-MIGRATIONS = (v0037_identity,)
+MIGRATIONS = (v0037_identity, v0038_agent_state)
 
 #: The chain this one continues (`events/persistence/migrations` 0034–0036).
 CHAIN_STARTS_AFTER = "0036"

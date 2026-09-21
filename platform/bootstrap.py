@@ -21,6 +21,7 @@ from core.session_control import SessionController, TranscriptSink
 from providers.llm.completion_stream import CompletionClient
 from providers.llm.echo import EchoLLM
 from providers.llm.groq import GroqLLM
+from providers.stt.deepgram import DEFAULT_LANGUAGES as DEEPGRAM_DEFAULT_LANGUAGES
 from providers.stt.deepgram import DeepgramSTT
 from providers.stt.local import LocalSTT
 from providers.stt.transcription_session import TranscriptionClient
@@ -349,6 +350,23 @@ def build_local_registry(*, include_voice_activity: bool = False) -> ProviderReg
     if include_voice_activity:
         registry.register(CapabilityKind.VOICE_ACTIVITY, LocalVoiceActivity(), default=True)
     return registry
+
+
+def declared_stt_languages(stt: str = STT_LOCAL) -> tuple[str, ...]:
+    """The languages the STT plugin of profile `stt` declares, exactly as `build_registry` builds it
+    (M12.3, finding F-4).
+
+    Read from the plugin's own declaration, never re-stated: the local transcriber's class
+    capabilities, and the default the Deepgram plugin is constructed with here (no `languages`
+    argument is passed to it). Nothing is constructed and no credential is read, so the developer
+    platform can offer agent languages without touching the provider plane. An agent language
+    outside this set is refused by the plugin at stream open, which is the call that "plays the
+    greeting then disconnects" (`docs/runtime/local-run.md` §6)."""
+    if stt == STT_LOCAL:
+        return tuple(LocalSTT.capabilities.languages)
+    if stt == STT_DEEPGRAM:
+        return tuple(DEEPGRAM_DEFAULT_LANGUAGES)
+    raise ValueError(f"unknown stt profile {stt!r}")
 
 
 def build_session_controller(

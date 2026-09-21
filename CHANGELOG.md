@@ -49,6 +49,23 @@ platform-baseline level (see `docs/releases/`).
   - No new dependency (Python or npm). No pre-`v4.0.0` `api/` file modified. The developer API
     and the M11 runtime are unchanged.
 
+- **M12.3 — Agents** (DL-0240). Real agent management in the console over the **one** M11
+  `agent` row.
+  - `/v1/console/agents` list/create, `/{id}` read/edit, `/{id}/archive`, and `/options`. The
+    organization comes from the session, cross-org access returns 404, the role matrix applies
+    (viewer reads, developer writes), and writes need the CSRF header.
+  - Only fields that reach the runtime are editable (name, instructions, greeting, language,
+    model, voice). A test drives the frozen `create_session` to prove each one arrives in
+    `StartSessionRequest`. `allow_interruptions`/endpointing/tools are neither shown nor written
+    (F-1 stays open for an owner decision).
+  - Languages come from what the STT plugin declares (`bootstrap.declared_stt_languages`,
+    additive; F-4). Undeclared languages are refused, and existing agents that have one are flagged.
+  - Archive replaces delete (`dp_agent_state`, migration `0038`, `ON DELETE CASCADE`; F-5).
+  - Console: Agents list, editor (create/edit/archive, read-only for viewers, only changed
+    fields sent). `/v1/console/meta` is at revision `m12.3`, with capability `agents`.
+  - No dependency added. No pre-`v4.0.0` `api/` file modified. The developer API and runtime are
+    unchanged.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),

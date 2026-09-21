@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.2). §3.1–§3.3 are **implemented** (migration `0037`, `api/console/persistence/`). §3.4–§3.5 are design, and each lands in the milestone named. |
+| **Status** | Living (M12.3). §3.1–§3.4 are **implemented** (migrations `0037`–`0038`, `api/console/persistence/`). §3.5 is design (M12.7). |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP1 · [LLD](m12-lld.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -88,7 +88,9 @@ Server-side console sessions. They are revocable, which a JWT is not.
 Expired and revoked rows are purged by a bounded startup sweep (M12.2). The session table is not
 an audit log.
 
-### 3.4 `dp_agent_state` (M12.3)
+### 3.4 `dp_agent_state` (M12.3) ✅
+
+Implemented by migration `0038`. `agent_id` is `ON DELETE CASCADE`, so the developer API's frozen hard delete is never blocked. There is no `created_at`/`updated_at` on this row: the agent row carries those.
 
 Lifecycle metadata for the runtime `agent` row, which the frozen model cannot carry.
 

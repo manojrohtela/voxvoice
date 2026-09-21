@@ -10,7 +10,7 @@ the rendezvous registry, `/health`, and the developer API (`/v1/agents`, `/v1/se
 deployment running both could end up with two controllers or two registries. So the console app
 **is** the WebRTC app, plus these additions:
 
-1. the console routers under `/v1/console/*` (meta, identity, organizations);
+1. the console routers under `/v1/console/*` (meta, identity, organizations, agents);
 2. the console error handler, scoped to `ConsoleError` so M11's `{"detail": …}` bodies are
    untouched;
 3. a startup step, run *after* the M11 lifespan has initialised the database, that applies the
@@ -31,13 +31,26 @@ from sqlmodel import Session as DBSession
 from ..db import engine as db_engine
 from ..webrtc.app import build_webrtc_app, resolve_ice_policy
 from ..webrtc.config import WebRTCSettings
+from .agents.service import AgentOptions
 from .bundle import mount_console_bundle
 from .config import ConsoleSettings
 from .errors import register_console_error_handler
 from .identity.service import purge_sessions
 from .identity.throttle import LoginThrottle
 from .persistence.migrations import upgrade_all
-from .routers import auth, meta, organizations
+from .routers import agents, auth, meta, organizations
+
+
+def _declared_agent_languages(webrtc_settings: WebRTCSettings) -> tuple[str, ...]:
+    """The agent languages the running speech recognizer declares (finding F-4).
+
+    Asked of the composition root, the one layer allowed to know which provider profile is
+    selected (AR-14) — the same choice `api.webrtc.app.build_controller` makes: the real profile
+    when WebRTC is enabled, the default (local) profile otherwise. Deferred import, as there."""
+    from bootstrap import REAL_PROVIDER_PROFILE, STT_LOCAL, declared_stt_languages
+
+    stt = REAL_PROVIDER_PROFILE["stt"] if webrtc_settings.webrtc_enabled else STT_LOCAL
+    return declared_stt_languages(stt)
 
 
 def build_console_app(
@@ -80,11 +93,15 @@ def build_console_app(
         ice_policy=resolve_ice_policy(webrtc_settings).describe(),
     )
     app.state.console_bundle = settings.dist_dir is not None
+    app.state.console_agent_options = AgentOptions(
+        languages=_declared_agent_languages(webrtc_settings)
+    )
 
     register_console_error_handler(app)
     app.include_router(meta.router)
     app.include_router(auth.router)
     app.include_router(organizations.router)
+    app.include_router(agents.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:

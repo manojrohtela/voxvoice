@@ -36,9 +36,10 @@ describe("Overview", () => {
     renderAt("/");
 
     const journey = await screen.findByRole("article", { name: "Get started" });
-    expect(await within(journey).findByText("Available")).toBeTruthy(); // identity (M12.2)
-    expect(within(journey).getByText("Arrives in M12.3")).toBeTruthy();
-    expect(within(journey).queryByText("Arrives in M12.2")).toBeNull();
+    await within(journey).findAllByText("Available");
+    expect(within(journey).getAllByText("Available")).toHaveLength(2); // identity, agents
+    expect(within(journey).getByText("Arrives in M12.4")).toBeTruthy();
+    expect(within(journey).queryByText("Arrives in M12.3")).toBeNull();
   });
 
   it("warns when the server's console API revision differs from this build", async () => {
@@ -207,10 +208,10 @@ describe("Settings", () => {
 describe("Navigation", () => {
   it("routes an undeclared surface to the not-yet-available page, never to sample data", async () => {
     healthyApi();
-    renderAt("/agents");
+    renderAt("/playground");
 
-    expect(await screen.findByRole("heading", { name: "Agents", level: 1 })).toBeTruthy();
-    expect(screen.getByText("Not yet available — arrives in M12.3")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Playground", level: 1 })).toBeTruthy();
+    expect(screen.getByText("Not yet available — arrives in M12.4")).toBeTruthy();
   });
 
   it("badges undeclared surfaces as Soon and marks the current page", async () => {
@@ -251,5 +252,5 @@ describe("Navigation", () => {
 
 // Keep the fixture honest: the fake metadata is the server's shape at this revision.
 it("the fixture metadata matches this build's revision", () => {
-  expect(META.console_api_revision).toBe("m12.2");
+  expect(META.console_api_revision).toBe("m12.3");
 });

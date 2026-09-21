@@ -37,7 +37,7 @@ from api.console.identity.throttle import LoginThrottle
 from api.console.persistence import ConsoleSessionRow, MembershipRow, UserRow
 from api.console.persistence import migrations as dp_migrations
 from api.db import engine
-from api.models import ApiKey, Org
+from api.models import Agent, ApiKey, Org
 from api.webrtc.config import WebRTCSettings
 
 HEADERS = {CONSOLE_HEADER: "1"}
@@ -539,22 +539,25 @@ def test_bootstrap_cli_reads_the_password_from_stdin(monkeypatch, capsys):
 def test_the_dp_chain_continues_after_the_events_chain():
     from events.persistence import migrations as events_migrations
 
-    assert [m.VERSION for m in dp_migrations.MIGRATIONS] == ["0037"]
+    assert [m.VERSION for m in dp_migrations.MIGRATIONS] == ["0037", "0038"]
     assert dp_migrations.CHAIN_STARTS_AFTER == events_migrations.MIGRATIONS[-1].VERSION
     assert int(dp_migrations.MIGRATIONS[0].VERSION) == int(dp_migrations.CHAIN_STARTS_AFTER) + 1
 
 
-def test_migration_0037_creates_only_dp_tables_and_is_idempotent():
+def test_the_dp_migrations_create_only_dp_tables_and_are_idempotent():
     fresh = create_engine("sqlite://")
-    Org.__table__.create(fresh)  # the M11 tenant the foreign keys point at
+    Org.__table__.create(fresh)  # the M11 tenant and agent the foreign keys point at
+    Agent.__table__.create(fresh)
 
-    assert dp_migrations.upgrade_all(fresh) == ("0037",)
-    assert dp_migrations.upgrade_all(fresh) == ("0037",)
+    assert dp_migrations.upgrade_all(fresh) == ("0037", "0038")
+    assert dp_migrations.upgrade_all(fresh) == ("0037", "0038")
     assert set(inspect(fresh).get_table_names()) == {
         "org",
+        "agent",
         "dp_user",
         "dp_membership",
         "dp_console_session",
+        "dp_agent_state",
     }
     uniques = inspect(fresh).get_unique_constraints("dp_membership")
     assert {"org_id", "user_id"} == set(uniques[0]["column_names"])

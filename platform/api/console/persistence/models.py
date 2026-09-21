@@ -16,7 +16,7 @@ from core.ids import gen_id
 
 # Importing the M11 models registers `org` on the shared metadata, so the foreign keys below
 # resolve and `create_all` orders the tables correctly.
-from ...models import Org  # noqa: F401
+from ...models import Agent, Org  # noqa: F401
 
 
 def _now() -> datetime:
@@ -67,4 +67,21 @@ class ConsoleSessionRow(SQLModel, table=True):
     revoked_at: datetime | None = None
 
 
-DP_TABLES = (UserRow, MembershipRow, ConsoleSessionRow)
+class AgentStateRow(SQLModel, table=True):
+    """Console lifecycle for an M11 `agent` row, which the frozen model cannot carry (M12.3,
+    DB design §3.4). 1:1 with the agent, and optional: an agent created through the developer API
+    has no row until the console archives it.
+
+    `ON DELETE CASCADE`, so the developer API's hard `DELETE /v1/agents/{id}` (frozen) is never
+    blocked by this row."""
+
+    __tablename__ = "dp_agent_state"
+
+    agent_id: str = Field(foreign_key="agent.id", primary_key=True, ondelete="CASCADE")
+    org_id: str = Field(foreign_key="org.id", index=True)
+    created_by: str | None = Field(default=None, foreign_key="dp_user.id")
+    archived_at: datetime | None = Field(default=None, index=True)
+    archived_by: str | None = Field(default=None, foreign_key="dp_user.id")
+
+
+DP_TABLES = (UserRow, MembershipRow, ConsoleSessionRow, AgentStateRow)
