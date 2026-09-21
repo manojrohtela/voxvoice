@@ -17,7 +17,9 @@ import re
 import uuid
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 
 REQUEST_ID_HEADER = "x-request-id"
 
@@ -89,9 +91,25 @@ async def _handle_console_error(request: Request, exc: Exception) -> JSONRespons
     return _envelope(request, exc)
 
 
+#: Paths whose request-validation failures use the console envelope. Everything else keeps
+#: FastAPI's default `{"detail": [...]}` body — the developer API's public contract.
+CONSOLE_API_PREFIX = "/v1/console/"
+
+
+async def _handle_validation_error(request: Request, exc: Exception) -> Response:
+    assert isinstance(exc, RequestValidationError)
+    if request.url.path.startswith(CONSOLE_API_PREFIX):
+        invalid = InvalidRequest("Some fields are missing or invalid")
+        invalid.status_code = 422
+        return _envelope(request, invalid)
+    return await request_validation_exception_handler(request, exc)
+
+
 def register_console_error_handler(app: FastAPI) -> None:
-    """Scope the envelope to console errors; every other handler is left exactly as it was."""
+    """Scope the envelope to console errors and console paths; every other response keeps the
+    shape it had before the console existed."""
     app.add_exception_handler(ConsoleError, _handle_console_error)
+    app.add_exception_handler(RequestValidationError, _handle_validation_error)
 
 
 __all__ = [

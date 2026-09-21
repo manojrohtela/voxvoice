@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🟢 M12.1 complete · Living plan |
+| **Status** | 🟢 M12.1, M12.1.1, M12.2 complete · Living plan |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [HLD](../architecture/epic12/m12-hld.md) · [LLD](../architecture/epic12/m12-lld.md) |
 
@@ -21,7 +21,7 @@ and would otherwise ship empty.
 |---|---|---|---|
 | **M12.1** | Foundation & architecture | ADR-0055, Epic 12 docs, `api/console` composition (`build_console_app`, `/v1/console/meta`, scoped error envelope, bundle serving), `console/` shell with real runtime status, CI job | ✅ See the M12.1 report (DL-0237) |
 | **M12.1.1** | E10-7 historical-counting repair | ADR-0052 Amendment 2: E10-7's `examined` reads the certified tree (F-6) | ✅ Epic 10 digests reproduce exactly (DL-0238) |
-| M12.2 | Identity & organizations | `dp_user`, `dp_membership`, `dp_console_session` (migration `0037`), signup/login/logout/me, role dependency, CSRF header, CLI to attach an owner to an existing org, console sign-in and org/account settings | unauthenticated → 401. Session revocation works. Role matrix tested. |
+| **M12.2** ✅ | Identity & organizations | `dp_user`, `dp_membership`, `dp_console_session` (migration `0037`), signup/login/logout/me, role dependency, CSRF header, CLI to attach an owner to an existing org, console sign-in and org/account settings | unauthenticated → 401. Session revocation works. Role matrix tested. |
 | M12.3 | Agents | console agent CRUD over the runtime `agent` row, `dp_agent_state` archive, declared-options endpoint, resolution of F-1/F-4/F-5 (composition or ADR), Agents UI | cross-org agent access → 404. Only fields proven to act are exposed. |
 | M12.4 | Real Playground | playground rendezvous/session/end calling the frozen handlers, TS SDK **core** extracted from `client.html`, Playground UI with mic, status and hang-up | a human talks to a console-created agent through the console, with real providers and no API key in the browser |
 | M12.5 | Conversations & read API | spine wiring at composition (F-2), transcript ordering from `evt_event.seq` (F-3), conversation list/detail, Conversations UI | cross-org conversation access → 404. Events come from the durable log. |

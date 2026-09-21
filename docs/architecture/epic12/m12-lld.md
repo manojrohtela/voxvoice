@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.1). §2 is **implemented**. §3–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
+| **Status** | Living (M12.2). §2 (M12.1) and §3 (M12.2) are **implemented**. §4–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
 | **Date** | 2026-09-21 |
 | **Related** | [HLD](m12-hld.md) · [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [DB design](m12-db-design.md) · [API design](../../apis/m12-api-design.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -17,15 +17,17 @@ api/console/
 ├── bundle.py          serves the built console SPA under /console/ (optional)                  [M12.1]
 ├── routers/
 │   ├── meta.py        GET /v1/console/meta                                                     [M12.1]
-│   ├── auth.py        signup · login · logout · me                                             [M12.2]
-│   ├── orgs.py        current org · members                                                    [M12.2]
+│   ├── auth.py        signup · login · logout                                                  [M12.2]
+│   ├── organizations.py  me · create · select · read/rename · members                          [M12.2]
+│   ├── views.py       identity response models (no secret is ever a field)                     [M12.2]
 │   ├── agents.py      console agent management over the runtime `agent` row                    [M12.3]
 │   ├── playground.py  rendezvous + session start/end from a console identity                   [M12.4]
 │   ├── conversations.py  list/detail projections                                               [M12.5]
 │   ├── analytics.py   metric.turn projections                                                  [M12.6]
 │   └── api_keys.py    list · create (one-time reveal) · revoke                                 [M12.7]
 ├── identity/          users, password hashing, console sessions, membership, dependencies     [M12.2]
-└── persistence/       dp_* SQLModel tables + migration chain from 0037                         [M12.2]
+├── persistence/       dp_* SQLModel tables + migration chain from 0037                         [M12.2]
+└── bootstrap_owner.py CLI: first console owner for an org / closed sign-up                    [M12.2]
 ```
 
 Naming rules (ADR-0055 DP2): no path under `api/` contains `observability` (`E10-9`). Code
@@ -42,9 +44,9 @@ identifiers name no vendor (`E11-3`). The analytics router is `analytics.py`, ne
    when signalling is enabled.
 3. `app.state.console_settings`, `app.state.console_runtime` (the transport/signalling/ICE
    description of the wrapped app) are recorded for the meta route.
-4. `register_console_error_handler(app)` registers a handler for **`ConsoleError` only**. It does
-   not register for `HTTPException`/`RequestValidationError`, so M11 routes keep their
-   `{"detail": …}` bodies.
+4. `register_console_error_handler(app)` registers a handler for **`ConsoleError`**, and (M12.2) a
+   `RequestValidationError` handler that uses the envelope **only for `/v1/console/*` paths** and
+   delegates everything else to FastAPI's default. M11 routes keep their `{"detail": …}` bodies.
 5. `app.include_router(meta.router)`.
 6. If `settings.dist_dir` is set: mount the SPA at `/console` (assets + index fallback).
 
@@ -56,12 +58,12 @@ what the console can do **now**:
 ```json
 {
   "api_version": "v1",
-  "console_api_revision": "m12.1",
-  "organization_term": "organization",
+  "console_api_revision": "m12.2",
   "runtime": {"transport": "local", "webrtc_signalling": false,
               "ice_policy": "no ICE servers (explicit; host candidates only)"},
-  "capabilities": ["runtime.status"],
-  "console_bundle": false
+  "capabilities": ["runtime.status", "identity"],
+  "console_bundle": false,
+  "signup": {"mode": "first_run", "available": true}
 }
 ```
 
@@ -92,26 +94,51 @@ otherwise a fresh id. It is echoed in the `x-request-id` response header. Messag
 exception text from lower layers. Cross-tenant reads raise `NotFound`, never `Forbidden`, so
 existence does not leak (M11 precedent).
 
-## 3. Identity (M12.2)
+## 3. Identity (M12.2) — implemented
 
-* **Signup** `POST /v1/console/auth/signup {email, password, display_name, organization_name}` →
-  in one transaction: `dp_user` (scrypt hash) + `org` row (the frozen model, **no API key
-  created**) + `dp_membership(role=owner)` + `dp_console_session`. Sets the cookie. Gated by
-  `VOXVOICE_CONSOLE_SIGNUP` (`open` | `closed`).
-* **Login** verifies scrypt in constant time and returns the same generic error for unknown
-  email and wrong password. It rotates the session (new token every login). Rate limiting is
-  per email and per client (M12.2 decides an in-process limiter, documented as Stage-1 only).
-* **Session**: 32-byte random token, stored as SHA-256 in `dp_console_session`. Cookie
-  `vv_console` has `HttpOnly; SameSite=Strict; Path=/`, plus `Secure` outside dev. Idle and
-  absolute expiry are configured. **Logout** sets `revoked_at`.
-* **Dependency** `current_member(request) -> Member(user, org, role)` validates the cookie, loads
-  the session → user → membership, and checks the membership is active. Every console query
-  scopes by `member.org.id`.
-* **CSRF**: mutating console routes require `x-voxvoice-console: 1`. A cross-site form cannot set
-  that header, and a cross-site `fetch` cannot either without a CORS preflight, which is not
-  granted.
-* **Existing orgs**: `python -m api.console.bootstrap_owner --org <org_id> --email … --password-stdin`
-  attaches an owner to an org created by `api.bootstrap`.
+Code: `api/console/identity/` (`passwords`, `throttle`, `service`, `deps`),
+`api/console/persistence/` (`dp_*` models, migration `0037`), `api/console/routers/`
+(`auth`, `organizations`, `views`), `api/console/bootstrap_owner.py`. Tests:
+`tests/test_console_identity.py`.
+
+* **Sign-up** `POST /v1/console/auth/signup {email, password, display_name?, organization_name}`
+  → in one transaction: `dp_user` (scrypt hash) + an M11 `org` row (**no API key**) +
+  `dp_membership(owner)` + `dp_console_session`. Sets the cookie. The `VOXVOICE_CONSOLE_SIGNUP`
+  policy is `first_run` (default: allowed only while no user exists, then closed), `open` or
+  `closed`. `/v1/console/meta` reports `signup.mode` and `signup.available`.
+* **Sign-in** `POST /v1/console/auth/login {email, password}`. scrypt is verified in constant time.
+  Unknown email, wrong password and disabled account return the same 401, and a dummy hash is
+  verified so the timing matches. Every sign-in creates a new session token. **There is no
+  endpoint that turns an identifier into a session**; the Epic 8 `/v1/auth/token` behaviour is
+  not reproduced, and that app is not served by the console.
+* **Throttle**: in-process, per `(email, client)`, sliding window. Once the limit is reached,
+  even the right password gets 429. Stage 1 only (a shared store is needed for several API
+  processes).
+* **Session**: 32-byte `token_urlsafe`, stored as SHA-256. Cookie `vv_console`: `HttpOnly;
+  SameSite=Strict; Path=/; Max-Age=<absolute>`, plus `Secure` unless `APP_ENV=dev`
+  (`VOXVOICE_CONSOLE_COOKIE_SECURE` overrides). Absolute expiry is `expires_at`; idle expiry is
+  `last_seen_at`, refreshed on each authenticated request. **Sign-out** sets `revoked_at`, so a
+  copied cookie is dead too. Expired and revoked rows are purged at startup.
+* **Dependencies** (`identity/deps.py`): `current_identity` returns user + session or 401.
+  `current_member` returns user + active org + role, or 409 if the session has no organization or
+  the membership was removed. `require_role(minimum)` returns 403 below the role. The active org
+  lives **only** on the server-side session; no endpoint takes an org id as a read scope.
+* **Organizations**: `GET /v1/console/me`, `POST /v1/console/organizations` (caller becomes
+  owner; the session switches to it), `POST /v1/console/session/organization` (switch; 404 if not
+  a member), `GET/PATCH /v1/console/organization` (rename: owner only),
+  `GET /v1/console/organization/members`.
+* **CSRF**: every non-GET console route requires `x-voxvoice-console: 1` (403 otherwise).
+  Request-validation failures on `/v1/console/*` use the console envelope (422
+  `invalid_request`). Other paths keep FastAPI's default body.
+* **Startup**: the console app wraps the M11 lifespan. After M11's `init_db`, it applies the
+  `dp_*` chain (`0037`) and purges dead sessions. Nothing creates a user at startup.
+* **Existing orgs / closed sign-up**: `python -m api.console.bootstrap_owner --email … (--org
+  <org_id> | --new-org <name>) [--password-stdin]`. The password comes from a prompt or stdin,
+  never argv. An existing user is attached without a password.
+
+**Not in M12.2:** invitations and member management (owner/admin can see members, but adding
+and removing members is a later milestone), password change/reset (no email delivery locally),
+account deletion, SSO/OAuth.
 
 Role matrix (enforced server-side):
 

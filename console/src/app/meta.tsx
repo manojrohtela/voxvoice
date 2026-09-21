@@ -17,7 +17,10 @@ function isConsoleMeta(value: unknown): value is ConsoleMeta {
     meta.capabilities.every((capability) => typeof capability === "string") &&
     typeof meta.runtime === "object" &&
     meta.runtime !== null &&
-    typeof meta.runtime.transport === "string"
+    typeof meta.runtime.transport === "string" &&
+    typeof meta.signup === "object" &&
+    meta.signup !== null &&
+    typeof meta.signup.available === "boolean"
   );
 }
 

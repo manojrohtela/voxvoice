@@ -29,6 +29,26 @@ platform-baseline level (see `docs/releases/`).
 - **No existing behaviour changed.** No pre-`v4.0.0` `platform/api/` file modified (`E10-7`), no
   Epic 10/11 module touched, no migration, no table, no event type, no Python dependency.
 
+- **M12.2 — Sign-in & organizations** (DL-0239). Real local sign-in for the console.
+  - `dp_user`, `dp_membership`, `dp_console_session` (migration `0037`, a new chain after the
+    events chain; real FKs to the M11 `org`). Passwords are stored as stdlib scrypt hashes and
+    session tokens as SHA-256; nothing is stored in plaintext.
+  - `/v1/console/auth/{signup,login,logout}`, `/v1/console/me`, `/v1/console/organizations`,
+    `/v1/console/session/organization`, `/v1/console/organization` (+ `/members`). The session is
+    an `HttpOnly; SameSite=Strict` cookie, `Secure` outside `APP_ENV=dev`, with absolute and idle
+    expiry and server-side revocation. Mutations require `x-voxvoice-console: 1` (CSRF). Sign-in
+    is throttled. The role matrix is enforced server-side.
+  - Sign-up policy `VOXVOICE_CONSOLE_SIGNUP=first_run|open|closed` (default `first_run`: the first
+    local account only). `python -m api.console.bootstrap_owner` attaches an owner to an M11 org
+    or creates an account while sign-up is closed. Nothing creates a user at startup.
+  - Console: sign-in, first-run sign-up, organization onboarding, organization switcher,
+    sign-out, and Settings (account, organization with owner-only rename, members, new
+    organization). No browser storage is used. 29 console tests.
+  - `/v1/console/meta` is at revision `m12.2`, with capability `identity` and a `signup` block.
+    Validation errors on `/v1/console/*` use the console envelope. M11 bodies are unchanged.
+  - No new dependency (Python or npm). No pre-`v4.0.0` `api/` file modified. The developer API
+    and the M11 runtime are unchanged.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),

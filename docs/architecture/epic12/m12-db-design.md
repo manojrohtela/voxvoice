@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.1). **Design only**: M12.1 creates no table and no migration. Each table lands in the milestone named, with its migration and tests. |
+| **Status** | Living (M12.2). §3.1–§3.3 are **implemented** (migration `0037`, `api/console/persistence/`). §3.4–§3.5 are design, and each lands in the milestone named. |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP1 · [LLD](m12-lld.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -38,7 +38,7 @@
 
 ## 3. New tables
 
-### 3.1 `dp_user` (M12.2)
+### 3.1 `dp_user` (M12.2) ✅
 
 A person who signs in to the console. Distinct from Epic 8's `cp_user`, which has no credential
 and lives in a disjoint tenancy graph (DL-0235).
@@ -53,7 +53,7 @@ and lives in a disjoint tenancy graph (DL-0235).
 | `created_at` / `updated_at` | timestamptz | |
 | `last_login_at` | timestamptz null | |
 
-### 3.2 `dp_membership` (M12.2)
+### 3.2 `dp_membership` (M12.2) ✅
 
 A user's role in an organization. Many-to-many from day one, so team support is additive.
 
@@ -67,7 +67,10 @@ A user's role in an organization. Many-to-many from day one, so team support is 
 | `created_at` | timestamptz | |
 | | **unique** `(org_id, user_id)` | one membership per user per org |
 
-### 3.3 `dp_console_session` (M12.2)
+### 3.3 `dp_console_session` (M12.2) ✅
+
+`org_id` is nullable: a user whose last membership was removed still has a session that can
+create or choose an organization.
 
 Server-side console sessions. They are revocable, which a JWT is not.
 

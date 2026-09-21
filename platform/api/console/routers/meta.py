@@ -12,16 +12,21 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from sqlmodel import Session as DBSession
 
+from ...db import get_session
+from ..config import ConsoleSettings
 from ..errors import NotFound
+from ..identity.deps import console_settings
+from .auth import signup_available
 
 #: The console API revision. The console compares it with the one it was built for.
-CONSOLE_API_REVISION = "m12.1"
+CONSOLE_API_REVISION = "m12.2"
 
 #: Capabilities the console API implements at this revision.
-CAPABILITIES: tuple[str, ...] = ("runtime.status",)
+CAPABILITIES: tuple[str, ...] = ("runtime.status", "identity")
 
 router = APIRouter(prefix="/v1/console", tags=["console"])
 
@@ -32,22 +37,37 @@ class RuntimeDescription(BaseModel):
     ice_policy: str
 
 
+class SignupDescription(BaseModel):
+    #: `first_run` | `open` | `closed` (the configured policy)
+    mode: str
+    #: whether a sign-up would be accepted right now
+    available: bool
+
+
 class ConsoleMeta(BaseModel):
     api_version: Literal["v1"] = "v1"
     console_api_revision: str
     runtime: RuntimeDescription
     capabilities: list[str]
     console_bundle: bool
+    signup: SignupDescription
 
 
 @router.get("/meta", response_model=ConsoleMeta)
-def get_meta(request: Request) -> ConsoleMeta:
+def get_meta(
+    request: Request,
+    db: DBSession = Depends(get_session),
+    settings: ConsoleSettings = Depends(console_settings),
+) -> ConsoleMeta:
     state = request.app.state
     return ConsoleMeta(
         console_api_revision=CONSOLE_API_REVISION,
         runtime=state.console_runtime,
         capabilities=list(CAPABILITIES),
         console_bundle=state.console_bundle,
+        signup=SignupDescription(
+            mode=settings.signup, available=signup_available(db, settings)
+        ),
     )
 
 
@@ -68,6 +88,7 @@ __all__ = [
     "CONSOLE_API_REVISION",
     "ConsoleMeta",
     "RuntimeDescription",
+    "SignupDescription",
     "fallback_router",
     "router",
 ]

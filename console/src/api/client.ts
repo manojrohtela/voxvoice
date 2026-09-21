@@ -54,19 +54,35 @@ export function toApiError(status: number, body: unknown, headerRequestId?: stri
   return new ApiError(status, fallbackType, `Request failed (${status})`, headerRequestId);
 }
 
-export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+/** Sent on every console mutation; the server refuses mutations without it (CSRF guard). */
+export const CONSOLE_HEADER = "x-voxvoice-console";
+
+type Method = "GET" | "POST" | "PATCH";
+
+async function request<T>(
+  method: Method,
+  path: string,
+  options: { body?: unknown; signal?: AbortSignal; expectBody?: boolean } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (method !== "GET") headers[CONSOLE_HEADER] = "1";
+  if (options.body !== undefined) headers["content-type"] = "application/json";
+
   let response: Response;
   try {
     response = await fetch(path, {
+      method,
       credentials: "same-origin",
-      headers: { accept: "application/json" },
-      ...(signal ? { signal } : {}),
+      headers,
+      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
     throw new ApiError(0, "network", "Cannot reach the VoxVoice API. Is the server running?");
   }
 
+  if (response.status === 204 && options.expectBody === false) return undefined as T;
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
     throw toApiError(response.status, body, response.headers.get("x-request-id") ?? undefined);
@@ -75,4 +91,21 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
     throw new ApiError(response.status, "invalid_response", "The server returned an unreadable response");
   }
   return body as T;
+}
+
+export function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>("GET", path, signal ? { signal } : {});
+}
+
+export function postJson<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>("POST", path, body === undefined ? {} : { body });
+}
+
+export function patchJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>("PATCH", path, { body });
+}
+
+/** A mutation whose success is a `204 No Content`. */
+export function postNoContent(path: string): Promise<void> {
+  return request<void>("POST", path, { expectBody: false });
 }

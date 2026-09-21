@@ -46,6 +46,23 @@ curl -sS http://127.0.0.1:8000/v1/console/meta
 
 The response names the API version, the runtime transport, and the capabilities that exist now.
 
+## 3a. Create the first account
+
+On a fresh database the console's **Create the first account** page is open (`first_run`), and
+it closes as soon as one account exists. Nothing creates an account at startup.
+
+To give an organization created with `python -m api.bootstrap` its console owner, or to create
+accounts while sign-up is `closed`:
+
+```bash
+cd platform
+uv run python -m api.console.bootstrap_owner --email you@example.com --org <org_id>
+uv run python -m api.console.bootstrap_owner --email you@example.com --new-org "Local Dev"
+```
+
+The password is prompted for, or read with `--password-stdin`, and is never passed as an
+argument. `VOXVOICE_CONSOLE_SIGNUP=open|closed|first_run` sets the policy (see `.env.example`).
+
 ## 4. Start the console (dev)
 
 ```bash

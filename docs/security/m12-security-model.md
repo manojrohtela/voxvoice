@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.1). This is the model every Epic 12 milestone implements and tests against. §7 lists what is enforced as of M12.1. |
+| **Status** | Living (M12.2). This is the model every Epic 12 milestone implements and tests against. §7 lists what is enforced as of M12.2. |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP4 · Constitution §A11.2 · [SECURITY_POLICY](../../.voxvoice/SECURITY_POLICY.md) · [ADR-0049](../adr/ADR-0049-provider-credential-injection.md) · [API design](../apis/m12-api-design.md) |
 
@@ -76,17 +76,34 @@ Provider keys are read only by `EnvCredentialProvider` inside the composition ro
 | Console meta never leaks planted secrets | **M12.1** |
 | M11 route error bodies are unchanged under the console app | **M12.1** |
 | Console bundle serving refuses path traversal | **M12.1** |
-| Unauthenticated console calls → 401 envelope | M12.2 |
+| Unauthenticated console calls → 401 envelope | **M12.2 ✅** |
 | A user of org A reads/edits an org B agent → 404 | M12.3 |
 | A user of org A starts a Playground session on an org B agent → 404, and no session row is created | M12.4 |
 | A user of org A reads an org B conversation or events → 404 | M12.5 |
 | Analytics never aggregate across orgs | M12.6 |
 | A revoked API key → 401 on the developer API | M12.7 |
-| The viewer role cannot mutate. Mutation without the CSRF header → 403 | M12.2–M12.7 |
+| The viewer role cannot mutate. Mutation without the CSRF header → 403 | M12.2 ✅ (org rename, CSRF) → M12.7 |
 
-## 7. Enforced as of M12.1
+## 7. Enforced as of M12.2
 
-The console surface at M12.1 is `GET /v1/console/meta` (public, secret-free) and the optional
-static bundle. S2 and the three M12.1 tests in §6 are implemented. S1, S3, S4 and S5 hold
-trivially: M12.1 exposes no tenant data and adds no credential path. They become testable
-obligations from M12.2.
+* **S1**: the console authenticates with the `vv_console` cookie only. The console makes no
+  `localStorage`/`sessionStorage` write (a console test spies on `Storage.setItem`). The only
+  browser-held secret is the `HttpOnly` cookie, which JavaScript cannot read.
+* **S2**: responses are scanned in tests for `scrypt$`, the session token and the word
+  `password`. The database holds only scrypt hashes and SHA-256 token hashes, as verified against
+  a live database.
+* **S3**: the active organization exists only on the server-side session. No read takes a client
+  org id (tested with a spoofed `?org_id=`).
+* **S4**: selecting another tenant's organization and selecting a non-existent one produce the
+  same 404.
+* **S5 (console sessions)**: sign-out revokes server-side, and a copied cookie is refused
+  afterwards. Absolute and idle expiry, and disabling a user, all end live sessions. API-key
+  revocation is M12.7.
+* **CSRF**: every non-GET console route refuses a request without `x-voxvoice-console: 1`.
+* **Throttling**: per `(email, client)` in-process. It is not shared across processes, which is
+  recorded as a Stage-2 item.
+* **Credential separation**: a console session does not authenticate `/v1/agents`, and an
+  `x-api-key` does not authenticate `/v1/console/*` (both tested).
+
+The M12.1 obligations (meta secret-free, M11 error bodies unchanged, traversal refused) remain
+tested.

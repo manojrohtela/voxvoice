@@ -1,4 +1,4 @@
-"""The Developer Platform application (M12.1, ADR-0055 DP3).
+"""The Developer Platform application (M12.1–M12.2, ADR-0055 DP3).
 
     uvicorn "api.console.app:build_console_app" --factory --host 127.0.0.1 --port 8000
 
@@ -8,26 +8,36 @@
 the rendezvous registry, `/health`, and the developer API (`/v1/agents`, `/v1/sessions`,
 `/v1/webrtc/*`). A second application would need a second copy of that composition — and a
 deployment running both could end up with two controllers or two registries. So the console app
-**is** the WebRTC app, plus exactly three additions:
+**is** the WebRTC app, plus these additions:
 
-1. the console routers under `/v1/console/*`;
+1. the console routers under `/v1/console/*` (meta, identity, organizations);
 2. the console error handler, scoped to `ConsoleError` so M11's `{"detail": …}` bodies are
    untouched;
-3. optionally, the built console bundle under `/console/`.
+3. a startup step, run *after* the M11 lifespan has initialised the database, that applies the
+   developer-platform migrations (`dp_*`, from `0037`) and purges dead console sessions;
+4. optionally, the built console bundle under `/console/`.
 
 Nothing in `platform/api/` that existed at `v4.0.0` is modified (`E10-7`, DL-0226).
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from sqlmodel import Session as DBSession
+
+from ..db import engine as db_engine
 from ..webrtc.app import build_webrtc_app, resolve_ice_policy
 from ..webrtc.config import WebRTCSettings
 from .bundle import mount_console_bundle
 from .config import ConsoleSettings
 from .errors import register_console_error_handler
-from .routers import meta
+from .identity.service import purge_sessions
+from .identity.throttle import LoginThrottle
+from .persistence.migrations import upgrade_all
+from .routers import auth, meta, organizations
 
 
 def build_console_app(
@@ -44,6 +54,26 @@ def build_console_app(
     # is refused before any console surface exists.
     app = build_webrtc_app(webrtc_settings)
 
+    runtime_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(inner_app: FastAPI) -> AsyncIterator[None]:
+        # The M11 lifespan runs first and unchanged: it creates the M11 tables and the runtime
+        # controller. The console's own schema and housekeeping follow it.
+        async with runtime_lifespan(inner_app):
+            upgrade_all(db_engine)
+            with DBSession(db_engine) as db:
+                purge_sessions(db)
+                db.commit()
+            yield
+
+    app.router.lifespan_context = lifespan
+
+    app.state.console_settings = settings
+    app.state.console_app_env = webrtc_settings.app_env
+    app.state.console_login_throttle = LoginThrottle(
+        settings.login_max_failures, settings.login_failure_window_minutes * 60.0
+    )
     app.state.console_runtime = meta.RuntimeDescription(
         transport=webrtc_settings.transport,
         webrtc_signalling=webrtc_settings.signalling_enabled,
@@ -53,6 +83,8 @@ def build_console_app(
 
     register_console_error_handler(app)
     app.include_router(meta.router)
+    app.include_router(auth.router)
+    app.include_router(organizations.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:

@@ -66,12 +66,14 @@ def test_meta_describes_the_running_process(console: TestClient) -> None:
         },
         "capabilities": list(CAPABILITIES),
         "console_bundle": False,
+        "signup": response.json()["signup"],  # depends on accounts; asserted in the M12.2 suite
     }
+    assert response.json()["signup"]["mode"] == "first_run"
 
 
-def test_meta_capabilities_are_only_what_m12_1_implements() -> None:
+def test_meta_capabilities_are_only_what_is_implemented() -> None:
     # The console renders anything absent as "not yet available"; claiming more would fake it.
-    assert CAPABILITIES == ("runtime.status",)
+    assert CAPABILITIES == ("runtime.status", "identity")
 
 
 def test_meta_reports_signalling_when_the_wrapped_app_mounts_it() -> None:
