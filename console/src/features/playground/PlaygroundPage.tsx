@@ -54,6 +54,7 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
   const [log, setLog] = useState<{ at: string; message: string }[]>([]);
   const [muted, setMuted] = useState(false);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
+  const [lastSession, setLastSession] = useState<string | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const elapsed = useElapsed(state === "connected" ? connectedAt : null);
@@ -74,12 +75,16 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
   const start = () => {
     setLog([]);
     setDetail(null);
+    setLastSession(null);
     setMuted(false);
     const call = new VoiceCall(agentId, consoleCallBackend, environment, {
       onState: (next, why) => {
         setState(next);
         setDetail(why ?? null);
-        if (next === "connected") setConnectedAt(Date.now());
+        if (next === "connected") {
+          setConnectedAt(Date.now());
+          setLastSession(call.session);
+        }
       },
       onRemoteStream: (stream) => {
         if (audioRef.current) audioRef.current.srcObject = stream;
@@ -165,6 +170,11 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
             </button>
           )}
         </div>
+        {lastSession && !active ? (
+          <p className="note">
+            <Link to={`/conversations/${lastSession}`}>View this conversation</Link>
+          </p>
+        ) : null}
         <p className="note">
           Use headphones: on speakers the agent can hear itself. Speak, then pause, and the agent
           answers when you stop.
@@ -185,7 +195,7 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
             ))}
           </ol>
         )}
-        <p className="note">The transcript and per-turn latency of each call arrive with Conversations (M12.5).</p>
+        <p className="note">After the call, its transcript, per-turn latency and timeline are in Conversations.</p>
       </article>
     </div>
   );

@@ -25,6 +25,7 @@ downgrade to the loopback transport.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -33,7 +34,7 @@ from sqlmodel import Session as DBSession
 
 from ..db import engine as db_engine
 from ..db import init_db
-from ..models import Transcript
+from ..models import Session, Transcript
 from ..routers import agents, sessions, webrtc
 from .binding import RendezvousBindingController
 from .config import WebRTCConfigError, WebRTCSettings
@@ -41,16 +42,32 @@ from .rendezvous import RendezvousRegistry
 
 
 def _persist_transcript(session_id: str, role: str, text_value: str, is_final: bool) -> None:
-    """The same Control-Plane transcript sink the default app uses: FINAL items only."""
+    """The Control-Plane transcript sink: FINAL items only.
+
+    `ts` is **seconds since the session started** — what the `Transcript.ts` column has always
+    documented ("seconds offset within the call"). Until M12.5 this sink wrote `0.0` for every
+    item, so a transcript had no recoverable order (finding F-3): ids are random and SQL gives no
+    insertion order. The default app (`api/main.py`) is frozen and still writes `0.0`; its rows are
+    reported as unordered rather than guessed at."""
     if not is_final:
         return
     with DBSession(db_engine) as db:
-        db.add(Transcript(session_id=session_id, role=role, text=text_value, ts=0.0))
+        session = db.get(Session, session_id)
+        offset = 0.0
+        if session is not None and session.started_at is not None:
+            started = session.started_at
+            if started.tzinfo is None:  # SQLite returns naive values for the stored UTC instant
+                started = started.replace(tzinfo=UTC)
+            offset = max(0.0, (datetime.now(UTC) - started).total_seconds())
+        db.add(Transcript(session_id=session_id, role=role, text=text_value, ts=offset))
         db.commit()
 
 
 def build_controller(
-    settings: WebRTCSettings, registry: RendezvousRegistry, ice_policy: Any = None
+    settings: WebRTCSettings,
+    registry: RendezvousRegistry,
+    ice_policy: Any = None,
+    observability: Any = None,
 ) -> Any:
     """Assemble the runtime controller the configured transport calls for.
 
@@ -58,8 +75,13 @@ def build_controller(
     sanctioned wiring point, exactly as in `api/main.py`."""
     from bootstrap import build_session_controller
 
+    # `observability` (M12.5) is the Epic 10 plane a composition root may attach. It is passed
+    # only when given, so `None` leaves each builder's own default (`UNWIRED`) — the pre-M12.5
+    # composition exactly — and `api` names no `runtime` type (AR-14).
+    wired = {} if observability is None else {"observability": observability}
+
     if not settings.webrtc_enabled:
-        inner = build_session_controller(transcript_sink=_persist_transcript)
+        inner = build_session_controller(transcript_sink=_persist_transcript, **wired)
     else:
         # The real stack. The signalling channel is this app's own registry; the credentials come
         # from the ADR-0049 provider and nowhere else, and a missing one is a startup failure
@@ -78,6 +100,7 @@ def build_controller(
             media_endpoint=build_webrtc_media_endpoint(registry, ice_policy=ice_policy),
             tts_voice=settings.voice_id,
             transcript_sink=_persist_transcript,
+            **wired,
         )
     return RendezvousBindingController(inner, registry)
 
@@ -96,8 +119,13 @@ def resolve_ice_policy(settings: WebRTCSettings) -> Any:
         raise WebRTCConfigError(f"VOXVOICE_ICE_STUN_URLS: {exc}") from exc
 
 
-def build_webrtc_app(settings: WebRTCSettings | None = None) -> FastAPI:
-    """Assemble the WebRTC-capable Control Plane application."""
+def build_webrtc_app(
+    settings: WebRTCSettings | None = None, *, observability: Any = None
+) -> FastAPI:
+    """Assemble the WebRTC-capable Control Plane application.
+
+    `observability` (M12.5) is passed to the runtime controller unchanged; omitted, the app is
+    composed exactly as before."""
     settings = settings or WebRTCSettings.from_env()
     settings.validate()
     ice_policy = resolve_ice_policy(settings)  # refused at startup, never at call setup
@@ -107,7 +135,9 @@ def build_webrtc_app(settings: WebRTCSettings | None = None) -> FastAPI:
         init_db()
         registry = RendezvousRegistry()
         app.state.webrtc_rendezvous = registry if settings.signalling_enabled else None
-        app.state.session_controller = build_controller(settings, registry)
+        app.state.session_controller = build_controller(
+            settings, registry, observability=observability
+        )
         yield
 
     app = FastAPI(title="VoxVoice Platform (WebRTC)", version="0.1.0", lifespan=lifespan)

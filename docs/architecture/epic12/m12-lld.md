@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.4). §2–§5 (M12.1–M12.4) are **implemented**. §6–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
+| **Status** | Living (M12.5). §2–§6 (M12.1–M12.5) are **implemented**. §7–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
 | **Date** | 2026-09-21 |
 | **Related** | [HLD](m12-hld.md) · [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [DB design](m12-db-design.md) · [API design](../../apis/m12-api-design.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -246,22 +246,44 @@ browser (VoiceCall)                   api/console/routers/playground.py      M11
 * **Not in M12.4:** live transcripts and latency in the Playground (Conversations, M12.5; they need
   the event read path), barge-in (F-1), device selection.
 
-## 6. Conversations (M12.5)
+## 6. Conversations (M12.5) — implemented
 
-* **Spine wiring (F-2):** the console app composes the controller with
-  `build_observability_plane(durable=SqlDurableEventSpine(EventDatabase(url)))` at the composition
-  root (ADR-0050 SW2). The URL is the same System of Record. This adds no module and no producer.
-* **List** `GET /v1/console/conversations?agent_id&status&cursor&limit` → `session` rows for
-  `member.org.id`, newest first. Keyset cursor on `(started_at, id)`.
-* **Detail** `GET /v1/console/conversations/{id}` → session, plus a transcript ordered by
-  `evt_event.seq` (F-3), plus the per-turn `metric.turn` payloads, plus a lifecycle event timeline
-  (allow-listed types only: `session.*`, `turn.*`, `transcript.completed`, `interrupt.confirmed`,
-  `provider.*`, `runtime.error`). Raw internal payloads are not passed through. Each item is mapped
-  to a product view.
-* **Tenancy**: the session is fetched by `(id, org_id)`. Events are read by `session_id` **and**
-  filtered on `org_id`, so defence in depth holds even for a malformed row.
-* Transcript text is shown to members of the owning org only. Retention/redaction policy is
-  inherited from §A11.2 and is out of scope for Epic 12.
+Code: `api/console/conversations/service.py`, `api/console/routers/conversations.py`,
+`api/console/session_defaults.py`, the composition in `api/console/app.py`; M11 additions in
+`api/webrtc/app.py` (the observability passthrough and the transcript `ts`) and
+`bootstrap.build_real_session_controller` (an `observability` passthrough). Tests:
+`tests/test_console_conversations.py` and `console/src/features/conversations/`.
+
+* **Event log wired (F-2, ADR-0055 DP10):** the console app attaches `SqlDurableEventLog` over the
+  same `DATABASE_URL` through `build_observability_plane(durable=…, telemetry=True)`, and
+  `build_webrtc_app(observability=…)` passes it to either profile's controller. The `evt_*` tables
+  are created before the runtime starts. There is no outbox, no metric buffer, and no new producer
+  or event type.
+* **Audio endpointing (F-7, DP11):** `AudioEndpointingController` sets
+  `StartSessionRequest.audio_endpointing=True` on the real profile only (switchable). Evidence: the
+  same M11 conversation gives two metrics with no `voice_to_voice_ms` without it, and one complete
+  metric with it.
+* **Transcript order (F-3):** the WebRTC app's sink writes `ts` = seconds since `session.started_at`.
+  The read orders by `(ts, id)`. `transcript_ordered: false` when a session has ≥ 2 rows that are
+  all `0.0` (the frozen default app, and pre-M12.5 rows); their order is never guessed.
+* **List** `GET /v1/console/conversations?agent_id&status&cursor&limit`: `session` rows of the
+  session's organization, newest first, keyset cursor on `(started_at, id)`, `limit` ≤ 100.
+  Each row has the agent (name, or null if deleted), status, channel, `source`
+  (`console_playground` from session metadata, else `api`), times, `duration_s` (only when ended)
+  and `message_count` (final transcript rows).
+* **Detail** `GET /v1/console/conversations/{id}`: the summary, plus the transcript, plus
+  `turns` (from `metric.turn`: `voice_to_voice_ms`, `stages_ms` for endpoint/stt/llm/tts/egress,
+  `user_speech_ms`, and `unmeasured` stages; absent is never 0), plus `timeline` (allow-listed
+  lifecycle types with labels and offsets; engine detail such as token streams and routine
+  provider connect/disconnect is excluded), plus `events_recorded`. The raw payload and the
+  monotonic `at` instants are never returned.
+* **Tenancy:** the session is fetched by id and checked against the member's org (404 otherwise).
+  Events are read with **both** `session_id` and `org_id` predicates, using the same query shape as
+  `SqlDurableEventLog.read_session` and Epic 10's own `to_event` mapping, on the request's session.
+* **Linkage:** the Playground shows "View this conversation" after a call, and the agent editor
+  links to its conversations.
+* **Not in M12.5:** live (in-call) transcripts, recordings, search, retention/redaction policy,
+  and aggregate analytics (M12.6).
 
 ## 7. Analytics (M12.6)
 

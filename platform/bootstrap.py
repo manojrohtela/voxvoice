@@ -436,6 +436,7 @@ def build_real_session_controller(
     tts_voice: str,
     transcript_sink: TranscriptSink | None = None,
     llm_model: str | None = None,
+    observability: ObservabilityPlane = UNWIRED,
 ) -> SessionController:
     """Assemble the **real** provider stack: WebRTC + Deepgram + Silero + Groq + Cartesia.
 
@@ -454,6 +455,9 @@ def build_real_session_controller(
         credentials=credentials,
         tts_voice=tts_voice,
         llm_model=llm_model,
+        # M12.5: the Epic 10 attachments, passed straight through (ADR-0050 SW2). `UNWIRED` — the
+        # default — is exactly the pre-M12.5 composition.
+        observability=observability,
         **REAL_PROVIDER_PROFILE,
     )
 

@@ -131,6 +131,9 @@ describe("Playground", () => {
 
     expect(await screen.findByText("Call ended")).toBeTruthy();
     expect(browser.closed()).toBe(true);
+    expect(screen.getByRole("link", { name: "View this conversation" }).getAttribute("href")).toBe(
+      "/conversations/ses_1",
+    );
     await waitFor(() =>
       expect(fetchMock.mock.calls.some((c) => c[0] === "/v1/console/playground/sessions/ses_1/end")).toBe(true),
     );

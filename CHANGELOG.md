@@ -84,6 +84,22 @@ platform-baseline level (see `docs/releases/`).
   - No dependency added. No pre-`v4.0.0` `api/` file modified. The M11 runtime and developer API are
     unchanged.
 
+- **M12.5 — Conversations** (DL-0242, ADR-0055 Amendment 1). Persisted, ordered,
+  tenant-scoped call history.
+  - F-2: the console runtime writes Epic 10's durable log (`SqlDurableEventLog`, through
+    `build_observability_plane`; no outbox, no new producer or event type).
+    `build_webrtc_app(observability=…)` and `build_real_session_controller(observability=…)` are
+    additive passthroughs.
+  - F-3: the WebRTC app's transcript sink records seconds since session start (was always `0.0`);
+    legacy rows are reported unordered.
+  - F-7 (confirmed): on the product path each turn lost `voice_to_voice_ms` to an orphan metric.
+    `AudioEndpointingController` enables audio-driven endpointing on the real profile
+    (`VOXVOICE_CONSOLE_AUDIO_ENDPOINTING`).
+  - `/v1/console/conversations` (filters, keyset pagination) and `/{id}` (transcript, per-turn
+    latency, lifecycle timeline; unmeasured is never 0; no raw payloads). Console Conversations
+    list and detail, "View this conversation" from the Playground, "Conversations" from an agent.
+  - No dependency added. No pre-`v4.0.0` `api/` file or Epic 10 module modified.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),

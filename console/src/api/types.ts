@@ -2,7 +2,7 @@
 // (api/console/routers/meta.py and the M11 /health) and nothing more.
 
 /** The console API revision this build was written against (`/v1/console/meta`). */
-export const EXPECTED_CONSOLE_API_REVISION = "m12.4";
+export const EXPECTED_CONSOLE_API_REVISION = "m12.5";
 
 export interface RuntimeDescription {
   transport: string;
@@ -80,6 +80,42 @@ export interface AgentInput {
   language: string;
   llm_model: string | null;
   tts_voice: string | null;
+}
+
+/** A conversation is one M11 session (M12.5). */
+export interface ConversationSummary {
+  id: string;
+  agent: { id: string; name: string | null };
+  status: string;
+  channel: string;
+  source: "console_playground" | "api";
+  started_at: string | null;
+  ended_at: string | null;
+  duration_s: number | null;
+  message_count: number;
+}
+
+export interface ConversationPage {
+  data: ConversationSummary[];
+  next_cursor: string | null;
+}
+
+export interface TurnView {
+  turn: number | null;
+  status: string | null;
+  /** Null when the runtime could not measure it — never shown as 0. */
+  voice_to_voice_ms: number | null;
+  stages_ms: Partial<Record<"endpoint" | "stt" | "llm" | "tts" | "egress", number>>;
+  user_speech_ms: number | null;
+  unmeasured: string[];
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  transcript: { role: string; text: string; offset_s: number }[];
+  transcript_ordered: boolean;
+  turns: TurnView[];
+  timeline: { seq: number; type: string; label: string; turn: number | null; offset_s: number }[];
+  events_recorded: boolean;
 }
 
 /** `GET /health` — owned by the M11 WebRTC application, read as-is. */

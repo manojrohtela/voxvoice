@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.4). Rows marked ✅ and the M12.1 row are **implemented**. Other rows are **designed** and land in the milestone named. Every non-GET console route requires `x-voxvoice-console: 1`. |
+| **Status** | Living (M12.5). Rows marked ✅ and the M12.1 row are **implemented**. Other rows are **designed** and land in the milestone named. Every non-GET console route requires `x-voxvoice-console: 1`. |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP4/DP7 · [LLD](../architecture/epic12/m12-lld.md) · [Security model](../security/m12-security-model.md) |
 
@@ -56,8 +56,8 @@ session-creation contract. It resolves a console identity to an org and calls th
 | POST | `/v1/console/playground/rendezvous` | developer | **M12.4 ✅** | → `{rendezvous_id, signalling_token, expires_in_s}`. 503 `runtime_unavailable` when voice is not enabled. |
 | POST | `/v1/console/playground/sessions` | developer | **M12.4 ✅** | `{agent_id, rendezvous_id}` → frozen `create_webrtc_session`. Blocks until the peer is usable. 404 for another org's, an archived or a missing agent; 400 for an undeclared language; 502 `runtime_failed`. |
 | POST | `/v1/console/playground/sessions/{id}/end` | developer | **M12.4 ✅** | → frozen `end_session` (idempotent; 404 for another org's session) |
-| GET | `/v1/console/conversations` | viewer | M12.5 | keyset pagination |
-| GET | `/v1/console/conversations/{id}` | viewer | M12.5 | session + ordered transcript + turn metrics + lifecycle timeline |
+| GET | `/v1/console/conversations` | viewer | **M12.5 ✅** | `?agent_id&status&cursor&limit(≤100)`; newest first; `{data, next_cursor}` |
+| GET | `/v1/console/conversations/{id}` | viewer | **M12.5 ✅** | summary + `transcript` (+ `transcript_ordered`) + `turns` (from `metric.turn`; unmeasured is null, never 0) + `timeline` + `events_recorded` |
 | GET | `/v1/console/analytics/summary` | viewer | M12.6 | `?from&to&agent_id` |
 | GET | `/v1/console/analytics/latency` | viewer | M12.6 | voice-to-voice p50/p95 + `missing` count |
 | GET/POST | `/v1/console/api-keys` | admin | M12.7 | list / create (raw key returned once) |

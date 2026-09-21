@@ -10,6 +10,8 @@ import { AgentsPage } from "../features/agents/AgentsPage";
 import { SignInPage } from "../features/auth/SignInPage";
 import { SignUpPage } from "../features/auth/SignUpPage";
 import { CreateOrganizationPage } from "../features/onboarding/CreateOrganizationPage";
+import { ConversationDetailPage } from "../features/conversations/ConversationDetailPage";
+import { ConversationsPage } from "../features/conversations/ConversationsPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { PlaygroundPage } from "../features/playground/PlaygroundPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -21,6 +23,7 @@ import { NAVIGATION } from "./navigation";
 /** Implemented surfaces, by path. Everything else in NAVIGATION is "not yet available". */
 const IMPLEMENTED: Record<string, ComponentType> = {
   "/agents": AgentsPage,
+  "/conversations": ConversationsPage,
   "/playground": PlaygroundPage,
   "/settings": SettingsPage,
 };
@@ -48,6 +51,7 @@ export function App() {
             <Route index element={<OverviewPage />} />
             <Route path="agents/new" element={<AgentEditorPage />} />
             <Route path="agents/:agentId" element={<AgentEditorPage />} />
+            <Route path="conversations/:conversationId" element={<ConversationDetailPage />} />
             {NAVIGATION.filter((item) => item.path !== "/").map((item) => {
               const Page = IMPLEMENTED[item.path];
               return (

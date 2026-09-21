@@ -57,18 +57,27 @@ class ConsoleSettings:
     session_idle_minutes: int = 120
     login_max_failures: int = 10
     login_failure_window_minutes: int = 15
+    #: Start real-voice sessions with audio-driven endpointing (finding F-7). Applies only to the
+    #: WebRTC (real) profile, which registers the voice-activity provider it needs.
+    audio_endpointing: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> ConsoleSettings:
         source = os.environ if env is None else env
         raw_dist = source.get(CONSOLE_DIST_ENV, "").strip()
         raw_secure = source.get("VOXVOICE_CONSOLE_COOKIE_SECURE", "").strip()
+        raw_endpointing = source.get("VOXVOICE_CONSOLE_AUDIO_ENDPOINTING", "").strip()
         defaults = cls()
         return cls(
             dist_dir=Path(raw_dist) if raw_dist else None,
             signup=source.get("VOXVOICE_CONSOLE_SIGNUP", defaults.signup).strip(),
             cookie_secure=(
                 _bool(raw_secure, "VOXVOICE_CONSOLE_COOKIE_SECURE") if raw_secure else None
+            ),
+            audio_endpointing=(
+                _bool(raw_endpointing, "VOXVOICE_CONSOLE_AUDIO_ENDPOINTING")
+                if raw_endpointing
+                else defaults.audio_endpointing
             ),
             session_absolute_hours=_positive_int(
                 source.get("VOXVOICE_CONSOLE_SESSION_HOURS", str(defaults.session_absolute_hours)),

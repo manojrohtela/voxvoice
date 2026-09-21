@@ -237,6 +237,8 @@ export function AgentEditorPage() {
                 <Link to={`/playground?agent=${agent.data.id}`}>Talk to this agent</Link>
               </>
             ) : null}
+            {" · "}
+            <Link to={`/conversations?agent=${agent.data.id}`}>Conversations</Link>
           </p>
         ) : null}
       </header>

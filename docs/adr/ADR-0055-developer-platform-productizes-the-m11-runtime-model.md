@@ -5,6 +5,7 @@
 | **Status** | **ACCEPTED 2026-09-21** (M12.1). DP1 and DP8 were put to the Technical Owner as explicit choices at the M12.1 gate and ratified there; the rest follow from constraints already in force. |
 | **Kind** | Product-architecture ADR. **Amends no Part A section.** Adds one row to the §A14 responsibility map (`console/`, DP8), which §A12 allows as an additive extension point (a new Consumer). |
 | **Deciders** | Technical Owner |
+| **Amended** | Amendment 1 (M12.5): DP10 durable log without outbox, DP11 audio endpointing on the real path |
 | **Related** | [ADR-0003](ADR-0003-two-plane-architecture.md), [ADR-0021](ADR-0021-studio-consumer-and-management-surface.md) (Studio is a Consumer), [ADR-0043](ADR-0043-m10.13-certification.md) CD7 (`E10-7`), [ADR-0049](ADR-0049-provider-credential-injection.md), [ADR-0050](ADR-0050-epic10-spine-telemetry-metering-production-wiring.md), [ADR-0051](ADR-0051-epic11-certification-control-set.md), [ADR-0052](ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md), DL-0226, DL-0235, DL-0236, DL-0237; [Epic 12 HLD](../architecture/epic12/m12-hld.md) |
 
 ## Problem
@@ -169,3 +170,37 @@ CSRF discipline (R-E12-9).
 Each later Epic 12 milestone (plan: [epic12-implementation-plan.md](../roadmap/epic12-implementation-plan.md))
 builds inside DP1–DP9. Converging with Epic 8, team invitations, SSO, a public read API for
 events, telephony channels and billing are each additive, and each needs its own decision.
+
+## Amendment 1 — the console runtime's event log and endpointing (M12.5, 2026-09-21)
+
+**Status:** Accepted 2026-09-21 (M12.5, which the owner scoped to include F-2 and F-7). It is
+**additive**: DP1–DP9 are unchanged.
+
+**DP10 — The console composition attaches Epic 10's append-only log, not the outbox.**
+`api.console.app` builds `SqlDurableEventLog(EventDatabase(DATABASE_URL))` and passes it as the
+runtime's `durable` attachment through `bootstrap.build_observability_plane` (ADR-0050 **SW2**'s
+seam, unchanged), with `TurnLatencyTap` as the only `metric.turn` producer (SW9). It deliberately
+does **not** use `SqlDurableEventSpine`, which also writes an `evt_outbox` row per event:
+
+* no `DeliveryTransport` is deployed here, so every outbox row would stay `PENDING` for ever;
+* Conversations need history, and Epic 10 built `SqlDurableEventLog` for exactly *"a caller that
+  wants history without delivery state"*.
+
+Nothing in Epic 10 changes. Outbox, recovery and retention wiring (SW4–SW6) remain ADR-0050's, for
+the milestone that deploys a delivery transport. No metric buffer is attached (SW10/SW11: nothing
+pulls one here).
+
+**DP11 — Real-voice sessions use audio-driven endpointing, by composition (finding F-7).** The
+frozen `create_session` never sets `StartSessionRequest.audio_endpointing`, so the product path ran
+the segment-driven profile. Measured at M12.5: each turn's `metric.turn` lacked
+`voice_to_voice_ms`, and `speech_end` landed in an orphan second metric. `AudioEndpointingController`
+(a `SessionController` decorator, the same seam as `RendezvousBindingController`) sets it to `True`,
+changing nothing else. It is applied **only** to the real profile, which registers the
+voice-activity provider audio endpointing requires. `VOXVOICE_CONSOLE_AUDIO_ENDPOINTING=false`
+switches it off. **Risk:** this changes endpointing behaviour on the live path, which was not
+exercised with real providers at M12.5. The live run in `local-run.md` §7a is the check.
+
+**Also at M12.5 (F-3), recorded here because it touches M11's post-`v4.0.0` composition:** the
+WebRTC app's transcript sink now writes `Transcript.ts` as seconds since the session started, as
+the column documents, instead of `0.0`. The frozen default app still writes `0.0`; those sessions
+are reported as unordered.

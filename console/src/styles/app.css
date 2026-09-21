@@ -292,3 +292,16 @@ code {
 .button--left { margin-left: 0; }
 .call-log { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); font-size: 13px; }
 .call-log time { color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; margin-right: var(--space-2); }
+
+/* ── conversations (M12.5) ──────────────────────────────────────────── */
+.filters { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+.filters .form__field { min-width: 200px; }
+.table-card { padding: var(--space-3) var(--space-5); overflow-x: auto; }
+.table td a { color: var(--accent); }
+.transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.transcript__line { padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); max-width: 90%; }
+.transcript__line p { margin: var(--space-1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript__line--caller { background: var(--surface-sunken); justify-self: start; }
+.transcript__line--agent { background: var(--accent-soft); justify-self: end; }
+.transcript__who { font-weight: 600; font-size: 12px; }
+.transcript__at { margin-left: var(--space-2); color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
