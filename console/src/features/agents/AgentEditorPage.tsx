@@ -231,6 +231,12 @@ export function AgentEditorPage() {
         {agent.status === "ready" && agent.data ? (
           <p className="page__lede">
             <code>{agent.data.id}</code>
+            {agent.data.language_supported ? (
+              <>
+                {" · "}
+                <Link to={`/playground?agent=${agent.data.id}`}>Talk to this agent</Link>
+              </>
+            ) : null}
           </p>
         ) : null}
       </header>

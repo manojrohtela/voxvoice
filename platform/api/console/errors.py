@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -67,6 +67,37 @@ class RateLimited(ConsoleError):
 
 class RuntimeUnavailable(ConsoleError):
     type, status_code = "runtime_unavailable", 503
+
+
+class RuntimeFailed(ConsoleError):
+    """The runtime was reached and refused or failed to start the session (M12.4)."""
+
+    type, status_code = "runtime_failed", 502
+
+
+_TYPE_BY_STATUS = {
+    400: InvalidRequest,
+    401: Unauthenticated,
+    403: Forbidden,
+    404: NotFound,
+    409: Conflict,
+    429: RateLimited,
+    502: RuntimeFailed,
+    503: RuntimeUnavailable,
+}
+
+
+def from_http_exception(exc: HTTPException) -> ConsoleError:
+    """Re-express an error raised by a frozen M11 handler in the console's envelope.
+
+    The console calls those handlers as functions (ADR-0055 DP5), so their `HTTPException`s
+    surface inside console routes. Their `detail` strings are written for API consumers and are
+    safe to show; anything that is not a string is replaced by a generic message."""
+    kind = _TYPE_BY_STATUS.get(exc.status_code, ConsoleError)
+    message = exc.detail if isinstance(exc.detail, str) else "The request could not be completed"
+    error = kind(message)
+    error.status_code = exc.status_code
+    return error
 
 
 def request_id_for(request: Request) -> str:
@@ -120,8 +151,10 @@ __all__ = [
     "InvalidRequest",
     "NotFound",
     "RateLimited",
+    "RuntimeFailed",
     "RuntimeUnavailable",
     "Unauthenticated",
+    "from_http_exception",
     "register_console_error_handler",
     "request_id_for",
 ]

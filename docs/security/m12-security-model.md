@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.3). This is the model every Epic 12 milestone implements and tests against. §7 lists what is enforced as of M12.2. |
+| **Status** | Living (M12.4). This is the model every Epic 12 milestone implements and tests against. §7 lists what is enforced as of M12.2. |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP4 · Constitution §A11.2 · [SECURITY_POLICY](../../.voxvoice/SECURITY_POLICY.md) · [ADR-0049](../adr/ADR-0049-provider-credential-injection.md) · [API design](../apis/m12-api-design.md) |
 
@@ -78,7 +78,7 @@ Provider keys are read only by `EnvCredentialProvider` inside the composition ro
 | Console bundle serving refuses path traversal | **M12.1** |
 | Unauthenticated console calls → 401 envelope | **M12.2 ✅** |
 | A user of org A reads/edits an org B agent → 404 | **M12.3 ✅** (read, edit, archive; org id in a request body is ignored) |
-| A user of org A starts a Playground session on an org B agent → 404, and no session row is created | M12.4 |
+| A user of org A starts a Playground session on an org B agent → 404, and no session row is created | **M12.4 ✅** (also archived, missing and undeclared-language agents, foreign rendezvous, foreign session end; the browser receives only `{rendezvous_id, signalling_token, expires_in_s}`) |
 | A user of org A reads an org B conversation or events → 404 | M12.5 |
 | Analytics never aggregate across orgs | M12.6 |
 | A revoked API key → 401 on the developer API | M12.7 |

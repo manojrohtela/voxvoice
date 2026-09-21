@@ -154,6 +154,27 @@ curl -sS -X POST http://127.0.0.1:8000/v1/agents \
 
 6. Click **Hang up** when finished. That ends the session and releases the rendezvous.
 
+## 7a. Talk to it from the console (M12.4)
+
+The Developer Platform console does the same thing without handing an API key to the browser.
+Start the **console** app instead of the WebRTC app, in the shell with the credentials from §3:
+
+```bash
+cd console && npm ci && npm run build && cd ../platform
+export RUNTIME_TRANSPORT=webrtc DATABASE_URL=sqlite:///./voxvoice-local.db
+export VOXVOICE_CONSOLE_DIST="$(cd ../console/dist && pwd)"
+uv run uvicorn "api.console.app:build_console_app" --factory --host 127.0.0.1 --port 8000
+```
+
+1. Open **`http://localhost:8000/console/`**. On a fresh database, create the first account.
+2. **Agents → New agent.** The language list offers only what the recognizer supports (`en`).
+   Set **Model** to one your Groq account offers (see §6).
+3. **Talk to this agent** (or **Playground**), then **Start call**, and allow the microphone.
+4. Wait for **Connected** and the timer. Speak, then pause. **Hang up** when done.
+
+The browser receives only a single-purpose signalling token. The session is recorded with
+`source: console_playground`. With headphones on, the checks in §8 apply unchanged.
+
 ## 8. What to watch for
 
 | | |

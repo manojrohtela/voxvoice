@@ -2,7 +2,7 @@
 // (api/console/routers/meta.py and the M11 /health) and nothing more.
 
 /** The console API revision this build was written against (`/v1/console/meta`). */
-export const EXPECTED_CONSOLE_API_REVISION = "m12.3";
+export const EXPECTED_CONSOLE_API_REVISION = "m12.4";
 
 export interface RuntimeDescription {
   transport: string;

@@ -11,6 +11,7 @@ import { SignInPage } from "../features/auth/SignInPage";
 import { SignUpPage } from "../features/auth/SignUpPage";
 import { CreateOrganizationPage } from "../features/onboarding/CreateOrganizationPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
+import { PlaygroundPage } from "../features/playground/PlaygroundPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { UnavailablePage } from "../features/unavailable/UnavailablePage";
 import { AuthProvider, useAuth } from "./auth";
@@ -20,6 +21,7 @@ import { NAVIGATION } from "./navigation";
 /** Implemented surfaces, by path. Everything else in NAVIGATION is "not yet available". */
 const IMPLEMENTED: Record<string, ComponentType> = {
   "/agents": AgentsPage,
+  "/playground": PlaygroundPage,
   "/settings": SettingsPage,
 };
 

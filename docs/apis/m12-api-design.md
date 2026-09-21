@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.3). Rows marked ✅ and the M12.1 row are **implemented**. Other rows are **designed** and land in the milestone named. Every non-GET console route requires `x-voxvoice-console: 1`. |
+| **Status** | Living (M12.4). Rows marked ✅ and the M12.1 row are **implemented**. Other rows are **designed** and land in the milestone named. Every non-GET console route requires `x-voxvoice-console: 1`. |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) DP4/DP7 · [LLD](../architecture/epic12/m12-lld.md) · [Security model](../security/m12-security-model.md) |
 
@@ -53,9 +53,9 @@ session-creation contract. It resolves a console identity to an org and calls th
 | GET/PATCH | `/v1/console/agents/{id}` | viewer/developer | **M12.3 ✅** | name, system_prompt, first_message, language, llm_model, tts_voice, plus `language_supported`. PATCH changes only the fields sent. |
 | POST | `/v1/console/agents/{id}/archive` | developer | **M12.3 ✅** | archive, not delete (204) |
 | GET | `/v1/console/agents/options` | viewer | **M12.3 ✅** | `{languages, default_language}` as declared by the configured STT plugin. Models and voices are not listable offline, so they are free identifiers. |
-| POST | `/v1/console/playground/rendezvous` | developer | M12.4 | → `{rendezvous_id, signalling_token, expires_in_s}` |
-| POST | `/v1/console/playground/sessions` | developer | M12.4 | `{agent_id, rendezvous_id}` → frozen `create_webrtc_session` |
-| POST | `/v1/console/playground/sessions/{id}/end` | developer | M12.4 | → frozen `end_session` |
+| POST | `/v1/console/playground/rendezvous` | developer | **M12.4 ✅** | → `{rendezvous_id, signalling_token, expires_in_s}`. 503 `runtime_unavailable` when voice is not enabled. |
+| POST | `/v1/console/playground/sessions` | developer | **M12.4 ✅** | `{agent_id, rendezvous_id}` → frozen `create_webrtc_session`. Blocks until the peer is usable. 404 for another org's, an archived or a missing agent; 400 for an undeclared language; 502 `runtime_failed`. |
+| POST | `/v1/console/playground/sessions/{id}/end` | developer | **M12.4 ✅** | → frozen `end_session` (idempotent; 404 for another org's session) |
 | GET | `/v1/console/conversations` | viewer | M12.5 | keyset pagination |
 | GET | `/v1/console/conversations/{id}` | viewer | M12.5 | session + ordered transcript + turn metrics + lifecycle timeline |
 | GET | `/v1/console/analytics/summary` | viewer | M12.6 | `?from&to&agent_id` |
@@ -86,6 +86,7 @@ x-request-id: 3f1c…
 | `conflict` | 409 | e.g. email already registered, rendezvous already bound |
 | `rate_limited` | 429 | login throttling |
 | `runtime_unavailable` | 503 | runtime/signalling not configured |
+| `runtime_failed` | 502 | the runtime was reached and failed to start the session (M12.4) |
 | `internal` | 500 | anything unexpected. The message is generic. Detail goes to logs only. |
 
 Messages are written for the user and never include stack traces, SQL or provider responses.

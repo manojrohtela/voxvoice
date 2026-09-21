@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Living (M12.3). §2–§4 (M12.1–M12.3) are **implemented**. §5–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
+| **Status** | Living (M12.4). §2–§5 (M12.1–M12.4) are **implemented**. §6–§9 are **designed**, and each is implemented and re-verified in the milestone named. |
 | **Date** | 2026-09-21 |
 | **Related** | [HLD](m12-hld.md) · [ADR-0055](../../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [DB design](m12-db-design.md) · [API design](../../apis/m12-api-design.md) · [Security model](../../security/m12-security-model.md) |
 
@@ -201,25 +201,50 @@ cannot be verified without a live voice session. The ADR-0046 interrupt behaviou
 check, so the console hides the field instead of pretending it works (AR-25). `audio_endpointing`
 is not carried either (F-7).
 
-## 5. Playground (M12.4)
+## 5. Playground (M12.4) — implemented
+
+Code: `api/console/routers/playground.py`, `console/src/voice/call.ts` (`VoiceCall`),
+`console/src/features/playground/`. Tests: `tests/test_console_playground.py` (Python, including
+a real WebRTC call), `console/src/voice/call.test.ts`, and `Playground.test.tsx`.
 
 ```
-console (SDK core)                     api/console/playground.py            M11 (frozen, reused)
- 1 POST /v1/console/playground/rendezvous ─► current_member ─► RendezvousRegistry.reserve(org.id)
+browser (VoiceCall)                   api/console/routers/playground.py      M11 (frozen, reused)
+ 1 getUserMedia (on a click)
+ 2 POST /v1/console/playground/rendezvous ─► developer role ─► RendezvousRegistry.reserve(org.id)
    ◄─ {rendezvous_id, signalling_token, expires_in_s}
- 2 POST /v1/console/playground/sessions {agent_id, rendezvous_id}   (blocks until peer usable)
-                                        ─► agent owned & not archived?
-                                        ─► create_webrtc_session(body, request, org, db, registry)
-                                               └► create_session ─► SessionController.start
- 2' concurrently: GET /v1/webrtc/rendezvous/{id}/offer, POST …/answer   (x-signalling-token)
- 3 audio flows peer↔runtime; transcripts/events as M11
- 4 POST /v1/console/playground/sessions/{id}/end ─► end_session(session_id, org, db, controller)
+ 3 POST /v1/console/playground/sessions {agent_id, rendezvous_id}      (blocks until peer usable)
+                                         ─► agent in org, not archived, language declared?
+                                         ─► create_webrtc_session(…, metadata={source, started_by})
+                                                └► create_session ─► SessionController.start
+ 3' concurrently: GET  /v1/webrtc/rendezvous/{id}/offer   (x-signalling-token; 204 = not yet)
+                  POST /v1/webrtc/rendezvous/{id}/answer  (x-signalling-token)
+ 4 real audio both ways; the agent's voice plays in an <audio> element
+ 5 POST /v1/console/playground/sessions/{id}/end ─► end_session(…) ─► rendezvous released
 ```
 
-The browser holds only the signalling token (DP4). The SDK core ports the offer/answer loop from
-`client.html` and becomes the Playground's client. The same code later ships in `sdk/`.
-Microphone permission, device selection, mute and hang-up live in the SDK. Status (connecting,
-connected, failed, ended) comes from the peer connection state.
+* **One runtime.** Every route calls a frozen M11 function. There is no second signalling
+  channel, WebRTC implementation, session API or worker. The browser's offer/answer uses the
+  existing `/v1/webrtc/rendezvous/*` endpoints with the single-purpose token.
+* **Authorization (server-side, before the runtime is touched):** signed-in, `developer` role or
+  higher in the session's organization, and the CSRF header. The agent must belong to that
+  organization (otherwise 404), must not be archived (404), and must use a language the STT plugin
+  declares (400 with the reason). A foreign rendezvous is refused by the frozen `check_bindable`
+  (404). Ending a foreign session returns 404. The frozen handlers' `HTTPException`s are
+  re-expressed in the console envelope (`from_http_exception`); a runtime start failure is
+  `runtime_failed` (502).
+* **Voice not enabled:** without the signalling surface the routes answer 503
+  `runtime_unavailable` with the fix. The UI enables calling only when meta reports
+  `transport: webrtc` **and** signalling, and otherwise explains how to enable it.
+* **Recorded:** the session row's metadata is `{"source": "console_playground", "started_by": <user_id>}`,
+  for Conversations (M12.5).
+* **`VoiceCall`** (framework-free, dependency-injected, the future `sdk/` client core): state
+  machine `idle → requesting_microphone → reserving → connecting → connected → ending → ended |
+  failed`. A refused start fails at once instead of waiting out the 30 s offer deadline. Hanging
+  up while connecting ends a session that starts late, so nothing leaks. Peer `failed`/`closed`
+  reports "connection lost" and ends the session. Mute disables the microphone track. The session
+  is ended on `pagehide` (`fetch keepalive`, same-origin, with the CSRF header).
+* **Not in M12.4:** live transcripts and latency in the Playground (Conversations, M12.5; they need
+  the event read path), barge-in (F-1), device selection.
 
 ## 6. Conversations (M12.5)
 

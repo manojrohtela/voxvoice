@@ -109,3 +109,17 @@ export function patchJson<T>(path: string, body: unknown): Promise<T> {
 export function postNoContent(path: string): Promise<void> {
   return request<void>("POST", path, { expectBody: false });
 }
+
+/**
+ * A mutation that must survive the page going away (`pagehide`): `keepalive` lets the browser
+ * finish it after unload. Same-origin with the console header, so the CSRF guard still applies.
+ * Best effort by nature — the caller cannot observe the result.
+ */
+export function postOnUnload(path: string): void {
+  void fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    keepalive: true,
+    headers: { [CONSOLE_HEADER]: "1" },
+  }).catch(() => undefined);
+}

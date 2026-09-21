@@ -285,3 +285,10 @@ code {
   .agent-list__item { flex-direction: column; }
   .agent-list__meta { justify-items: start; }
 }
+
+/* ── playground (M12.4) ─────────────────────────────────────────────── */
+.call { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-4) 0; }
+.call__timer { font-family: var(--font-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
+.button--left { margin-left: 0; }
+.call-log { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); font-size: 13px; }
+.call-log time { color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; margin-right: var(--space-2); }

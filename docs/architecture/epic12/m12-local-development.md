@@ -87,6 +87,12 @@ uv run uvicorn "api.console.app:build_console_app" --factory --host 127.0.0.1 --
 `VOXVOICE_CONSOLE_DIST` must be an absolute path to a directory containing `index.html`, or the
 API refuses to start. Unset means the API serves no console (the default).
 
+## 5a. Real voice from the console
+
+Follow [local-run §7a](../../runtime/local-run.md#7a-talk-to-it-from-the-console-m124): the same
+console app with `RUNTIME_TRANSPORT=webrtc` and the provider credentials. Without them, the
+Playground explains that voice is not enabled and offers no call.
+
 ## 6. Checks (the same commands CI runs)
 
 ```bash

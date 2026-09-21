@@ -37,9 +37,9 @@ describe("Overview", () => {
 
     const journey = await screen.findByRole("article", { name: "Get started" });
     await within(journey).findAllByText("Available");
-    expect(within(journey).getAllByText("Available")).toHaveLength(2); // identity, agents
-    expect(within(journey).getByText("Arrives in M12.4")).toBeTruthy();
-    expect(within(journey).queryByText("Arrives in M12.3")).toBeNull();
+    expect(within(journey).getAllByText("Available")).toHaveLength(3); // identity, agents, playground
+    expect(within(journey).getByText("Arrives in M12.5")).toBeTruthy();
+    expect(within(journey).queryByText("Arrives in M12.4")).toBeNull();
   });
 
   it("warns when the server's console API revision differs from this build", async () => {
@@ -208,10 +208,10 @@ describe("Settings", () => {
 describe("Navigation", () => {
   it("routes an undeclared surface to the not-yet-available page, never to sample data", async () => {
     healthyApi();
-    renderAt("/playground");
+    renderAt("/conversations");
 
-    expect(await screen.findByRole("heading", { name: "Playground", level: 1 })).toBeTruthy();
-    expect(screen.getByText("Not yet available — arrives in M12.4")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Conversations", level: 1 })).toBeTruthy();
+    expect(screen.getByText("Not yet available — arrives in M12.5")).toBeTruthy();
   });
 
   it("badges undeclared surfaces as Soon and marks the current page", async () => {
@@ -222,7 +222,8 @@ describe("Navigation", () => {
     await within(nav).findAllByText("Soon");
     expect(within(nav).getByRole("link", { name: "Overview" }).getAttribute("aria-current")).toBe("page");
     expect(within(nav).getByRole("link", { name: "Settings" }).textContent).toBe("Settings");
-    expect(within(nav).getByRole("link", { name: /Playground/ }).textContent).toContain("Soon");
+    expect(within(nav).getByRole("link", { name: "Playground" }).textContent).toBe("Playground");
+    expect(within(nav).getByRole("link", { name: /Conversations/ }).textContent).toContain("Soon");
   });
 
   it("shows a not-found page for unknown paths", async () => {
@@ -252,5 +253,5 @@ describe("Navigation", () => {
 
 // Keep the fixture honest: the fake metadata is the server's shape at this revision.
 it("the fixture metadata matches this build's revision", () => {
-  expect(META.console_api_revision).toBe("m12.3");
+  expect(META.console_api_revision).toBe("m12.4");
 });

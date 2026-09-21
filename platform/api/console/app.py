@@ -10,7 +10,8 @@ the rendezvous registry, `/health`, and the developer API (`/v1/agents`, `/v1/se
 deployment running both could end up with two controllers or two registries. So the console app
 **is** the WebRTC app, plus these additions:
 
-1. the console routers under `/v1/console/*` (meta, identity, organizations, agents);
+1. the console routers under `/v1/console/*` (meta, identity, organizations, agents,
+   playground);
 2. the console error handler, scoped to `ConsoleError` so M11's `{"detail": …}` bodies are
    untouched;
 3. a startup step, run *after* the M11 lifespan has initialised the database, that applies the
@@ -38,7 +39,7 @@ from .errors import register_console_error_handler
 from .identity.service import purge_sessions
 from .identity.throttle import LoginThrottle
 from .persistence.migrations import upgrade_all
-from .routers import agents, auth, meta, organizations
+from .routers import agents, auth, meta, organizations, playground
 
 
 def _declared_agent_languages(webrtc_settings: WebRTCSettings) -> tuple[str, ...]:
@@ -102,6 +103,7 @@ def build_console_app(
     app.include_router(auth.router)
     app.include_router(organizations.router)
     app.include_router(agents.router)
+    app.include_router(playground.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:

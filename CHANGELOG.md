@@ -66,6 +66,24 @@ platform-baseline level (see `docs/releases/`).
   - No dependency added. No pre-`v4.0.0` `api/` file modified. The developer API and runtime are
     unchanged.
 
+- **M12.4 — Real Playground** (DL-0241). Talk to an agent from the console over the one M11
+  voice path.
+  - `/v1/console/playground/{rendezvous, sessions, sessions/{id}/end}` call the frozen
+    `RendezvousRegistry.reserve`, `create_webrtc_session` and `end_session`. The browser answers the
+    offer on the existing `/v1/webrtc/rendezvous/*` with only the single-purpose token. There is no
+    second WebRTC path, signalling channel, session API or runtime.
+  - Server-side checks: signed-in, developer role, CSRF header, agent in the session's
+    organization, not archived, language declared. Foreign rendezvous and sessions are refused.
+    Sessions are tagged `source: console_playground`, `started_by`.
+  - `console/src/voice/call.ts` (`VoiceCall`): a framework-free port of the proven `client.html`
+    flow, failing fast on a refused start and never leaking a late session. Also the Playground
+    page (agent picker, start/hang up/mute, timer, connection log, "voice not enabled"
+    explanation) and "Talk to this agent" from the agent editor.
+  - A real WebRTC call (a genuine aiortc peer, real SDP/ICE/DTLS/RTP) runs through the console
+    routes in the test suite. Console API revision `m12.4`, capability `playground`.
+  - No dependency added. No pre-`v4.0.0` `api/` file modified. The M11 runtime and developer API are
+    unchanged.
+
 ### Fixed
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),
