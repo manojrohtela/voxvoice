@@ -42,7 +42,7 @@ from .errors import register_console_error_handler
 from .identity.service import purge_sessions
 from .identity.throttle import LoginThrottle
 from .persistence.migrations import upgrade_all
-from .routers import agents, auth, conversations, meta, organizations, playground
+from .routers import agents, analytics, auth, conversations, meta, organizations, playground
 from .session_defaults import AudioEndpointingController
 
 
@@ -146,6 +146,7 @@ def build_console_app(
     app.include_router(agents.router)
     app.include_router(playground.router)
     app.include_router(conversations.router)
+    app.include_router(analytics.router)
     app.include_router(meta.fallback_router)  # last among console routers
 
     if settings.dist_dir is not None:

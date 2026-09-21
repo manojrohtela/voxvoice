@@ -80,7 +80,7 @@ Provider keys are read only by `EnvCredentialProvider` inside the composition ro
 | A user of org A reads/edits an org B agent → 404 | **M12.3 ✅** (read, edit, archive; org id in a request body is ignored) |
 | A user of org A starts a Playground session on an org B agent → 404, and no session row is created | **M12.4 ✅** (also archived, missing and undeclared-language agents, foreign rendezvous, foreign session end; the browser receives only `{rendezvous_id, signalling_token, expires_in_s}`) |
 | A user of org A reads an org B conversation or events → 404 | **M12.5 ✅** (list and detail; events filed under a foreign `org_id` with the same session id are excluded; raw payloads are never returned) |
-| Analytics never aggregate across orgs | M12.6 |
+| Analytics never aggregate across orgs | **M12.6 ✅** (all four endpoints: counts, turns, series and per-agent figures of org A exclude org B, including events filed under the wrong `org_id` in either direction. Another org's `agent_id` gets the same 404 as a missing one. An `org_id`/`organization_id` query parameter is ignored. Every role reads, and a signed-out caller gets 401) |
 | A revoked API key → 401 on the developer API | M12.7 |
 | The viewer role cannot mutate. Mutation without the CSRF header → 403 | M12.2 ✅ (org rename, CSRF) → M12.7 |
 

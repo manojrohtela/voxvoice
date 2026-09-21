@@ -2,7 +2,7 @@
 // (api/console/routers/meta.py and the M11 /health) and nothing more.
 
 /** The console API revision this build was written against (`/v1/console/meta`). */
-export const EXPECTED_CONSOLE_API_REVISION = "m12.5";
+export const EXPECTED_CONSOLE_API_REVISION = "m12.6";
 
 export interface RuntimeDescription {
   transport: string;
@@ -116,6 +116,86 @@ export interface ConversationDetail extends ConversationSummary {
   turns: TurnView[];
   timeline: { seq: number; type: string; label: string; turn: number | null; offset_s: number }[];
   events_recorded: boolean;
+}
+
+// ── analytics (M12.6) — contract: docs/architecture/epic12/m12-analytics-definitions.md ──
+
+export type AnalyticsPreset = "today" | "7d" | "30d";
+
+/** What the server resolved, echoed on every analytics response. Days are UTC. */
+export interface AnalyticsQuery {
+  range: {
+    preset: AnalyticsPreset | null;
+    first_day: string;
+    last_day: string;
+    start: string;
+    end: string;
+    timezone: "UTC";
+    bucket: "day";
+  };
+  filters: { agent_id: string | null; source: "playground" | "api" | null };
+}
+
+export interface AnalyticsSummary {
+  query: AnalyticsQuery;
+  conversations: {
+    total: number;
+    by_status: Record<string, number>;
+    by_source: Record<string, number>;
+    recorded: number;
+    not_recorded: number;
+  };
+  /** Averages are null when nothing was measured — never 0. */
+  duration: { measured: number; unmeasured: number; total_s: number | null; avg_s: number | null };
+  turns: { total: number; by_status: Record<string, number>; avg_per_conversation: number | null };
+}
+
+export interface LatencyFigure {
+  metric: string;
+  turns: number;
+  samples: number;
+  missing: number;
+  avg_ms: number | null;
+  min_ms: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  max_ms: number | null;
+}
+
+export interface LatencyReport {
+  query: AnalyticsQuery;
+  data: LatencyFigure[];
+}
+
+export interface SeriesBucket {
+  date: string;
+  conversations: number;
+  turns: number;
+  avg_duration_s: number | null;
+  voice_to_voice_samples: number;
+  voice_to_voice_p50_ms: number | null;
+}
+
+export interface SeriesReport {
+  query: AnalyticsQuery;
+  data: SeriesBucket[];
+}
+
+export interface AgentUsage {
+  id: string;
+  name: string | null;
+  archived: boolean;
+  conversations: number;
+  recorded: number;
+  turns: number;
+  avg_duration_s: number | null;
+  avg_turns_per_conversation: number | null;
+  voice_to_voice: LatencyFigure;
+}
+
+export interface AgentReport {
+  query: AnalyticsQuery;
+  data: AgentUsage[];
 }
 
 /** `GET /health` — owned by the M11 WebRTC application, read as-is. */

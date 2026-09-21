@@ -4,13 +4,13 @@ import type { ConsoleMeta, Health, Me } from "../api/types";
 
 export const META: ConsoleMeta = {
   api_version: "v1",
-  console_api_revision: "m12.5",
+  console_api_revision: "m12.6",
   runtime: {
     transport: "local",
     webrtc_signalling: false,
     ice_policy: "no ICE servers (explicit; host candidates only)",
   },
-  capabilities: ["runtime.status", "identity", "agents", "playground", "conversations"],
+  capabilities: ["runtime.status", "identity", "agents", "playground", "conversations", "analytics"],
   console_bundle: false,
   signup: { mode: "first_run", available: false },
 };

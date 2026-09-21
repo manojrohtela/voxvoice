@@ -204,3 +204,33 @@ exercised with real providers at M12.5. The live run in `local-run.md` §7a is t
 WebRTC app's transcript sink now writes `Transcript.ts` as seconds since the session started, as
 the column documents, instead of `0.0`. The frozen default app still writes `0.0`; those sessions
 are reported as unordered.
+
+## Amendment 2 — analytics is a query layer with a written contract (M12.6, 2026-09-21)
+
+**Status:** Accepted 2026-09-21 (M12.6). It is **additive**: DP1–DP11 are unchanged, and it makes
+DP6 precise for analytics.
+
+**DP12 — Analytics owns no data, and its definitions are a contract.**
+* **Ownership.** `api/console/analytics/` computes every figure per request from the M11 `session`
+  rows (the conversations, as in M12.5), `agent` and `dp_agent_state` (names, archive state), and
+  `metric.turn` plus `session.started` in `evt_event`. It adds **no table, event type, producer,
+  writer, buffer, index or migration**, and reads nothing from `MetricTurnBuffer`. A pre-aggregated
+  read model (`dp_turn_metric`, LLD §7) remains an option only if query cost demands it, and it
+  would be derived from the log, which stays the source of truth.
+* **Contract.** The figures, their populations and their null semantics are defined in
+  [`m12-analytics-definitions.md`](../architecture/epic12/m12-analytics-definitions.md). Changing a
+  definition is a contract change for the console and the future SDK.
+* **Missing is never 0.** Unmeasured latencies are excluded from statistics and counted as
+  `missing`. Unfinished conversations have no duration. Conversations the log did not observe have
+  unknown turns and are excluded from per-conversation averages. Statistics over nothing are
+  `null`. Counts of nothing are 0.
+* **Time.** UTC only: storage, query, range and buckets. Membership is by `session.started_at`,
+  half-open `[start, end)`. A conversation and all its turns belong to the UTC day it started.
+* **Turns are `metric.turn` records**, counted exactly as the conversation detail lists them. The
+  producer's latency semantics (ADR-0038/0047/0053) are used as-is. Analytics neither redefines nor
+  back-fills them (F-7: with audio endpointing off, a spoken exchange may be two records and may
+  have no voice-to-voice value).
+* **Not provided:** cost, tokens or provider usage (no authoritative metering exists), end reasons
+  (not recorded), and barge-in rates (F-1 is unresolved).
+* **Frozen boundary noted, not crossed.** The indexes that would bound the turn read on large logs
+  belong to frozen schemas (M11 `session`, Epic 10 `evt_event`). None is added at M12.6.

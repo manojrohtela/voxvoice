@@ -171,6 +171,9 @@ uv run uvicorn "api.console.app:build_console_app" --factory --host 127.0.0.1 --
    Set **Model** to one your Groq account offers (see §6).
 3. **Talk to this agent** (or **Playground**), then **Start call**, and allow the microphone.
 4. Wait for **Connected** and the timer. Speak, then pause. **Hang up** when done.
+5. **View this conversation** (M12.5): each turn should show a voice-to-voice value, which is the
+   live check of audio endpointing (F-7). Then open **Analytics** (M12.6) with **Today**: the
+   conversation, its turns and the same voice-to-voice values appear there. Days are UTC.
 
 The browser receives only a single-purpose signalling token. The session is recorded with
 `source: console_playground`. With headphones on, the checks in §8 apply unchanged.

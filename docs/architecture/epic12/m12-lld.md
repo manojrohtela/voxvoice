@@ -22,9 +22,10 @@ api/console/
 │   ├── views.py       identity response models (no secret is ever a field)                     [M12.2]
 │   ├── agents.py      console agent management over the runtime `agent` row                    [M12.3]
 ├── agents/            agent validation + tenant-scoped operations (service.py)                [M12.3]
+├── analytics/         metric.turn + session projections, per the definitions contract         [M12.6]
 │   ├── playground.py  rendezvous + session start/end from a console identity                   [M12.4]
 │   ├── conversations.py  list/detail projections                                               [M12.5]
-│   ├── analytics.py   metric.turn projections                                                  [M12.6]
+│   ├── analytics.py   summary · latency · timeseries · agents (read-only)                     [M12.6]
 │   └── api_keys.py    list · create (one-time reveal) · revoke                                 [M12.7]
 ├── identity/          users, password hashing, console sessions, membership, dependencies     [M12.2]
 ├── persistence/       dp_* SQLModel tables + migration chain from 0037                         [M12.2]
@@ -285,14 +286,29 @@ Code: `api/console/conversations/service.py`, `api/console/routers/conversations
 * **Not in M12.5:** live (in-call) transcripts, recordings, search, retention/redaction policy,
   and aggregate analytics (M12.6).
 
-## 7. Analytics (M12.6)
+## 7. Analytics (M12.6) — implemented
 
-A pure projection over `metric.turn` in `evt_event`, grouped per org, agent and time bucket:
-sessions, turns, session duration (from `session.started_at/ended_at`), and voice-to-voice
-p50/p95 (ADR-0038 / ADR-0053 semantics, `voice_to_voice_ms`). **A missing boundary is excluded
-from the percentile and counted as `missing`, never 0** (`E11-10`). No cost, no provider usage and
-no billing figures (R-E12-6). If query cost becomes a problem, a `dp_turn_metric` read model can be
-derived later with the event log remaining the source of truth. That is not planned now.
+Code: `api/console/analytics/service.py`, `api/console/routers/analytics.py`. Contract:
+[`m12-analytics-definitions.md`](m12-analytics-definitions.md). Tests:
+`tests/test_console_analytics.py` and `console/src/features/analytics/`.
+
+* A pure projection over `session` (the conversations), `agent`/`dp_agent_state`, and `metric.turn`
+  + `session.started` in `evt_event`: sessions, turns, session duration (from
+  `session.started_at/ended_at`), voice-to-voice and stage latency with `samples`, `missing` and
+  nearest-rank p50/p95 (ADR-0038 / ADR-0053 semantics, `voice_to_voice_ms`), per-day and per-agent
+  usage, and lifecycle and turn outcomes. **A missing boundary is excluded from every statistic and
+  counted as `missing`, never 0** (`E11-10`). No cost, no provider usage and no billing figures
+  (R-E12-6). No end reason (not recorded) and no barge-in rate (F-1).
+* `GET /v1/console/analytics/{summary, latency, timeseries, agents}`, `viewer`+. Shared parameters
+  `range=today|7d|30d` or `from/to` (UTC days, inclusive, ≤ 92), `agent_id` (404 when not the
+  organization's), `source=playground|api`. The resolved query is echoed on each response.
+  `analytics_today()` is the single clock (UTC), and a dependency so tests can pin it.
+* Reads: the conversation population, the turn population via `IN` (numeric fields extracted in
+  SQL), and the recorded marks. Arithmetic is done in Python because durations and percentiles are
+  not portable SQL across SQLite and Postgres. Measured at 45–140 ms for 5,000 conversations / 845,000
+  events on SQLite. The frozen-schema index finding is in the definitions document §6.
+* If query cost becomes a problem, a `dp_turn_metric` read model can be derived later, with the
+  event log remaining the source of truth. That is not planned now.
 
 ## 8. API keys (M12.7)
 

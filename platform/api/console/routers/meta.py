@@ -23,7 +23,7 @@ from ..identity.deps import console_settings
 from .auth import signup_available
 
 #: The console API revision. The console compares it with the one it was built for.
-CONSOLE_API_REVISION = "m12.5"
+CONSOLE_API_REVISION = "m12.6"
 
 #: Capabilities the console API implements at this revision.
 CAPABILITIES: tuple[str, ...] = (
@@ -32,6 +32,7 @@ CAPABILITIES: tuple[str, ...] = (
     "agents",
     "playground",
     "conversations",
+    "analytics",
 )
 
 router = APIRouter(prefix="/v1/console", tags=["console"])

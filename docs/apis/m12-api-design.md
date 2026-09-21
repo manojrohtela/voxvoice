@@ -58,13 +58,17 @@ session-creation contract. It resolves a console identity to an org and calls th
 | POST | `/v1/console/playground/sessions/{id}/end` | developer | **M12.4 ✅** | → frozen `end_session` (idempotent; 404 for another org's session) |
 | GET | `/v1/console/conversations` | viewer | **M12.5 ✅** | `?agent_id&status&cursor&limit(≤100)`; newest first; `{data, next_cursor}` |
 | GET | `/v1/console/conversations/{id}` | viewer | **M12.5 ✅** | summary + `transcript` (+ `transcript_ordered`) + `turns` (from `metric.turn`; unmeasured is null, never 0) + `timeline` + `events_recorded` |
-| GET | `/v1/console/analytics/summary` | viewer | M12.6 | `?from&to&agent_id` |
-| GET | `/v1/console/analytics/latency` | viewer | M12.6 | voice-to-voice p50/p95 + `missing` count |
+| GET | `/v1/console/analytics/summary` | viewer | **M12.6 ✅** | `?range=today\|7d\|30d` (default `7d`) **or** `?from&to` (UTC days, inclusive, ≤ 92), plus `&agent_id&source=playground\|api`. Returns conversation counts by status and source, recorded/not recorded, duration (measured/unmeasured/total/avg) and turns (total, by outcome, avg per recorded conversation). 404 for another org's or a missing agent. |
+| GET | `/v1/console/analytics/latency` | viewer | **M12.6 ✅** | same parameters. For `voice_to_voice` and each stage: `turns`, `samples`, `missing`, `avg/min/p50/p95/max_ms` (nearest-rank; all null without samples) |
+| GET | `/v1/console/analytics/timeseries` | viewer | **M12.6 ✅** | same parameters. One bucket per UTC day, including empty days: conversations, turns, avg duration, voice-to-voice samples and p50 |
+| GET | `/v1/console/analytics/agents` | viewer | **M12.6 ✅** | same parameters. Per agent with conversations in range: counts, avg duration, avg turns, voice-to-voice stats, `archived` |
 | GET/POST | `/v1/console/api-keys` | admin | M12.7 | list / create (raw key returned once) |
 | POST | `/v1/console/api-keys/{id}/revoke` | admin | M12.7 | |
 
 Collection responses use `{"data": [...], "next_cursor": "…" | null}`. Single resources return
-the object directly.
+the object directly. Analytics responses are computed reports, not collections: each carries the
+resolved `query` (range + filters) beside its figures, and none is paginated. Their definitions are
+[`m12-analytics-definitions.md`](../architecture/epic12/m12-analytics-definitions.md).
 
 ## 4. Error model
 

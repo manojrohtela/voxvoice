@@ -7,6 +7,7 @@ import { ErrorState } from "../components/ErrorState";
 import { Loading } from "../components/Loading";
 import { AgentEditorPage } from "../features/agents/AgentEditorPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
+import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { SignInPage } from "../features/auth/SignInPage";
 import { SignUpPage } from "../features/auth/SignUpPage";
 import { CreateOrganizationPage } from "../features/onboarding/CreateOrganizationPage";
@@ -23,6 +24,7 @@ import { NAVIGATION } from "./navigation";
 /** Implemented surfaces, by path. Everything else in NAVIGATION is "not yet available". */
 const IMPLEMENTED: Record<string, ComponentType> = {
   "/agents": AgentsPage,
+  "/analytics": AnalyticsPage,
   "/conversations": ConversationsPage,
   "/playground": PlaygroundPage,
   "/settings": SettingsPage,

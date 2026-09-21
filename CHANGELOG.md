@@ -99,6 +99,21 @@ platform-baseline level (see `docs/releases/`).
     latency, lifecycle timeline; unmeasured is never 0; no raw payloads). Console Conversations
     list and detail, "View this conversation" from the Playground, "Conversations" from an agent.
   - No dependency added. No pre-`v4.0.0` `api/` file or Epic 10 module modified.
+- **M12.6 — Analytics** (DL-0243, ADR-0055 Amendment 2). Read-only aggregates over the
+  conversation data, with a written contract
+  ([`m12-analytics-definitions.md`](docs/architecture/epic12/m12-analytics-definitions.md)).
+  - `GET /v1/console/analytics/{summary, latency, timeseries, agents}`: conversations by status
+    and source, recorded/unrecorded, duration, turns by outcome, voice-to-voice and stage latency
+    (`samples`, `missing`, avg/min/max, nearest-rank p50/p95), daily buckets including empty days,
+    per-agent usage including archived agents. Range `today|7d|30d` or `from/to` (UTC days).
+    Filters `agent_id` and `source`.
+  - Missing is never 0: unmeasured latency, unfinished conversations and unrecorded conversations
+    are reported as such. There is no cost, end-reason or barge-in figure, because the data does
+    not support one.
+  - Console Analytics page: summary, usage over time, latency table, agents and outcomes, each with
+    loading, empty and error states. No chart dependency.
+  - No table, event, writer, index, migration or dependency added. No pre-`v4.0.0` `api/` file or
+    Epic 10 module modified.
 
 ### Fixed
 
