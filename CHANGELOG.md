@@ -173,6 +173,18 @@ platform-baseline level (see `docs/releases/`).
     built SDK end to end (26 checks) including a browser `SignallingClient` exchange. **Visual
     validation was achieved for the first time** (earlier milestones could not sign in headlessly).
 
+- **M12.11 — Epic 12 certification** (DL-0248, ADR-0055 Amendment 5).
+  **Verdict: CERTIFIED WITH DOCUMENTED NON-BLOCKING RISKS.**
+  - `platform/tests/test_m12_certification.py`: the executable control set `E12-1…E12-10` (frozen
+    boundary, additive surface and import boundary, provider neutrality, read-only projections, one
+    credential class per operation, contract ≡ server, capability honesty, no weakened or skipped
+    M12 test, no committed credential or build output, and the record's own completeness).
+  - [`docs/testing/m12-certification.md`](docs/testing/m12-certification.md): the record — verdict,
+    control set, the M12.1…M12.10 matrix with evidence, security certification, architecture
+    consistency, evidence that could not be gathered, fifteen limitations each classified
+    blocking/non-blocking, Epic 11's `NOT CERTIFIED` dependency, release readiness, measurements.
+  - No feature, API, runtime, schema or frozen-file change: certification only.
+
 ### Fixed
 
 - **M12.10 — defects found by end-to-end hardening** (DL-0247).

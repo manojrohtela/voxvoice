@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🟢 M12.1, M12.1.1, M12.2, M12.3, M12.4, M12.5, M12.6, M12.7, M12.8, M12.9, M12.10 complete · Living plan |
+| **Status** | 🟢 M12.1, M12.1.1, M12.2, M12.3, M12.4, M12.5, M12.6, M12.7, M12.8, M12.9, M12.10, M12.11 complete · **Epic 12 CERTIFIED WITH DOCUMENTED NON-BLOCKING RISKS** (M12.11) · Living plan |
 | **Date** | 2026-09-21 |
 | **Related** | [ADR-0055](../adr/ADR-0055-developer-platform-productizes-the-m11-runtime-model.md) · [HLD](../architecture/epic12/m12-hld.md) · [LLD](../architecture/epic12/m12-lld.md) |
 
@@ -30,7 +30,7 @@ and would otherwise ship empty.
 | **M12.8** ✅ | Overview dashboard | `/v1/console/overview`, a composition of Agents, Conversations and Analytics (identical figures), with agent inventory, usage, latency snapshot, recent conversations, agent activity, deterministic attention items, runtime status and quick actions. Org-switch reload fixed across the console. | every tile is backed by a real endpoint, and Overview equals Analytics (tested) |
 | **M12.9** ✅ | SDK | `sdk/`: `@voxvoice/sdk` (agents, sessions, WebRTC server calls; `@voxvoice/sdk/signalling` for the browser), a contract snapshot of the server OpenAPI with drift tests, README and developer-docs sections. The browser `Call`, React hook and Python helper are deferred (ADR-0055 Amendment 4). | an application integrates with only an API key on its server (live SDK smoke, incl. revocation) |
 | **M12.10** ✅ | End-to-end hardening | the full local journey as an automated E2E test (loopback profile) plus a manual real-voice run, error paths, performance of the read paths. **Flows recorded by M12.9 to cover:** organization switching; API key create/list/revoke; SDK authentication; SDK foreign-org isolation; SDK revoked key; console vs developer API separation; Overview = Analytics; Playground → Conversation → Analytics → Overview; signed-out behaviour; role restrictions. | the journey passes from a fresh clone. **Done:** `tests/test_m12_e2e.py` (8 cross-product tests) + the `e2e/` harness (browser 72 checks incl. a real browser WebRTC call, SDK 26 checks). Five defects fixed, limitations classified: [m12-e2e.md](../testing/m12-e2e.md) |
-| M12.11 | Developer Platform certification | an `E12-*` control set in its own module (ADR-0051/0052 pattern), historical digests of Epics 9–11 re-verified | verdict recorded. No release unless separately authorized. |
+| **M12.11** ✅ | Developer Platform certification | `E12-1…E12-10` in `tests/test_m12_certification.py` (ADR-0055 Amendment 5), the [certification record](../testing/m12-certification.md), and the Epic 9/10/11 historical digests re-verified by the certification and freeze suites | **CERTIFIED WITH DOCUMENTED NON-BLOCKING RISKS.** Verdict recorded; no release, tag, push or SDK publication. |
 
 ## Standing gates (every milestone)
 

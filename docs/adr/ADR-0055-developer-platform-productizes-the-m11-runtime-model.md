@@ -295,3 +295,30 @@ helper).
   for `first_message`, `tts_voice` and `llm_model`. The server schema accepts `null` for every field,
   but storing it in a non-nullable column fails with `500` (verified). The server defect is left for a
   future API fix, not changed here.
+
+## Amendment 5 — the Epic 12 certification control set (M12.11, 2026-09-24)
+
+**Status:** Accepted 2026-09-24 (M12.11). It is **additive**: DP1–DP14 are unchanged.
+
+**DP15 — Epic 12 is certified against an executable control set, and certification is not release.**
+* **Control set `E12-1 … E12-10`**, a fresh namespace disjoint from Epic 9's, Epic 10's and Epic
+  11's (the ADR-0051 **CE1** rule), implemented in `platform/tests/test_m12_certification.py` and
+  recorded in [`docs/testing/m12-certification.md`](../testing/m12-certification.md). The controls
+  assert what a document cannot assert about itself: the frozen boundary, the additive surface and
+  its import boundary, provider neutrality, read-only projections, one credential class per
+  operation, the contract being the server's own, capability honesty, no weakened or skipped M12
+  test, no committed credential or build output, and the record's own completeness.
+* **Behavioural evidence is not duplicated.** Whether a call connects, a key stops working or the
+  Overview equals Analytics is owned by the milestone suites and the M12.10 journeys; the record
+  names them. The repository's standard is that a certification is *reproducible as tests, not a
+  one-off document* (M9.24's Definition of Done), and **CE3**: a control whose evidence cannot be
+  gathered fails rather than passes.
+* **Absence is recorded as absence.** No call with real speech providers has been executed, so no
+  claim about live voice is made anywhere in the record; Postgres and accessibility beyond names,
+  labels and overflow are likewise recorded as not executed.
+* **Certification ≠ release.** The verdict covers Epic 12's own correctness, isolation and honesty.
+  It does not make the platform live-ready: **Epic 11 remains `NOT CERTIFIED`** (`E11-12`
+  inconclusive, `E11-15` not executed), and the record states that dependency explicitly. Deploying,
+  tagging, publishing the SDK and merging stay outside Epic 12.
+* **Self-administered** (**CE9**), as Epic 11's was: the implementer wrote the controls. Recorded as
+  limitation `E12-LIM-1`; every control is executable and re-runnable by anyone.
