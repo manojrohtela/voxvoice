@@ -37,7 +37,9 @@ export class VoxVoiceClient {
     if (options.timeoutMs !== undefined && !(options.timeoutMs > 0)) {
       throw new TypeError("timeoutMs must be a positive number");
     }
-    const fetchImpl = options.fetch ?? globalThis.fetch;
+    // Bound to `globalThis`: a browser's `fetch` throws "Illegal invocation" when it is called as
+    // anything but a method of `window` (found by the M12.10 browser run; Node does not mind).
+    const fetchImpl = options.fetch ?? globalThis.fetch?.bind(globalThis);
     if (typeof fetchImpl !== "function") {
       throw new TypeError("no fetch implementation is available (Node.js 20.3 or later provides one)");
     }

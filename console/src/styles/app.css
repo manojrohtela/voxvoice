@@ -81,7 +81,9 @@ code {
 .content { padding: var(--space-6) var(--space-5); max-width: 1120px; width: 100%; }
 
 /* ── page ──────────────────────────────────────────────────────────── */
-.page { display: grid; gap: var(--space-5); }
+/* minmax(0, 1fr): without it a wide child (a code block, a table) sets the column's minimum width and the
+   whole page overflows horizontally on narrow screens (found by the M12.10 browser journey). */
+.page { display: grid; gap: var(--space-5); grid-template-columns: minmax(0, 1fr); }
 .page__header h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
 .page__lede { margin: var(--space-1) 0 0; color: var(--text-muted); max-width: 64ch; }
 
@@ -227,6 +229,11 @@ code {
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
 .table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+/* M12.10: cells had no horizontal gap, so a long unbreakable value (an email) ran into the next
+   column. Adjacent cells are separated; a cell holding such a value opts in to breaking it
+   (`.cell--break`), because breaking every cell anywhere also splits short words ("owne r"). */
+.table th + th, .table td + td, .table th + td, .table td + th { padding-left: var(--space-3); }
+.cell--break { overflow-wrap: anywhere; }
 
 .visually-hidden {
   position: absolute;

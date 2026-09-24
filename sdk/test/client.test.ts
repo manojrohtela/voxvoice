@@ -54,6 +54,22 @@ describe("configuration", () => {
   });
 });
 
+describe("the global fetch", () => {
+  // A browser's `fetch` refuses to run unless it is called on `window`; Node's does not care. The
+  // SDK must bind it, or every request from a browser fails with "Illegal invocation".
+  const browserLike = function (this: unknown, ...rest: Parameters<typeof fetch>) {
+    if (this !== globalThis) throw new TypeError("Illegal invocation");
+    void rest;
+    return Promise.resolve(json([]));
+  };
+
+  it("is used the way a browser requires", async () => {
+    vi.stubGlobal("fetch", browserLike);
+    await expect(new VoxVoiceClient({ apiKey: API_KEY, baseUrl: BASE_URL }).agents.list()).resolves.toEqual([]);
+    await expect(new SignallingClient({ baseUrl: BASE_URL, rendezvousId: "rdv_1", signallingToken: "tok" }).getOffer()).resolves.toEqual([]);
+  });
+});
+
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
 describe("requests", () => {

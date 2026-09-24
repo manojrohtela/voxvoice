@@ -60,3 +60,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# ── E2E harness output (M12.10): screenshots and reports, never committed ──
+e2e-out*/

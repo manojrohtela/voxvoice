@@ -32,7 +32,8 @@ export class SignallingClient {
 
   constructor(options: SignallingClientOptions) {
     if (!options?.signallingToken) throw new TypeError("signallingToken is required");
-    const fetchImpl = options.fetch ?? globalThis.fetch;
+    // Bound, because this client runs in a browser: see the note in `client.ts`.
+    const fetchImpl = options.fetch ?? globalThis.fetch?.bind(globalThis);
     if (typeof fetchImpl !== "function") throw new TypeError("no fetch implementation is available");
     this.#http = new Transport({
       baseUrl: normalizeBaseUrl(options.baseUrl),

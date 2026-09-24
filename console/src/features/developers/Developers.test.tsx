@@ -87,6 +87,32 @@ describe("API keys", () => {
     expect(fetchMock.mock.calls.every((c) => !String(c[0]).includes(SECRET))).toBe(true);
   });
 
+  it("sends one create request however fast the button is clicked", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = healthyApi({}, ME, {
+      "/v1/console/api-keys": () => json({ data: [] }),
+      "POST /v1/console/api-keys": async () => {
+        await gate;
+        return json({ ...KEY, key: SECRET }, 201);
+      },
+    });
+    renderAt("/developers");
+
+    fireEvent.change(await screen.findByLabelText("Label"), { target: { value: "billing" } });
+    const create = screen.getByRole("button", { name: "Create key" });
+    fireEvent.click(create);
+    fireEvent.click(create);
+    fireEvent.click(create);
+    await act(async () => release());
+
+    expect(await screen.findByRole("article", { name: "Copy your new key now" })).toBeTruthy();
+    const posts = fetchMock.mock.calls.filter((c) => c[0] === "/v1/console/api-keys" && c[1]?.method === "POST");
+    expect(posts).toHaveLength(1);
+  });
+
   it("leaves the key selectable when the clipboard is unavailable", async () => {
     stubClipboard(async () => {
       throw new Error("denied");

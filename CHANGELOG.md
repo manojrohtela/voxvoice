@@ -162,7 +162,31 @@ platform-baseline level (see `docs/releases/`).
     `sdk`.
   - No API, runtime, provider or frozen-file change.
 
+- **M12.10 — End-to-end hardening** (DL-0247). The M12 surfaces verified as one product; no
+  feature added.
+  - `platform/tests/test_m12_e2e.py`: the journey (sign-up → agent → real WebRTC call →
+    conversation → analytics → overview, with the same numbers throughout), key lifecycle and
+    revocation, credential separation, organization switching across every read surface, sign-out,
+    the role matrix, repeated submissions, and the failed-start path.
+  - `e2e/`: a harness running the product with a real WebRTC media path and deterministic speech
+    providers, a real Chrome driven over the DevTools protocol (72 checks, screenshots), and the
+    built SDK end to end (26 checks) including a browser `SignallingClient` exchange. **Visual
+    validation was achieved for the first time** (earlier milestones could not sign in headlessly).
+
 ### Fixed
+
+- **M12.10 — defects found by end-to-end hardening** (DL-0247).
+  - **The SDK could not run in a browser:** it called the global `fetch` unbound, which a browser
+    rejects with `Illegal invocation`; the SDK reported it as "Could not reach the VoxVoice API".
+    Bound in `client.ts` and `signalling.ts`, with a regression test.
+  - **Console tables** had no horizontal cell spacing, so a long email ran into the next column;
+    long values now wrap where they occur (`.cell--break`).
+  - **The Developer docs page overflowed horizontally** at 1024 px and below: a wide code block set
+    the page grid's minimum width (`minmax(0, 1fr)`).
+  - **A `/favicon.ico` 404 on every page load** (an empty `<link rel="icon">`).
+  - **Documentation:** `POST /v1/sessions` fails with `502` on a voice-enabled server rather than
+    starting an unjoinable session; corrected in the developer API contract, the SDK README and the
+    console docs.
 
 - **M12.1.1 — Epic 10 E10-7 historical counting** ([ADR-0052 Amendment 2](docs/adr/ADR-0052-certification-is-historical-not-a-permanent-tree-lock.md),
   DL-0238). E10-7 derived its `examined` digest input from the **live** count of `api/` changes

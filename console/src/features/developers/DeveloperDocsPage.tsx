@@ -25,7 +25,7 @@ const AGENTS: Endpoint[] = [
 ];
 
 const SESSIONS: Endpoint[] = [
-  { op: "POST /v1/sessions", what: "Start a session for an agent. Has no audio path for a caller; use WebRTC below." },
+  { op: "POST /v1/sessions", what: "Start a session with no audio path. On a voice-enabled server this fails with 502 — use WebRTC below." },
   { op: "GET /v1/sessions/{session_id}", what: "Status (active, ended, failed), times and your metadata." },
   { op: "GET /v1/sessions/{session_id}/transcript", what: "Final transcript lines with seconds since start." },
   { op: "POST /v1/sessions/{session_id}/end", what: "End the session. Safe to repeat." },

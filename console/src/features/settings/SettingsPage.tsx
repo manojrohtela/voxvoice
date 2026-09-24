@@ -80,7 +80,7 @@ function MembersCard() {
           <tbody>
             {members.data.map((member) => (
               <tr key={member.user_id}>
-                <td>
+                <td className="cell--break">
                   {member.display_name ? `${member.display_name} · ` : ""}
                   {member.email}
                 </td>

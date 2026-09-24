@@ -139,9 +139,14 @@ A **session** is one conversation between a caller and an agent.
 {"session_id": "ses_0e4f36c46805bb80c4e7a855", "engine": "voxvoice", "channel": "web", "web": null, "phone": null}
 ```
 
-`web` and `phone` are currently always `null`. To connect a caller's browser with audio, start the
-session through **`POST /v1/webrtc/sessions`** instead (§6). A session started with
-`POST /v1/sessions` has no way for a caller to join it. It is useful for testing your integration.
+`web` and `phone` are currently always `null`: this call connects no caller. What it does depends on
+the server:
+
+* **voice enabled** (the real WebRTC transport): there is nothing for the runtime to connect to, so
+  the call **fails with `502 "Runtime failed to start the session"`** and the session is recorded as
+  `failed`. Start voice sessions with **`POST /v1/webrtc/sessions`** (§6).
+* **voice not enabled**: it starts a session with no audio path, which is useful for exercising your
+  integration.
 
 **Session** (`GET /v1/sessions/{id}`):
 

@@ -61,7 +61,7 @@ An API key is not a speech, language-model or voice-provider key. You never need
 | `agents.get(id)` | `GET /v1/agents/{id}` |
 | `agents.update(id, body)` | `PATCH /v1/agents/{id}`: only the fields you send change. `null` clears `first_message`, `tts_voice`, `llm_model`. |
 | `agents.delete(id)` | `DELETE /v1/agents/{id}`: permanent |
-| `sessions.create(body)` | `POST /v1/sessions`: no caller can join this session (see WebRTC) |
+| `sessions.create(body)` | `POST /v1/sessions`: connects no caller. On a voice-enabled server it fails with `502`; use `webrtc.startSession` (below). |
 | `sessions.get(id)` | `GET /v1/sessions/{id}` |
 | `sessions.transcript(id)` | `GET /v1/sessions/{id}/transcript` |
 | `sessions.end(id)` | `POST /v1/sessions/{id}/end`: safe to repeat |

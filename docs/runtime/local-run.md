@@ -178,6 +178,13 @@ uv run uvicorn "api.console.app:build_console_app" --factory --host 127.0.0.1 --
 The browser receives only a single-purpose signalling token. The session is recorded with
 `source: console_playground`. With headphones on, the checks in §8 apply unchanged.
 
+## 7b. Driving the whole product automatically (M12.10)
+
+Without provider credentials you can still exercise every surface, including a **real** browser
+WebRTC call, with deterministic speech providers: see [`e2e/README.md`](../../e2e/README.md) and
+the results in [`docs/testing/m12-e2e.md`](../testing/m12-e2e.md). It is not a substitute for §7a:
+only a real spoken call exercises real providers.
+
 ## 8. What to watch for
 
 | | |
