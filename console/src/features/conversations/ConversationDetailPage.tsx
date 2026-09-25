@@ -90,37 +90,41 @@ function Detail({ c }: { c: ConversationDetail }) {
             {c.turns.length === 0 ? (
               <p className="note">No turn was completed in this session.</p>
             ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Turn</th>
-                    <th scope="col">Voice-to-voice</th>
-                    {STAGES.map((s) => (
-                      <th key={s.key} scope="col">
-                        {s.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {c.turns.map((turn, index) => (
-                    <tr key={index}>
-                      <td>
-                        {turn.turn ?? "—"}
-                        {turn.status && turn.status !== "completed" ? <span className="muted"> · {turn.status}</span> : null}
-                      </td>
-                      <td>
-                        <strong>{formatMs(turn.voice_to_voice_ms)}</strong>
-                      </td>
+              // Eight columns: wider than the content column between ~500 and ~770 px, so it
+              // scrolls inside its own box rather than pushing the page sideways (M12.12 defect 2).
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Turn</th>
+                      <th scope="col">Voice-to-voice</th>
                       {STAGES.map((s) => (
-                        <td key={s.key} className={turn.stages_ms[s.key] === undefined ? "muted" : undefined}>
-                          {formatMs(turn.stages_ms[s.key])}
-                        </td>
+                        <th key={s.key} scope="col">
+                          {s.label}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {c.turns.map((turn, index) => (
+                      <tr key={index}>
+                        <td>
+                          {turn.turn ?? "—"}
+                          {turn.status && turn.status !== "completed" ? <span className="muted"> · {turn.status}</span> : null}
+                        </td>
+                        <td>
+                          <strong>{formatMs(turn.voice_to_voice_ms)}</strong>
+                        </td>
+                        {STAGES.map((s) => (
+                          <td key={s.key} className={turn.stages_ms[s.key] === undefined ? "muted" : undefined}>
+                            {formatMs(turn.stages_ms[s.key])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <p className="note">Measured by the runtime on every turn. A stage it could not measure says so.</p>
           </article>

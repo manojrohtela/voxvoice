@@ -128,6 +128,19 @@ describe("Conversation detail", () => {
     expect(within(timeline).getByText("Session ended")).toBeTruthy();
   });
 
+  // M12.12 defect 2: the eight-column Turns table was the one wide table not contained by
+  // `.table-scroll`, so between ~500 and ~770 px it set the page's minimum width and the whole
+  // page scrolled sideways. Width itself is a layout property jsdom does not compute — the
+  // browser journey measures that at 768 and 500 px — so what is pinned here is the containment.
+  it("contains the wide turns table so it cannot scroll the page", async () => {
+    healthyApi({}, ME, { "/v1/console/conversations/ses_1": () => json(DETAIL) });
+    renderAt("/conversations/ses_1");
+
+    const turns = await screen.findByRole("article", { name: "Turns" });
+    const table = within(turns).getByRole("table");
+    expect(table.parentElement?.className).toBe("table-scroll");
+  });
+
   it("warns when the transcript order is unknown", async () => {
     healthyApi({}, ME, {
       "/v1/console/conversations/ses_1": () => json({ ...DETAIL, transcript_ordered: false }),

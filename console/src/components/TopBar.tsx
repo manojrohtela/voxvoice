@@ -4,9 +4,16 @@ import { useAuth, useMe } from "../app/auth";
 import { useConsoleMeta } from "../app/meta";
 import { StatusPill } from "./StatusPill";
 
+/**
+ * What the transport is, and nothing more (M12.12 defect 1).
+ *
+ * `/v1/console/meta` carries no provider information — deliberately, so that `api/**` never names
+ * a vendor (`E11-3`) — so the console cannot know whether the speech providers behind a WebRTC
+ * media path are the real ones or a test double. It must not imply that they are.
+ */
 export function transportLabel(transport: string): string {
-  if (transport === "webrtc") return "WebRTC · real providers";
-  if (transport === "local") return "Loopback · no real voice";
+  if (transport === "webrtc") return "WebRTC transport";
+  if (transport === "local") return "Loopback transport · no audio path";
   return transport;
 }
 

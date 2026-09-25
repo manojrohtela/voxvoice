@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { getJson, postOnUnload } from "../../api/client";
 import type { AgentView } from "../../api/types";
 import { useResource } from "../../api/useResource";
+import { useAuth } from "../../app/auth";
 import { useConsoleMeta } from "../../app/meta";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState } from "../../components/ErrorState";
@@ -11,6 +12,7 @@ import { Loading } from "../../components/Loading";
 import { StatusPill, type Tone } from "../../components/StatusPill";
 import { browserEnvironment, VoiceCall, type CallEnvironment, type CallState } from "../../voice/call";
 import { consoleCallBackend } from "./backend";
+import { canStartCalls } from "./roles";
 
 function loadAgents(signal: AbortSignal): Promise<{ data: AgentView[] }> {
   return getJson<{ data: AgentView[] }>("/v1/console/agents", signal);
@@ -203,9 +205,15 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
 
 export function PlaygroundPage({ environment = browserEnvironment() }: { environment?: CallEnvironment }) {
   const meta = useConsoleMeta();
+  // Read through the auth state rather than `useMe`: an unknown role is not a refused one, so
+  // nothing is offered and nothing is refused until the organization is known.
+  const { state } = useAuth();
+  const organization = state.status === "signed_in" ? state.me.organization : null;
   const agents = useResource(loadAgents);
   const voiceReady =
     meta.status === "ready" && meta.data.runtime.transport === "webrtc" && meta.data.runtime.webrtc_signalling;
+  const roleKnown = organization !== null;
+  const canCall = roleKnown && canStartCalls(organization.role);
 
   return (
     <section className="page">
@@ -213,11 +221,21 @@ export function PlaygroundPage({ environment = browserEnvironment() }: { environ
         <h1>Playground</h1>
         <p className="page__lede">Talk to an agent through the real runtime, from this browser.</p>
       </header>
-      {meta.status === "loading" || agents.status === "loading" ? <Loading /> : null}
-      {agents.status === "error" ? (
+      {/* Before anything else: a role that cannot start a call is never offered one, so the
+          browser is not asked for a microphone for a request the server will refuse. */}
+      {roleKnown && !canCall ? (
+        <EmptyState title="Only a developer, admin or owner can start calls">
+          <p>
+            Ask someone with one of those roles in {organization.name} to try an agent. You can
+            still read every <Link to="/conversations">conversation</Link> they have.
+          </p>
+        </EmptyState>
+      ) : null}
+      {!roleKnown || (canCall && (meta.status === "loading" || agents.status === "loading")) ? <Loading /> : null}
+      {canCall && agents.status === "error" ? (
         <ErrorState title="Could not load agents" error={agents.error} onRetry={agents.reload} />
       ) : null}
-      {meta.status === "ready" && !voiceReady ? (
+      {canCall && meta.status === "ready" && !voiceReady ? (
         <EmptyState title="Voice is not enabled on this server">
           <p>
             This server runs the <code>{meta.data.runtime.transport}</code> transport, which carries no real audio.
@@ -226,7 +244,7 @@ export function PlaygroundPage({ environment = browserEnvironment() }: { environ
           </p>
         </EmptyState>
       ) : null}
-      {voiceReady && agents.status === "ready" ? (
+      {canCall && voiceReady && agents.status === "ready" ? (
         <Playground agents={agents.data.data} environment={environment} />
       ) : null}
     </section>

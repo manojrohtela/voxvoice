@@ -376,6 +376,12 @@ export function OverviewPage() {
               server&apos;s environment. See <code>docs/runtime/local-run.md</code>.
             </p>
           ) : null}
+          {meta.status === "ready" && meta.data.runtime.transport === "webrtc" ? (
+            <p className="note">
+              The transport is all this server reports; it says nothing about which speech
+              providers are configured.
+            </p>
+          ) : null}
         </article>
 
         <article className="card" aria-labelledby="journey-heading">

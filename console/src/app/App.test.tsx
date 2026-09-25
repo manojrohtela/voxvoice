@@ -30,7 +30,7 @@ describe("Overview", () => {
 
     const runtime = await screen.findByRole("article", { name: "Runtime" });
     expect(await within(runtime).findByText("Healthy")).toBeTruthy();
-    expect(within(runtime).getByText("Loopback · no real voice")).toBeTruthy();
+    expect(within(runtime).getByText("Loopback transport · no audio path")).toBeTruthy();
     expect(within(runtime).getByText("Disabled")).toBeTruthy();
     expect(within(runtime).getByText(/RUNTIME_TRANSPORT=webrtc/)).toBeTruthy();
   });
@@ -45,6 +45,24 @@ describe("Overview", () => {
     expect(within(journey).getAllByText("Available")).toHaveLength(4);
     expect(within(journey).getByText("Arrives in M12.7")).toBeTruthy();
     expect(within(journey).queryByText("Arrives in M12.5")).toBeNull();
+  });
+
+  // M12.12 defect 1: the console labelled a WebRTC transport "WebRTC · real providers", although
+  // /v1/console/meta carries no provider information at all (it must not name a vendor, E11-3).
+  // It said "real providers" while the E2E harness was running scripted TTS. The transport is the
+  // only thing this metadata proves, and it is the only thing the console may say.
+  it("describes the transport without claiming anything about the providers", async () => {
+    healthyApi({ runtime: { ...META.runtime, transport: "webrtc", webrtc_signalling: true } });
+    renderAt("/");
+
+    const runtime = await screen.findByRole("article", { name: "Runtime" });
+    expect(await within(runtime).findByText("WebRTC transport")).toBeTruthy();
+    expect(
+      within(runtime).getByText(/says nothing about which speech providers are configured/),
+    ).toBeTruthy();
+    // Nowhere on the page — neither the top bar pill nor the runtime card — and in either theme,
+    // which is a matter of tokens rather than of text.
+    expect(document.body.textContent).not.toMatch(/real providers/i);
   });
 
   it("warns when the server's console API revision differs from this build", async () => {

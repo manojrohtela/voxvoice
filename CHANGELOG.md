@@ -187,6 +187,34 @@ platform-baseline level (see `docs/releases/`).
 
 ### Fixed
 
+- **M12.12A — frontend correctness and honesty, from the M12.12 audit.** The four defects that
+  audit found, and nothing else: no feature was added, no surface redesigned, no backend or
+  runtime behaviour changed, no dependency added.
+  - **The console claimed "real providers" on the evidence of the transport alone.** The top bar
+    and the Overview mapped `transport === "webrtc"` to "WebRTC · real providers", although
+    `/v1/console/meta` carries no provider information at all — deliberately, so that `api/**`
+    never names a vendor (`E11-3`). It displayed exactly that while the E2E harness ran scripted
+    TTS. The label is now "WebRTC transport" (and "Loopback transport · no audio path"), with a
+    note on the Overview saying the transport is all the server reports. Pinned by a component
+    test, a source guard and a browser check.
+  - **Conversation detail scrolled the page horizontally** between ~500 and ~770 px: its
+    eight-column Turns table was the one wide table not contained by `.table-scroll`, so it set
+    the page's minimum width (measured 775 px at a 768 px viewport). It now scrolls inside its own
+    box. The browser journey's responsive sweep was extended to 500 px and to the conversation
+    detail, conversations list and Playground — the pages whose absence hid this.
+  - **The Playground offered a `viewer` an enabled "Start call"**, took their microphone, and only
+    then met the server's `403`. It now states, before anything is attempted, that the role cannot
+    start calls — as Agents and API keys already did. The server remains the authorization
+    boundary and is unchanged; the gate is UX only.
+  - **Documentation claimed WCAG AA contrast** in `m12-frontend-architecture.md` while
+    `m12-certification.md` recorded contrast as NOT EXECUTED. Contrast has now been measured
+    against WCAG AA for the text tokens in both themes (the lowest pair is 4.79:1), and the
+    document states that, what remains untested (screen readers, keyboard-only journeys, other
+    browsers) and that **no WCAG conformance is claimed**.
+  - [`docs/testing/frontend-product-completeness-audit.md`](docs/testing/frontend-product-completeness-audit.md)
+    records the audit and this corrective pass. M12.11's certification is unaffected: none of the
+    four contradicted a control in `E12-1…E12-10`.
+
 - **M12.10 — defects found by end-to-end hardening** (DL-0247).
   - **The SDK could not run in a browser:** it called the global `fetch` unbound, which a browser
     rejects with `Illegal invocation`; the SDK reported it as "Could not reach the VoxVoice API".

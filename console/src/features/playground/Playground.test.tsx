@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 
-import type { AgentView } from "../../api/types";
+import type { AgentView, Me } from "../../api/types";
 import { AuthProvider } from "../../app/auth";
 import { MetaProvider } from "../../app/meta";
 import { ME, META, healthyApi, json } from "../../test/fakeApi";
@@ -23,6 +23,9 @@ const AGENT: AgentView = {
 };
 const LEGACY: AgentView = { ...AGENT, id: "agt_2", name: "Legacy", language: "en-IN", language_supported: false };
 const VOICE = { runtime: { ...META.runtime, transport: "webrtc", webrtc_signalling: true } };
+/** The same user in a role the server's matrix (LLD §3) does and does not allow to call. */
+const VIEWER: Me = { ...ME, organization: { ...ME.organization!, role: "viewer" } };
+const DEVELOPER: Me = { ...ME, organization: { ...ME.organization!, role: "developer" } };
 
 /** A browser whose microphone, peer and signalling fetch are all fakes that succeed. */
 function fakeBrowser(options: { mic?: "denied" } = {}): CallEnvironment & { closed: () => boolean } {
@@ -137,6 +140,39 @@ describe("Playground", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some((c) => c[0] === "/v1/console/playground/sessions/ses_1/end")).toBe(true),
     );
+  });
+
+  // M12.12 defect 3: a viewer was offered an enabled "Start call", the browser asked for their
+  // microphone, and only then did the server refuse with 403. The gate is UX only — the server
+  // stays the authorization boundary — but nothing should be attempted on a viewer's behalf.
+  it("offers a viewer no call, and attempts nothing on their behalf", async () => {
+    const fetchMock = healthyApi(VOICE, VIEWER, consoleRoutes());
+    const browser = fakeBrowser();
+    let microphoneAsked = false;
+    renderPlayground("/playground", {
+      ...browser,
+      getUserMedia: async (constraints) => {
+        microphoneAsked = true;
+        return browser.getUserMedia(constraints);
+      },
+    });
+
+    expect(await screen.findByText("Only a developer, admin or owner can start calls")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start call" })).toBeNull();
+    expect(screen.queryByLabelText("Agent")).toBeNull();
+    expect(microphoneAsked).toBe(false);
+    const attempted = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(attempted.some((path) => path.includes("/playground/rendezvous"))).toBe(false);
+    expect(attempted.some((path) => path.includes("/playground/sessions"))).toBe(false);
+    expect(attempted.some((path) => path.includes("/webrtc/"))).toBe(false);
+  });
+
+  it("still offers the call to a developer, whom the server allows", async () => {
+    healthyApi(VOICE, DEVELOPER, consoleRoutes());
+    renderPlayground("/playground", fakeBrowser());
+
+    expect(await screen.findByRole("button", { name: "Start call" })).toBeTruthy();
+    expect(screen.queryByText("Only a developer, admin or owner can start calls")).toBeNull();
   });
 
   it("says why a call could not start", async () => {

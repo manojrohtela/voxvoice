@@ -218,6 +218,21 @@ try {
   check("overview recent conversations link to the conversation", await evaluate(`[...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === ${JSON.stringify(conversationHref)})`));
   await screenshot("overview");
 
+  // The transport is the only thing /v1/console/meta proves. This server runs the real WebRTC
+  // transport with *deterministic* providers, so a page that claimed "real providers" here would
+  // be claiming something false about this very run (M12.12 defect 1).
+  check("no page claims real providers", !(await has("real providers")) && !(await has("no real voice")), await evaluate(`document.querySelector(".topbar .pill")?.textContent`));
+  check("the runtime card says what the transport is", await has("WebRTC transport"));
+  // The same wording in both themes: the label is text, the theme is only tokens.
+  for (const scheme of ["dark", "light"]) {
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
+    await go("/console/?range=today");
+    await waitFor(`__e2e.has("WebRTC transport")`, 10_000);
+    check(`${scheme} theme: transport label unchanged, no provider claim`, !(await has("real providers")));
+    await screenshot(`overview-${scheme}`);
+  }
+  await send("Emulation.setEmulatedMedia", { features: [] });
+
   // 7. API keys: create → shown once → Done → gone; docs.
   await go("/console/developers");
   await waitFor(`!!__e2e.control("Label")`);
@@ -282,9 +297,20 @@ try {
   // 9. Responsive: narrow desktop / tablet / phone on the data-heaviest pages (back in A).
   await evaluate(`(() => { const s = document.querySelector(".topbar select"); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(s, ${JSON.stringify(orgA)}); s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   await sleep(1000);
-  for (const width of [1024, 768, 390]) {
+  // 500 px, the conversation detail and the Playground were added in M12.12A: the sweep used to
+  // stop at four pages and three widths, which is how a Turns table that set a 775 px minimum
+  // width — and scrolled the whole page between ~500 and ~770 px — went unmeasured (defect 2).
+  for (const width of [1024, 768, 500, 390]) {
     await viewport(width);
-    for (const path of ["/console/?range=today", "/console/analytics?range=today", `/console/agents/${agentId}`, "/console/developers/docs"]) {
+    for (const path of [
+      "/console/?range=today",
+      "/console/analytics?range=today",
+      `/console/agents/${agentId}`,
+      "/console/developers/docs",
+      conversationHref ?? "/console/conversations",
+      "/console/conversations",
+      "/console/playground",
+    ]) {
       await go(path);
       await sleep(900);
       await a11y(`${width}px ${path}`);

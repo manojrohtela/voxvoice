@@ -83,9 +83,20 @@ component → useResource(fetcher) → api/client.ts → fetch('/v1/console/…'
 ## 5. Accessibility & responsiveness
 
 Semantic landmarks (`nav`, `main`, `header`). `aria-current="page"` on the active nav item.
-Visible focus rings. Status is conveyed with text as well as colour. Contrast meets WCAG AA in
-both themes. Desktop-first. Below 760 px the sidebar collapses into a top navigation row, and
-nothing scrolls horizontally.
+Visible focus rings. Status is conveyed with text as well as colour. Desktop-first. Below 760 px
+the sidebar collapses into a top navigation row, and a table wider than its column scrolls inside
+its own `.table-scroll` box rather than scrolling the page.
+
+**What has been tested, and what that means.** Accessible names, form labels and page-level
+horizontal overflow are checked on every page at 1440 / 1024 / 768 / 500 / 390 px by
+`e2e/browser.mjs`. **Colour contrast** was measured in M12.12 against WCAG AA for the text colour
+tokens in `tokens.css`, in both themes: every foreground/background pair used for text passes AA
+(the lowest is the `ok` status pill at 4.79:1); borders are decorative and never the sole
+indicator. That is a check of the declared tokens, not of every painted element.
+
+**No WCAG conformance is claimed.** Screen-reader output, a keyboard-only journey and browsers
+other than Chrome remain untested, as [the certification record](../../testing/m12-certification.md)
+states. Contrast passing is one criterion among many.
 
 ## 6. Serving
 
