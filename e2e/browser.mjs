@@ -174,6 +174,30 @@ try {
   check("agent in list", await waitFor(`__e2e.has(${JSON.stringify(A.agent)})`));
   await screenshot("agents");
 
+  // 3b. Starter templates (M12.13): gallery → preview → one ordinary agent, editable like any
+  // other. The template is product data, so what this proves is that "use" is just a create.
+  check("agents page offers the starter templates", await waitFor(`__e2e.has("Starter templates") && __e2e.has("VoxVoice demo assistant")`));
+  await evaluate(`[...document.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/console/agents/templates/voxvoice_demo").click()`);
+  check("template preview opens without creating anything", await waitFor(`__e2e.h1() === "VoxVoice demo assistant" && __e2e.has("Use this template")`, 10_000), await page());
+  check("preview shows the instructions the agent will start with", await evaluate(`(document.querySelector(".template-prompt")?.textContent ?? "").includes("You are a demonstration assistant for VoxVoice")`));
+  await screenshot("template-preview");
+  await a11y("template preview");
+  const agentsBefore = await evaluate(`fetch("/v1/console/agents").then((r) => r.json()).then((b) => b.data.length)`);
+  await click("Use this template");
+  check("use template → the normal agent editor", await waitFor(`/\\/console\\/agents\\/agt_/.test(location.pathname) && !!__e2e.control("Instructions")`, 10_000), await page());
+  const templateAgentId = (await page()).split("/").pop();
+  check("it created exactly one agent", (await evaluate(`fetch("/v1/console/agents").then((r) => r.json()).then((b) => b.data.length)`)) === agentsBefore + 1);
+  check("the agent carries the template's greeting, and is editable", await waitFor(`__e2e.control("Greeting")?.value.startsWith("Hi, VoxVoice here.")`));
+  await fill("Name", "Demo, renamed"); await click("Save changes");
+  await sleep(800);
+  await go(`/console/agents/${templateAgentId}`);
+  check("an agent from a template edits and persists like any other", await waitFor(`__e2e.control("Name")?.value === "Demo, renamed"`));
+  // The template is untouched by that edit: the next preview still shows its own values.
+  await go("/console/agents/templates/voxvoice_demo");
+  check("editing the agent did not change the template", await waitFor(`__e2e.h1() === "VoxVoice demo assistant"`, 10_000) && !(await has("Demo, renamed")));
+  await go("/console/agents");
+  await screenshot("agents-with-template");
+
   // 4. Playground: a real browser WebRTC call through the console (deterministic providers).
   await go(`/console/playground?agent=${agentId}`);
   check("playground preselects the agent", await waitFor(`document.getElementById("playground-agent")?.value === ${JSON.stringify(agentId)}`));
@@ -310,6 +334,9 @@ try {
       conversationHref ?? "/console/conversations",
       "/console/conversations",
       "/console/playground",
+      // M12.13: the template gallery (a card grid) and the preview (a long prompt in a <pre>).
+      "/console/agents",
+      "/console/agents/templates/sales_representative",
     ]) {
       await go(path);
       await sleep(900);

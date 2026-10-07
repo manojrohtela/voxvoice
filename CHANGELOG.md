@@ -185,6 +185,32 @@ platform-baseline level (see `docs/releases/`).
     blocking/non-blocking, Epic 11's `NOT CERTIFIED` dependency, release readiness, measurements.
   - No feature, API, runtime, schema or frozen-file change: certification only.
 
+### Added
+
+- **M12.13 — starter agent templates.** Eight ready-made starting points so the first agent is not
+  a blank form: Sales representative, Interviewer, Customer support, Receptionist, Lead qualifier,
+  Appointment assistant, FAQ assistant and a VoxVoice demo assistant.
+  - **No server code.** A template is product data, not a runtime concept: the definitions are
+    version-controlled JSON shipped with the console (`console/src/features/agents/templates.json`),
+    and "Use this template" calls the unchanged `POST /v1/console/agents`. No table, no endpoint,
+    no template runtime, no second agent model and no template permission.
+  - Each template sets only fields that reach the runtime — name, instructions, greeting and
+    language. Model and voice are left to the server default, because what a provider account
+    offers is deployment-specific; language is resolved at creation against the recognizer's
+    declared set rather than sending a value that would be refused.
+  - Templates are **immutable** and global; the agents they create are ordinary,
+    organization-owned and independent of each other. A `viewer` is not offered the action and is
+    still refused by the server, which remains the authorization boundary.
+  - `console/src/features/agents/`: `templates.json`, `templates.ts`, `TemplateGallery.tsx`
+    (a section on Agents) and `TemplatePreviewPage.tsx` (`/agents/templates/:id` — purpose,
+    starting settings, greeting and the whole system prompt, before anything is created).
+  - Tests: 36 console tests, 29 platform tests — including **every one of the eight completing a
+    real WebRTC call** through the frozen Playground path and appearing in Conversations,
+    Analytics and the Overview — and the browser journey extended through gallery → preview →
+    use → editor → edit → persists → template unchanged, with both template pages added to the
+    responsive sweep. Verified to fail when a template is broken.
+  - [`docs/testing/m12-agent-templates.md`](docs/testing/m12-agent-templates.md).
+
 ### Fixed
 
 - **M12.12A — frontend correctness and honesty, from the M12.12 audit.** The four defects that

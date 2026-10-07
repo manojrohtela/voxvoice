@@ -9,6 +9,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { Loading } from "../../components/Loading";
 import { StatusPill } from "../../components/StatusPill";
 import { canEditAgents } from "./roles";
+import { TemplateGallery } from "./TemplateGallery";
 
 function loadAgents(signal: AbortSignal): Promise<{ data: AgentView[] }> {
   return getJson<{ data: AgentView[] }>("/v1/console/agents", signal);
@@ -41,7 +42,7 @@ export function AgentsPage() {
         <EmptyState title="No agents yet">
           <p>
             {canEdit
-              ? "Create your first agent: give it instructions and a greeting, then talk to it in the Playground."
+              ? "Start from a template below, or create one from scratch: give it instructions and a greeting, then talk to it in the Playground."
               : "Nobody has created an agent in this organization yet."}
           </p>
         </EmptyState>
@@ -68,6 +69,8 @@ export function AgentsPage() {
           ))}
         </ul>
       ) : null}
+
+      <TemplateGallery />
     </section>
   );
 }

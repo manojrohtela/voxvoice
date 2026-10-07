@@ -7,6 +7,7 @@ import { ErrorState } from "../components/ErrorState";
 import { Loading } from "../components/Loading";
 import { AgentEditorPage } from "../features/agents/AgentEditorPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
+import { TemplatePreviewPage } from "../features/agents/TemplatePreviewPage";
 import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { ApiKeysPage } from "../features/developers/ApiKeysPage";
 import { DeveloperDocsPage } from "../features/developers/DeveloperDocsPage";
@@ -67,6 +68,7 @@ export function App() {
           <Route element={<Protected />}>
             <Route index element={<OverviewPage />} />
             <Route path="agents/new" element={<AgentEditorPage />} />
+            <Route path="agents/templates/:templateId" element={<TemplatePreviewPage />} />
             <Route path="agents/:agentId" element={<AgentEditorPage />} />
             <Route path="conversations/:conversationId" element={<ConversationDetailPage />} />
             <Route path="developers/docs" element={<DeveloperDocsPage />} />
