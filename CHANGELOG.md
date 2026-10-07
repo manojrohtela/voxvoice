@@ -187,6 +187,37 @@ platform-baseline level (see `docs/releases/`).
 
 ### Added
 
+- **M12.14 — Playground runtime diagnostics.** The Playground now shows what the runtime is
+  doing: the conversation as it is recorded, the runtime's current state, and a chronological log
+  of every event the session produced — during the call and after it.
+  - **A projection, not an infrastructure.** No new event type, store, bus, state machine or
+    transcript path, and **no runtime change**. Epic 10's durable log and M11's transcript rows
+    already hold the truth; `api/console/diagnostics/` renders them and one SSE endpoint
+    (`GET /v1/console/playground/sessions/{id}/diagnostics`) streams them.
+  - **Live and replay are the same read**, so they cannot disagree: a watcher asks for everything
+    after the `seq` it has seen, a reader of a finished call asks from 0. A dropped stream loses
+    nothing and resumes from its last `seq`.
+  - **Stage visibility is per-turn, by ruling.** There are no `stt.started`/`llm.started` events
+    and none was added: ADR-0038 **TP10** publishes stage boundaries once, after the turn is
+    terminal, because the in-process bus is synchronous run-to-completion. Durations for
+    `endpoint`, `stt`, `llm`, `tts` and `egress` arrive on `metric.turn` as each turn completes,
+    and a stage the runtime could not measure stays **absent, never 0** (E11-10).
+  - **Interim transcript is not shown** because nothing records it; the UI says so rather than
+    leaving a gap to guess at.
+  - **Redaction fails closed:** `data` is never passed through — each event type names the fields
+    it may contribute, every value is re-checked, and provider *names* are withheld (`capability`
+    carries the diagnostic value). Tested against secret-shaped values, nested payloads and
+    over-long strings.
+  - **Authorization is the Playground's:** `developer`+, so a `viewer` may read a conversation but
+    not the live runtime stream. Another organization's session is `404`, as it is in
+    Conversations.
+  - **A diagnostics failure is never a call failure** (DL-0013): if the stream drops the panel
+    reconnects; if `EventSource` is unavailable the call proceeds untouched.
+  - Tests: 30 platform, 27 console (including 5,000-event rendering staying bounded at 300 DOM
+    rows, reconnect/resume, and all eight M12.13 templates through the same path), plus the
+    browser journey.
+  - [`docs/testing/m12-runtime-diagnostics.md`](docs/testing/m12-runtime-diagnostics.md).
+
 - **M12.13 — starter agent templates.** Eight ready-made starting points so the first agent is not
   a blank form: Sales representative, Interviewer, Customer support, Receptionist, Lead qualifier,
   Appointment assistant, FAQ assistant and a VoxVoice demo assistant.

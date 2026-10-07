@@ -49,6 +49,7 @@ from .routers import (
     api_keys,
     auth,
     conversations,
+    diagnostics,
     meta,
     organizations,
     overview,
@@ -156,6 +157,7 @@ def build_console_app(
     app.include_router(organizations.router)
     app.include_router(agents.router)
     app.include_router(playground.router)
+    app.include_router(diagnostics.router)
     app.include_router(conversations.router)
     app.include_router(analytics.router)
     app.include_router(api_keys.router)

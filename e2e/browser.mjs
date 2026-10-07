@@ -65,7 +65,13 @@ async function waitFor(expression, timeoutMs = 10_000) {
 }
 let shot = 0;
 async function screenshot(name) {
-  const { data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+  // A tall page (the diagnostics log) can exceed Chrome's capture limit; fall back to the viewport.
+  let data;
+  try {
+    ({ data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true }));
+  } catch {
+    ({ data } = await send("Page.captureScreenshot", { format: "png" }));
+  }
   const file = `${String(++shot).padStart(2, "0")}-${name}.png`;
   writeFileSync(join(OUT, file), Buffer.from(data, "base64"));
   return file;
@@ -209,9 +215,28 @@ try {
   await screenshot("playground-connected");
   await a11y("playground (in call)");
   await click("Hang up");
+  // M12.14: while the call is up, the diagnostics stream is a view of the durable log.
+  check("live diagnostics arrive during the call", await waitFor(`__e2e.has("Diagnostics") && document.querySelectorAll(".diag__row").length > 0`, 20_000), await evaluate(`document.querySelectorAll(".diag__row").length + " rows"`));
+  check("runtime state is shown", await waitFor(`!!document.querySelector(".runtime-steps")`));
+  // Every rendered row is one of the runtime's own events — no invented label, no "unknown".
+  const KNOWN = ["Runtime started","Session started","Caller connected","Audio flowing","User speech detected","User speech stopped","End of speech confirmed","End of speech cancelled","Turn-taking decision","Turn started","Agent started speaking","Agent stopped speaking","Turn completed","Turn cancelled","Possible interruption","Caller interrupted","Interruption withdrawn","Provider ready","Provider unavailable","Turn latency measured","Caller disconnected","Media failed","Runtime error","Session ended","Runtime stopped"];
+  const unknown = await evaluate(`(() => { const known = ${JSON.stringify(KNOWN)}; return [...document.querySelectorAll(".diag__message")].map((e) => e.textContent.trim()).filter((t) => !known.includes(t)); })()`);
+  check("every diagnostic names a runtime event", Array.isArray(unknown) && unknown.length === 0, JSON.stringify(unknown ?? []).slice(0, 200));
+  check("the panel bounds what it renders", await evaluate(`document.querySelectorAll(".diag__row").length <= 300`), await evaluate(`document.querySelectorAll(".diag__row").length + " rendered"`));
+  await screenshot("playground-diagnostics");
+  await a11y("playground diagnostics");
+  const liveRows = await evaluate(`document.querySelectorAll(".diag__row").length`);
+
   check("hang up → call ended", await waitFor(`__e2e.has("Call ended")`, 15_000));
   const conversationHref = await evaluate(`__e2e.find("View this conversation")?.getAttribute("href")`);
   check("playground links to the conversation", /\/console\/conversations\/ses_/.test(conversationHref ?? ""), conversationHref);
+  // After the call the diagnostics remain, and the session's end is in them.
+  check("diagnostics remain after the call, and grew", await waitFor(`document.querySelectorAll(".diag__row").length >= ${liveRows}`, 15_000));
+  check("the session end is in the diagnostics", await waitFor(`__e2e.has("Session ended")`, 20_000));
+  check("no diagnostic exposes a credential", !(await evaluate(`/sk-[A-Za-z0-9]{8,}|vf_[A-Za-z0-9]{8,}|Bearer\\s/.test(document.querySelector(".diag")?.textContent ?? "")`)));
+  await evaluate(`[...document.querySelectorAll(".diag__expand")].at(-1)?.click()`);
+  check("a diagnostic expands to its structured detail", await waitFor(`!!document.querySelector(".diag__detail")`));
+  await screenshot("playground-diagnostics-after");
   const signalling = requests.filter((r) => r.url.startsWith("/v1/webrtc/rendezvous/"));
   check("browser used the signalling endpoints", signalling.length >= 2, JSON.stringify(signalling.slice(0, 3)));
   await click("View this conversation");

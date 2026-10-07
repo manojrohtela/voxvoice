@@ -12,6 +12,17 @@ import { Loading } from "../../components/Loading";
 import { StatusPill, type Tone } from "../../components/StatusPill";
 import { browserEnvironment, VoiceCall, type CallEnvironment, type CallState } from "../../voice/call";
 import { consoleCallBackend } from "./backend";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import {
+  EMPTY,
+  browserStream,
+  followDiagnostics,
+  userFacingError,
+  type DiagnosticsSnapshot,
+  type DiagnosticsStream,
+  type StreamFactory,
+} from "./diagnostics";
+import { LiveConversation, RuntimeStatePanel } from "./LiveConversation";
 import { canStartCalls } from "./roles";
 
 function loadAgents(signal: AbortSignal): Promise<{ data: AgentView[] }> {
@@ -44,7 +55,15 @@ function useElapsed(since: number | null): string {
 }
 
 /** The call itself. `environment` is injectable so tests can run without a real browser. */
-export function Playground({ agents, environment }: { agents: AgentView[]; environment: CallEnvironment }) {
+export function Playground({
+  agents,
+  environment,
+  stream = browserStream,
+}: {
+  agents: AgentView[];
+  environment: CallEnvironment;
+  stream?: StreamFactory;
+}) {
   const [params, setParams] = useSearchParams();
   const usable = agents.filter((agent) => agent.language_supported);
   const requested = params.get("agent");
@@ -57,7 +76,9 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
   const [muted, setMuted] = useState(false);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastSession, setLastSession] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot>(EMPTY);
   const callRef = useRef<VoiceCall | null>(null);
+  const streamRef = useRef<DiagnosticsStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const elapsed = useElapsed(state === "connected" ? connectedAt : null);
 
@@ -70,6 +91,7 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      streamRef.current?.close();
       void callRef.current?.hangUp();
     };
   }, []);
@@ -79,6 +101,9 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
     setDetail(null);
     setLastSession(null);
     setMuted(false);
+    streamRef.current?.close();
+    streamRef.current = null;
+    setDiagnostics(EMPTY);
     const call = new VoiceCall(agentId, consoleCallBackend, environment, {
       onState: (next, why) => {
         setState(next);
@@ -86,10 +111,17 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
         if (next === "connected") {
           setConnectedAt(Date.now());
           setLastSession(call.session);
+          // The session now exists, so its events can be followed. The stream is a reader of the
+          // durable log; it outlives the call and is closed only when the view goes away.
+          const session = call.session;
+          if (session) {
+            streamRef.current?.close();
+            streamRef.current = followDiagnostics(session, setDiagnostics, stream);
+          }
         }
       },
-      onRemoteStream: (stream) => {
-        if (audioRef.current) audioRef.current.srcObject = stream;
+      onRemoteStream: (remote) => {
+        if (audioRef.current) audioRef.current.srcObject = remote;
       },
       onLog: (message) =>
         setLog((entries) => [...entries, { at: new Date().toLocaleTimeString(), message }]),
@@ -114,8 +146,12 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
     );
   }
 
+  const runtimeError = userFacingError(diagnostics.events);
+  const currentTurn = [...diagnostics.events].reverse().find((e) => e.turn !== null)?.turn ?? null;
+
   return (
-    <div className="grid playground">
+    <>
+      <div className="grid playground">
       <article className="card" aria-labelledby="call-heading">
         <h2 id="call-heading">Call</h2>
         <div className="form">
@@ -199,11 +235,42 @@ export function Playground({ agents, environment }: { agents: AgentView[]; envir
         )}
         <p className="note">After the call, its transcript, per-turn latency and timeline are in Conversations.</p>
       </article>
-    </div>
+      </div>
+
+      {runtimeError ? (
+        <div className="banner banner--error" role="alert">
+          {runtimeError}
+        </div>
+      ) : null}
+
+      {diagnostics.events.length > 0 || lastSession ? (
+        <>
+          <div className="grid">
+            <LiveConversation
+              transcript={diagnostics.transcript}
+              ordered={diagnostics.transcriptOrdered}
+              state={diagnostics.state}
+            />
+            <RuntimeStatePanel state={diagnostics.state} turn={currentTurn} />
+          </div>
+          <DiagnosticsPanel
+            events={diagnostics.events}
+            streamError={diagnostics.streamError}
+            complete={diagnostics.complete}
+          />
+        </>
+      ) : null}
+    </>
   );
 }
 
-export function PlaygroundPage({ environment = browserEnvironment() }: { environment?: CallEnvironment }) {
+export function PlaygroundPage({
+  environment = browserEnvironment(),
+  stream = browserStream,
+}: {
+  environment?: CallEnvironment;
+  stream?: StreamFactory;
+}) {
   const meta = useConsoleMeta();
   // Read through the auth state rather than `useMe`: an unknown role is not a refused one, so
   // nothing is offered and nothing is refused until the organization is known.
@@ -245,7 +312,7 @@ export function PlaygroundPage({ environment = browserEnvironment() }: { environ
         </EmptyState>
       ) : null}
       {canCall && voiceReady && agents.status === "ready" ? (
-        <Playground agents={agents.data.data} environment={environment} />
+        <Playground agents={agents.data.data} environment={environment} stream={stream} />
       ) : null}
     </section>
   );
