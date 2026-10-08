@@ -122,7 +122,7 @@ if `EventSource` cannot be constructed at all, the panel says diagnostics are un
 
 | | |
 |---|---|
-| Delivery | One SSE connection per open Playground, polling the session's own rows every 400 ms. Not one request per event, and no client-side polling. |
+| Delivery | **Server push over one persistent SSE connection** per open Playground: the browser makes a single `GET` and holds it. The browser never polls. The **server** re-reads the session's own rows every 400 ms — the durable log has no change feed — and pushes a frame only when there is something new, with a keepalive comment every 15 s. One request per session, not one per event. |
 | Rendering | The panel keeps at most **300 rows** in the DOM and says what it is showing. Tested with 100, 500, 1,000 and 5,000 events: the DOM stays at 300. |
 | Keepalive / bound | A comment frame every 15 s; one connection is capped at 30 min, after which the browser resumes from its `seq`. |
 | Clearing | "Clear view" hides rows **in this view only**, and says so. It never deletes durable history. |
