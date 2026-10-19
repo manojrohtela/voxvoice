@@ -68,9 +68,17 @@ from .completion_stream import (
     FailureKind,
 )
 
-#: The model requested when the session selects none. Groq's production Llama model; named here
-#: rather than in `runtime/` because a model identifier is vendor vocabulary (AR-21).
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+#: The model requested when the session selects none. A general-purpose instruct model on Groq's
+#: production catalogue; named here rather than in `runtime/` because a model identifier is vendor
+#: vocabulary (AR-21).
+#:
+#: **This value expires.** It was `llama-3.3-70b-versatile` until 2026-10-08, when the first real
+#: call found that Groq had retired it: the stream failed with `404 model_not_found`, classified
+#: `FailureKind.PROTOCOL`, and every turn was retired without an answer. A vendor catalogue changes
+#: without a release of ours, which is why `GroqLLM.capabilities.models` is empty and why an agent
+#: may name its own model — the default is a convenience, not a promise about the catalogue. An
+#: operator who finds this one retired should set the agent's model, or change it here.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 #: The context window **declared** for `DEFAULT_MODEL`, from the vendor's published model card.
 #: It is a declared configuration value, not a measured one: no token was counted to establish it,

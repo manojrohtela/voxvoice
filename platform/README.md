@@ -24,7 +24,6 @@ platform/
 ├── providers/      # capability plugin implementations (empty; from M2)
 ├── events/         # event delivery infra: webhook dispatcher now; Event Bus + outbox at M4
 ├── observability/  # metrics, tracing, cost, logging (skeleton; from M2/M3)
-├── voicebot/       # Phase-1 Pipecat prototype — becomes the first Session Worker at M2
 └── tests/          # auth scoping, agents CRUD, session-endpoint contract
 ```
 
@@ -70,7 +69,12 @@ first providers (M2); runtime/latency/turn-detection tiers follow (TESTING_POLIC
 
 The Phase-1 Dograh engine-adapter integration was retired at M1 (ADR-0001). Its
 live-verified API knowledge is archived in
-[`docs/research/dograh-api-notes.md`](../docs/research/dograh-api-notes.md); the
-old Dograh deploy runbooks (`DEPLOY.md`, `ORACLE_DEPLOY.md`, `scripts/`) are kept
-but marked superseded — their Oracle/TURN/WebRTC deployment knowledge will inform
-the first-party runtime's deploy at M2+.
+[`docs/research/dograh-api-notes.md`](../docs/research/dograh-api-notes.md).
+
+The old Dograh deploy runbooks (`DEPLOY.md`, `ORACLE_DEPLOY.md`,
+`scripts/oracle_setup.sh`) and the Phase-1 Pipecat prototype (`voicebot/`) were
+**removed at M11.18** (2026-10-16). They were kept only until their
+Oracle/TLS/WebRTC knowledge had been carried into a current deploy document, and
+[`docs/releases/epic11-pre-live-handoff.md`](../docs/releases/epic11-pre-live-handoff.md)
+is now that document — it supersedes them outright, and explicitly contradicts
+their coturn port list. Both remain in git history.
