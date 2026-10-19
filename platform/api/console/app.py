@@ -29,6 +29,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from sqlmodel import Session as DBSession
 
 from ..config import get_settings as get_api_settings
@@ -166,6 +167,10 @@ def build_console_app(
 
     if settings.dist_dir is not None:
         mount_console_bundle(app, settings.dist_dir)
+
+        @app.get("/", include_in_schema=False)
+        def console_home() -> RedirectResponse:
+            return RedirectResponse("/console/")
 
     openapi.install(app)
     return app
