@@ -37,6 +37,21 @@ and its amendments; GOVERNANCE §10/§11; the repository's certification practic
 Each control is executed by the module named above; the behavioural evidence each one relies on is
 the suite in its "evidence" column.
 
+> **`E12-1` and `E12-2` evaluate the closed range `1a03d90^..76acdbb`** — Epic 12's first commit to
+> its last (ADR-0055 **Amendment 6, DP16**, added at M11.18). They assert what Epic 12 *changed*,
+> not what the tree contains today; deriving the near end from `HEAD` made a later milestone's
+> authorized edits look like Epic 12's, which is the defect ADR-0052 Amendment 2 corrected for
+> `E10-7`. **Re-verified at M11.18 over the pinned range: the same five authorized pre-existing
+> files, and no spine or runtime module — identical to what this record asserts, so the verdict
+> below is unchanged.**
+>
+> `E10-7` (`v4.0.0..HEAD`) and `E12-9` (`git ls-files`) remain **open-ended by design**: a frozen
+> api file modified today, or a credential committed today, must fail whoever did it. `E12-9` was
+> inspected for the same defect and correctly has none.
+>
+> **What this no longer claims:** that the spine and runtime are untouched *today* — only that
+> Epic 12 did not touch them. That guard belongs to Epic 10's own freeze suite.
+
 | Control | Requirement | Evidence | Verdict |
 |---|---|---|---|
 | `E12-1` | No file frozen at `v4.0.0` modified; Epic 10's spine and Epic 11's runtime untouched by M12; every other pre-existing file M12 edited is named by an ADR | `test_e12_1_*` (git diff against `v4.0.0` and against the Epic 12 baseline) | **SATISFIED** |

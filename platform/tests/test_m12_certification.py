@@ -37,6 +37,17 @@ RECORD = REPO / "docs" / "testing" / "m12-certification.md"
 #: The commit M12 started from: `M12.1` is the first Epic 12 commit, so its parent is the baseline
 #: every "what did M12 change?" question is asked against.
 M12_BASE = "1a03d90^"
+#: The **last** Epic 12 commit (M12.14). `E12-1` and `E12-2` ask what Epic 12 *did*, so their range
+#: is pinned at both ends. Deriving the near end from `HEAD` asks *"has anyone changed this, ever,
+#: in any later epic?"* — the different question ADR-0052 Amendment 2 corrected for `E10-7` at
+#: M12.1.1, and which `tests/freeze/epic10.py` states as doctrine: *"the frozen boundary is a
+#: commit range, not `HEAD` and not the working tree."* M11.18 — authorized to edit Epic 11
+#: provider code — made both `E12-1` controls fail on changes Epic 12 never made.
+#:
+#: **Epic 12's certification range is CLOSED at this commit.** It is never bumped automatically: a
+#: future M12 milestone extends it only through an explicit, reviewed ADR-0055 amendment that also
+#: renews verification of `AUTHORIZED_EDITS` (ADR-0055 Amendment 6, DP16).
+M12_HEAD = "76acdbb"
 #: The frozen Epic 10 baseline: `E10-7` freezes every `platform/api/**` file that existed at it.
 FROZEN_BASELINE = "v4.0.0"
 
@@ -69,9 +80,13 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
-def _changed(base: str, *paths: str) -> dict[str, str]:
-    """`{path: status}` for `base..HEAD`."""
-    out = _git("diff", "--name-status", base, "HEAD", "--", *paths)
+def _changed(base: str, *paths: str, until: str = "HEAD") -> dict[str, str]:
+    """`{path: status}` for `base..until`.
+
+    `until` defaults to `HEAD` because one caller is deliberately open-ended: `E10-7` freezes every
+    pre-`v4.0.0` `platform/api` file **permanently**, so a modification today is a real violation
+    and must fail. Callers asking what one epic *did* pass `until=M12_HEAD` instead."""
+    out = _git("diff", "--name-status", base, until, "--", *paths)
     return {line.split("\t", 1)[1]: line.split("\t", 1)[0] for line in out.splitlines() if line}
 
 
@@ -91,12 +106,12 @@ def test_e12_1_no_file_frozen_at_v4_0_0_was_modified():
 
 def test_e12_1_m12_changed_no_runtime_or_spine_module():
     """Epic 10's spine and Epic 11's runtime are not Epic 12's to change (ADR-0055 DP2/DP6)."""
-    assert _changed(M12_BASE, *UNTOUCHABLE) == {}
+    assert _changed(M12_BASE, *UNTOUCHABLE, until=M12_HEAD) == {}
 
 
 def test_e12_1_every_pre_existing_file_m12_modified_is_authorized():
     """M12 may edit a post-`v4.0.0` composition file, but only the ones the ADRs name."""
-    modified = {p for p, s in _changed(M12_BASE, "platform").items() if s != "A"}
+    modified = {p for p, s in _changed(M12_BASE, "platform", until=M12_HEAD).items() if s != "A"}
     assert modified == set(AUTHORIZED_EDITS), (
         f"unauthorized: {sorted(modified - set(AUTHORIZED_EDITS))}; "
         f"expected but absent: {sorted(set(AUTHORIZED_EDITS) - modified)}"
@@ -107,7 +122,7 @@ def test_e12_1_every_pre_existing_file_m12_modified_is_authorized():
 
 
 def test_e12_2_the_console_is_one_additive_package_with_no_forbidden_path():
-    added = {p for p, s in _changed(M12_BASE, "platform/api").items() if s == "A"}
+    added = {p for p, s in _changed(M12_BASE, "platform/api", until=M12_HEAD).items() if s == "A"}
     assert added, "no Epic 12 api files found"
     assert all(p.startswith("platform/api/console/") for p in added), sorted(added)
     # E10-9: no path under `api/` may contain "observability", new files included.

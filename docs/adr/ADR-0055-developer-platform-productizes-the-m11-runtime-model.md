@@ -322,3 +322,54 @@ helper).
   tagging, publishing the SDK and merging stay outside Epic 12.
 * **Self-administered** (**CE9**), as Epic 11's was: the implementer wrote the controls. Recorded as
   limitation `E12-LIM-1`; every control is executable and re-runnable by anyone.
+
+## Amendment 6 — `E12-1`/`E12-2` evaluate a closed commit range (M11.18, 2026-10-19)
+
+**Status:** Accepted 2026-10-19 (M11.18). It is **additive**: DP1–DP15 are unchanged, and no
+control's *assertion* changes — only the range it is evaluated over.
+
+**DP16 — a control that asks what Epic 12 did must be bounded at both ends.**
+
+* **The defect.** `E12-1` and `E12-2` derived the near end of their diff from `HEAD`, so they asked
+  *"what does the tree look like now?"* rather than *"what did Epic 12 change?"* At M11.18 — a
+  milestone authorized to edit Epic 11 provider code — both `E12-1` controls failed on
+  `platform/providers/llm/groq.py` (a vendor model the first real call found retired) and on the
+  removal of the Dograh-era deploy artefacts. **Nothing about Epic 12 had changed.**
+* **The precedent is this repository's own.** ADR-0052 Amendment 2 corrected the identical shape for
+  `E10-7` at M12.1.1: under the `HEAD` form, *"any later epic authorized to touch a guarded path
+  retroactively un-certified Epic 10."* `platform/tests/freeze/epic10.py` already states the rule as
+  doctrine — *"the frozen boundary is a **commit range**, not `HEAD` and not the working tree"* —
+  and names the trap exactly: it turns *"did this epic change this?"* into *"has anyone changed
+  this, ever, in any later epic?"* **Those are different questions.** Epic 12's control set did not
+  inherit the rule.
+* **The decision.** `M12_HEAD = "76acdbb"` — M12.14's final commit, the last Epic 12 commit.
+  `E12-1` and `E12-2` evaluate **`M12_BASE..M12_HEAD`**, a range closed at both ends.
+  **Epic 12's certification range is closed.** The pin is **never bumped automatically**: a future
+  M12 milestone extends it only through an explicit, reviewed amendment to this ADR that also
+  renews verification of `AUTHORIZED_EDITS`.
+* **The fix is the bound, not the allowlist.** `AUTHORIZED_EDITS` is unchanged, and **no M11.18
+  file was added to it.** Widening the allowlist would have recorded a false fact — that Epic 12
+  made edits it did not make — to obtain a green result.
+* **Deliberately left open-ended, each for a stated reason.**
+  * `E10-7` keeps `v4.0.0..HEAD`. Those files are frozen **permanently**, so a modification today
+    is a real violation and must fail. This is the one control where the near end *should* be the
+    present.
+  * `E12-9` keeps `git ls-files`. *"No committed file contains a credential"* and *"no build output
+    is tracked"* are **live invariants**, not facts about one epic. Pinning them would blind the
+    suite to a secret committed by a later milestone — a security regression dressed as tidiness.
+    `E12-9` was inspected for this defect at M11.18 and **correctly has none**.
+
+**Consequence, stated rather than discovered later.** `E12-1` now asserts *"Epic 12 did not touch
+the spine or the runtime"*, **not** *"the spine and runtime are untouched today"*. A future epic that
+touches `platform/runtime` or the Epic 10 spine will **not** be caught by `E12-1`. That guard is
+Epic 10's own — its freeze suite owns those trees as a pinned range — and `E10-7` continues to
+guarantee the frozen `platform/api` surface at `HEAD`. Epic 12 has no standing to lock Epic 11's
+tree in perpetuity, which is the whole point of ADR-0052.
+
+**The verdict is preserved on evidence, not assumption.** Over the pinned range the controls yield
+exactly what the record asserts: the same **five** authorized pre-existing files
+(`.env.example`, `api/webrtc/app.py`, `bootstrap.py`, `tests/certification/epic10.py`,
+`tests/test_epic10_historical_counting.py`) and **no** spine or runtime module. The M12 record
+carries no digest of its own; Epic 10's certification `7e57bc14…` and freeze `d3d4858d…` digests
+reproduce unchanged, because they were already computed over a pinned range and M11.18 touched no
+`platform/api` file. **M12.14's verdict therefore stands without re-certification.**
