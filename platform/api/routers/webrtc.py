@@ -80,7 +80,7 @@ class AnswerRequest(BaseModel):
 def get_call_slot(request: Request) -> CallSlot | None:
     """The deployment's call-concurrency cap, or `None` when it configured none (M13.1).
 
-    Read from the application rather than injected as a dependency **on purpose**: the console's
+    Read off `request.app.state` rather than injected as a dependency **on purpose**: the console's
     Playground calls `create_webrtc_session` as a plain function (ADR-0055 DP5), so a
     `Depends(...)` default would arrive there as the unresolved `Depends` object and the guard
     would be silently absent on the one path that most needs it. `request` is passed on both
