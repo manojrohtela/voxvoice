@@ -44,6 +44,7 @@ every call setup without anyone deciding to. See `ice.py` and ADR-0054.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -175,6 +176,12 @@ class AiortcMediaEndpoint:
         self._tracks: dict[str, Any] = {}
         self._outbound: dict[str, asyncio.Queue] = {}
         self._seq: dict[str, int] = {}
+        #: Why a session's media path broke, when the break was reported by ICE rather than by the
+        #: track. Consumed by `inbound`, which is the only place that can turn it into the right
+        #: AR-6 fact — see `_watch_connection_state`.
+        self._faults: dict[str, str] = {}
+        #: The teardown a connection-state watcher started, held so it is never an orphan (§12).
+        self._closers: dict[str, asyncio.Task] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -185,6 +192,8 @@ class AiortcMediaEndpoint:
         established is exactly the fabricated fact AR-6 forbids."""
         pc = self._new_peer_connection()
         self._connections[session_id] = pc
+        self._faults.pop(session_id, None)  # a fresh session inherits no previous fault
+        self._watch_connection_state(session_id, pc)
         # The outbound track is attached **before** negotiation, so the offer advertises the audio
         # this runtime will send. Attaching it afterwards would produce a recvonly session that
         # silently drops every assistant frame — which is what `send()` did until M11.16.3, because
@@ -202,6 +211,55 @@ class AiortcMediaEndpoint:
             raise MediaEndpointError("negotiation produced no inbound audio track")
         self._tracks[session_id] = track
         self._seq[session_id] = 0
+
+    def _watch_connection_state(self, session_id: str, pc: Any) -> None:
+        """Close the connection when ICE reports it **failed** (M13.1).
+
+        ## The gap this closes
+
+        aiortc ends the inbound track by itself in exactly one case: a **clean** close, where the
+        peer's DTLS `close_notify` drives every DTLS transport to `closed` and
+        `RTCPeerConnection.__updateConnectionState` then auto-closes. That is the tab-closed path,
+        and it already worked.
+
+        An **abrupt** loss — a sleeping laptop, a dropped Wi-Fi link, a killed browser — sends no
+        `close_notify`. aioice's consent-freshness checks eventually fail, ICE moves to `failed`,
+        `connectionstatechange` is emitted, and aiortc leaves the connection open: its own comment
+        notes it has no `disconnected` state, and nothing closes a failed one. Nobody was listening
+        here, so the receiver was never stopped, `recv()` never raised, `inbound()` never returned,
+        and the session stayed alive with no media and no event — indefinitely.
+
+        **Detection time is not ours to promise.** It is whatever aioice's consent freshness takes
+        (`CONSENT_FAILURES` × `CONSENT_INTERVAL`, ~30 s at the time of writing) plus aiortc's
+        propagation, and it depends on the path. Treat it as an expected bound to validate on a
+        real network, never as a guarantee.
+
+        ## Why this reports `FAILED`, not `DISCONNECTED`
+
+        Closing the connection ends the track *cleanly*, which would otherwise make `inbound()`
+        return normally and the transport emit `DISCONNECTED` — "the caller went away". A dead
+        network path is not a hangup, and the console renders the two differently. So the cause is
+        recorded here and `inbound()` raises instead, which is what makes the transport emit
+        `FAILED`. AR-6 asks for the reality the transport observed; "they hung up" would be a
+        fabrication.
+        """
+
+        def on_connection_state_change() -> None:
+            if getattr(pc, "connectionState", None) != "failed":
+                return  # `closed` arrives from our own close; `connected` is not our business
+            if session_id not in self._connections:
+                return  # already torn down: nothing to close, and nobody left to await a task
+            if session_id in self._closers:
+                return  # exactly once per session
+            log.warning("aiortc: ICE reported failed for %s; closing the connection", session_id)
+            self._faults[session_id] = "ice connection failed"
+            task = asyncio.ensure_future(self._safe_close(session_id))
+            self._closers[session_id] = task
+            # Dropped as soon as it finishes, so a completed teardown is not mistaken for one in
+            # flight by a later `_safe_close` (which would otherwise await an already-done task).
+            task.add_done_callback(lambda _task, sid=session_id: self._closers.pop(sid, None))
+
+        pc.on("connectionstatechange", on_connection_state_change)
 
     def _new_peer_connection(self) -> Any:
         """Construct the peer connection under this deployment's stated ICE policy.
@@ -222,6 +280,13 @@ class AiortcMediaEndpoint:
 
     async def _safe_close(self, session_id: str) -> None:
         pc = self._connections.pop(session_id, None)
+        # A watcher may already be tearing this session down (M13.1). Awaited rather than
+        # cancelled — cancelling mid-`pc.close()` would leave the connection half-closed — and
+        # skipped when *this* call is that task, which would otherwise await itself forever.
+        closer = self._closers.pop(session_id, None)
+        if closer is not None and closer is not asyncio.current_task():
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await closer
         self._tracks.pop(session_id, None)
         queue = self._outbound.pop(session_id, None)
         self._seq.pop(session_id, None)
@@ -258,6 +323,12 @@ class AiortcMediaEndpoint:
             try:
                 frame = await track.recv()
             except MediaStreamError:
+                fault = self._faults.pop(session_id, None)
+                if fault is not None:
+                    # The track ended because *we* closed the connection after ICE reported it
+                    # failed, so this is a broken media path and must leave as one (M13.1). The
+                    # transport turns this into `FAILED`; returning would make it `DISCONNECTED`.
+                    raise MediaEndpointError(f"inbound media ended: {fault}") from None
                 return  # the track ended — a hangup, not a fault
             except asyncio.CancelledError:
                 raise
