@@ -26,6 +26,7 @@ WebRTC does not expose an unauthenticated-looking surface it never intended (§1
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
@@ -39,7 +40,10 @@ from ..routers.sessions import create_session, get_controller
 from ..schemas import SessionCreate, SessionCreateResponse
 from ..security import get_org
 from ..webrtc.binding import PENDING_RENDEZVOUS
+from ..webrtc.call_slot import CallSlot, CallSlotBusy
 from ..webrtc.rendezvous import RendezvousError, RendezvousRegistry
+
+log = logging.getLogger("voxvoice.api.webrtc.router")
 
 router = APIRouter(prefix="/v1/webrtc", tags=["webrtc"])
 
@@ -71,6 +75,18 @@ class AnswerRequest(BaseModel):
     # Bounded at the schema edge as well as in the registry, so an oversized body is refused
     # before it is parsed into a model that would hold it.
     sdp: str = Field(max_length=256 * 1024)
+
+
+def get_call_slot(request: Request) -> CallSlot | None:
+    """The deployment's call-concurrency cap, or `None` when it configured none (M13.1).
+
+    Read from the application rather than injected as a dependency **on purpose**: the console's
+    Playground calls `create_webrtc_session` as a plain function (ADR-0055 DP5), so a
+    `Depends(...)` default would arrive there as the unresolved `Depends` object and the guard
+    would be silently absent on the one path that most needs it. `request` is passed on both
+    paths, so reading through it is the form that cannot diverge.
+    """
+    return getattr(request.app.state, "webrtc_call_slot", None)
 
 
 def get_registry(request: Request) -> RendezvousRegistry:
@@ -182,6 +198,28 @@ async def create_webrtc_session(
         registry.check_bindable(body.rendezvous_id, org.id)
     except RendezvousError as exc:
         raise _fail(exc) from exc
+    controller = get_controller(request)
+    slot = get_call_slot(request)
+    evicted: tuple[str, ...] = ()
+    if slot is not None:
+        try:
+            evicted = slot.try_acquire(body.rendezvous_id)
+        except CallSlotBusy as exc:
+            # Refused **before** `create_session` is reached, so no session row is written and the
+            # call in progress is not touched. A guard one layer down would have produced a 502
+            # and a `status="failed"` row for every caller it turned away.
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    # Ending a finished holder is `async`, so it happens **here** — after capacity is already
+    # held — and never inside `try_acquire`, whose atomicity depends on containing no `await`.
+    for stale in evicted:
+        try:
+            if controller is not None:
+                await controller.end(stale)
+        except Exception as exc:  # noqa: BLE001 — a stale call that will not die is not this
+            # caller's problem: capacity is already theirs, and failing their request because an
+            # abandoned session resisted teardown would be the wrong trade. The runtime may keep
+            # the worker until the process restarts, which is why this is an error, not a warning.
+            log.error("could not end finished session %s: %s", stale, exc)
     token = PENDING_RENDEZVOUS.set((body.rendezvous_id, org.id))
     try:
         return await create_session(
@@ -190,7 +228,15 @@ async def create_webrtc_session(
             ),
             org=org,
             db=db,
-            controller=get_controller(request),
+            controller=controller,
         )
+    except BaseException:
+        # `BaseException` because `CancelledError` is one: a caller that disappears between the
+        # acquisition above and `SingleCallController.start` below would otherwise leave capacity
+        # held by a call that never existed. Release is idempotent, so overlapping with the
+        # controller's own release costs nothing.
+        if slot is not None:
+            slot.release(key=body.rendezvous_id)
+        raise
     finally:
         PENDING_RENDEZVOUS.reset(token)

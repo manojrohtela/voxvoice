@@ -37,8 +37,10 @@ from ..db import init_db
 from ..models import Session, Transcript
 from ..routers import agents, sessions, webrtc
 from .binding import RendezvousBindingController
+from .call_slot import CallSlot, capacity_from_env
 from .config import WebRTCConfigError, WebRTCSettings
 from .rendezvous import RendezvousRegistry
+from .single_call import SingleCallController
 
 
 def _persist_transcript(session_id: str, role: str, text_value: str, is_final: bool) -> None:
@@ -68,6 +70,7 @@ def build_controller(
     registry: RendezvousRegistry,
     ice_policy: Any = None,
     observability: Any = None,
+    call_slot: CallSlot | None = None,
 ) -> Any:
     """Assemble the runtime controller the configured transport calls for.
 
@@ -102,7 +105,12 @@ def build_controller(
             transcript_sink=_persist_transcript,
             **wired,
         )
-    return RendezvousBindingController(inner, registry)
+    controller = RendezvousBindingController(inner, registry)
+    if call_slot is not None and not call_slot.unlimited:
+        # Wrapped **only** when a cap was configured, so an unconfigured deployment's controller
+        # chain is the one it had before M13.1 — not a chain with a disabled layer in it.
+        controller = SingleCallController(controller, call_slot)
+    return controller
 
 
 def resolve_ice_policy(settings: WebRTCSettings) -> Any:
@@ -129,14 +137,25 @@ def build_webrtc_app(
     settings = settings or WebRTCSettings.from_env()
     settings.validate()
     ice_policy = resolve_ice_policy(settings)  # refused at startup, never at call setup
+    # Read here so a malformed cap fails startup alongside every other configuration refusal,
+    # rather than at the first call (M13.1). `None` is unlimited: the pre-M13.1 behaviour.
+    capacity = capacity_from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db()
         registry = RendezvousRegistry()
         app.state.webrtc_rendezvous = registry if settings.signalling_enabled else None
+        # The probe resolves `session_controller` **at call time**, not now: a composition root
+        # above this one may wrap the controller after this lifespan has run (the console adds
+        # `AudioEndpointingController`), and the slot must ask whoever is outermost then.
+        slot = CallSlot(
+            capacity,
+            probe=lambda session_id: app.state.session_controller.conversation_state(session_id),
+        )
+        app.state.webrtc_call_slot = slot
         app.state.session_controller = build_controller(
-            settings, registry, observability=observability
+            settings, registry, observability=observability, call_slot=slot
         )
         yield
 

@@ -165,6 +165,11 @@ DATABASE_URL=sqlite:////var/lib/voxvoice/voxvoice.db
 # ICE — §1 decides this. Empty means "explicitly none" (ADR-0054); it is never inherited.
 VOXVOICE_ICE_STUN_URLS=stun:stun.l.google.com:19302    # only if behind 1:1 NAT
 
+# Calls this PROCESS will run at once (M13.1). Unset/0 = unlimited, the pre-M13.1 behaviour.
+# A further caller gets 409 and the call in progress is untouched. PER PROCESS — see §6's
+# one-worker rule. It is a call count, not a memory limit; both are needed on a shared host.
+VOXVOICE_MAX_CONCURRENT_CALLS=        # a constrained host sets 1
+
 # Console
 VOXVOICE_CONSOLE_DIST=/opt/voxvoice/console/dist
 VOXVOICE_CONSOLE_SIGNUP=closed     # first_run | open | closed
@@ -177,6 +182,8 @@ Startup refuses an incomplete configuration (`WebRTCSettings.validate`): an unkn
 no separate one.
 
 Note `VOXVOICE_ICE_STUN_URLS` is **comma-separated**, and a `turn:` URL fails startup by design.
+`VOXVOICE_MAX_CONCURRENT_CALLS` is refused at startup if it is not an integer — a host that asked
+for a cap and silently got none would be the wrong way round.
 
 ## 6. Install and run
 
@@ -238,6 +245,12 @@ journalctl -u voxvoice -f                                      # watch the start
 directory must be listed or the first write fails. If you add anything else that writes, add it
 there too.
 
+**Exactly one worker.** The `ExecStart` above passes no `--workers`, and uvicorn's default is 1 —
+keep it that way, and do not front it with gunicorn. Both the rendezvous registry (`R-E12-5`) and
+`VOXVOICE_MAX_CONCURRENT_CALLS` (§5) are **per process**: a second worker would hold its own
+independent call slot, so a cap of 1 across two workers admits two calls. One process is a
+correctness precondition here, not a tuning preference.
+
 Create the first account once, then set `VOXVOICE_CONSOLE_SIGNUP=closed`:
 
 ```bash
@@ -253,6 +266,11 @@ curl -sS https://<host>/health
 
 `transport: "webrtc"` confirms the real stack. **Green health does not mean a call will work** — it
 says nothing about media flowing or the providers accepting your keys.
+
+```bash
+pgrep -fc 'uvicorn.*api.console.app'          # must be 1 — see §6's one-worker rule
+systemctl show voxvoice -p ExecStart | grep -c -- --workers   # must be 0
+```
 
 1. Open `https://<host>/console/`, sign in.
 2. **Agents → New agent.** Language **`en`** (the recognizer declares only `en`; F-4). **Set
