@@ -170,6 +170,11 @@ VOXVOICE_ICE_STUN_URLS=stun:stun.l.google.com:19302    # only if behind 1:1 NAT
 # one-worker rule. It is a call count, not a memory limit; both are needed on a shared host.
 VOXVOICE_MAX_CONCURRENT_CALLS=        # a constrained host sets 1
 
+# Refuse to start if another process already holds this file (M13.1). Unset = no check.
+# Both the cap above and the rendezvous registry are per process, so this turns a stray
+# second worker into a loud startup failure instead of a silently doubled capacity.
+VOXVOICE_SINGLE_PROCESS_LOCK=/var/lib/voxvoice/single-process.lock
+
 # Console
 VOXVOICE_CONSOLE_DIST=/opt/voxvoice/console/dist
 VOXVOICE_CONSOLE_SIGNUP=closed     # first_run | open | closed
@@ -250,6 +255,12 @@ keep it that way, and do not front it with gunicorn. Both the rendezvous registr
 `VOXVOICE_MAX_CONCURRENT_CALLS` (§5) are **per process**: a second worker would hold its own
 independent call slot, so a cap of 1 across two workers admits two calls. One process is a
 correctness precondition here, not a tuning preference.
+
+`VOXVOICE_SINGLE_PROCESS_LOCK` (§5) enforces it: the second process refuses to start rather than
+quietly disagreeing with the first about how many calls are in progress. The file must sit inside
+`ReadWritePaths` (`/var/lib/voxvoice`), and there is **no stale lock to clean up** — an advisory
+`flock` belongs to the open descriptor, so the kernel releases it on any exit, `SIGKILL` included.
+It is a single-machine precondition, not distributed coordination.
 
 Create the first account once, then set `VOXVOICE_CONSOLE_SIGNUP=closed`:
 

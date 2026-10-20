@@ -39,6 +39,11 @@ from ..routers import agents, sessions, webrtc
 from .binding import RendezvousBindingController
 from .call_slot import CallSlot, capacity_from_env
 from .config import WebRTCConfigError, WebRTCSettings
+from .process_lock import (
+    acquire_single_process_lock,
+    lock_path_from_env,
+    release_single_process_lock,
+)
 from .rendezvous import RendezvousRegistry
 from .single_call import SingleCallController
 
@@ -157,7 +162,18 @@ def build_webrtc_app(
         app.state.session_controller = build_controller(
             settings, registry, observability=observability, call_slot=slot
         )
-        yield
+        # Taken **last**, so a startup that fails earlier never held it, and released in a
+        # `finally`, so one that fails later does not keep it. The slot above and the rendezvous
+        # registry are both per process, which is the precondition this enforces (M13.1).
+        lock_path = lock_path_from_env()
+        lock_fd = acquire_single_process_lock(lock_path) if lock_path else None
+        app.state.single_process_lock_fd = lock_fd
+        try:
+            yield
+        finally:
+            if lock_fd is not None:
+                release_single_process_lock(lock_fd)
+                app.state.single_process_lock_fd = None
 
     app = FastAPI(title="VoxVoice Platform (WebRTC)", version="0.1.0", lifespan=lifespan)
 
