@@ -304,6 +304,7 @@ systemctl show voxvoice -p ExecStart | grep -c -- --workers   # must be 0
 | Speakers instead of headphones | Agent interrupts itself | Headphones. It hears its own output. |
 | IPv4 open, IPv6 silent | Works for some callers, not others | `ip6tables` is a separate ruleset (§3) |
 | Connected, then silence | ICE negotiated, no media | NAT shape (§1) — add STUN, or record TURN as a prerequisite |
+| Media stopped mid-call, Conversations says **"Media failed"** | The caller or their network went away abruptly — a sleeping laptop, a dropped link, a killed browser — sending no clean close | **Expected, and not a provider fault.** Since M13.1 the endpoint closes the connection once ICE reports `failed`, so the session ends and the fact is reported as a broken media path rather than a hangup (AR-6). The delay is whatever aioice's consent freshness takes — **≈30 s today, derived from its constants, path-dependent, and not a guaranteed interval**. A media path that is dead while ICE still reports a live pair stays **indistinguishable from silence**, so that case still ends only when someone ends it (DL-0255, DL-0256). |
 | Barge-in does nothing | Speaking over the agent is ignored | **Expected.** F-1: `allow_interruptions` never reaches the runtime on the product path. |
 
 ## 9. Teardown
