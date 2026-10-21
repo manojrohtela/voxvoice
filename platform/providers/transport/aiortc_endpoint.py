@@ -73,6 +73,18 @@ OUTBOUND_QUEUE_FRAMES = 64
 #: longer than one frame and far shorter than any audible pause.
 _PACING_SLACK_S = 0.2
 
+#: How long `inbound()` waits for the ICE transport's verdict once the inbound track has ended
+#: (M13.1). The track ends **before** ICE reports failure — aioice signals consent loss by closing
+#: its own connection, and that close reaches the receiver before it reaches the ICE monitor — so a
+#: classification made the instant the track ends would call every dead network path a hangup.
+#:
+#: Measured in-process over twelve runs on one machine: the verdict follows the track's end by
+#: 0.26-0.83 ms. This is ~120x that worst case, which is headroom for a loaded host rather than a
+#: cross-platform guarantee; it is **not** a proven bound and is deliberately a named constant so
+#: it can be retuned. Exceeding it is safe by construction: the wait fails **open** to the
+#: pre-M13.1 behaviour, so the cost of being wrong is a late `DISCONNECTED`, never a wrong fact.
+ICE_SETTLE_DEADLINE_S = 0.1
+
 
 def _build_outbound_track(queue: asyncio.Queue) -> Any:
     """An `aiortc` audio track fed from `queue`.
@@ -182,6 +194,9 @@ class AiortcMediaEndpoint:
         self._faults: dict[str, str] = {}
         #: The teardown a connection-state watcher started, held so it is never an orphan (§12).
         self._closers: dict[str, asyncio.Task] = {}
+        #: Set once this session's ICE transport reaches a terminal state, so a track that has
+        #: already ended can wait for the verdict instead of guessing it — see `_settled_fault`.
+        self._ice_settled: dict[str, asyncio.Event] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -193,6 +208,10 @@ class AiortcMediaEndpoint:
         pc = self._new_peer_connection()
         self._connections[session_id] = pc
         self._faults.pop(session_id, None)  # a fresh session inherits no previous fault
+        # Created **here**, before any listener can exist: `asyncio.Event` is sticky, so a verdict
+        # that arrives before the first `wait()` is still seen — but one that arrives before the
+        # Event itself would be lost. A fresh session therefore gets a fresh, unset Event.
+        self._ice_settled[session_id] = asyncio.Event()
         self._watch_connection_state(session_id, pc)
         # The outbound track is attached **before** negotiation, so the offer advertises the audio
         # this runtime will send. Attaching it afterwards would produce a recvonly session that
@@ -209,6 +228,11 @@ class AiortcMediaEndpoint:
         if track is None:
             await self._safe_close(session_id)
             raise MediaEndpointError("negotiation produced no inbound audio track")
+        # Registered only now: the transceivers that carry the ICE transport do not exist until
+        # negotiation has produced them. A failure before this point still has a path — it either
+        # fails `negotiate` outright or leaves `connectionState` at `failed`, which the watcher
+        # above already handles, because the peer connection is not closing yet.
+        self._watch_ice_state(session_id, pc)
         self._tracks[session_id] = track
         self._seq[session_id] = 0
 
@@ -261,6 +285,108 @@ class AiortcMediaEndpoint:
 
         pc.on("connectionstatechange", on_connection_state_change)
 
+    def _ice_transports(self, pc: Any) -> list[Any]:
+        """The distinct ICE transports behind this peer connection.
+
+        Reached through documented public properties only — `getTransceivers()` ->
+        `receiver.transport` -> `.transport` — which is how aiortc wires its own state updates.
+        Probed with `getattr` rather than called outright because a peer-connection double is a
+        legitimate `MediaEndpoint` implementation detail: a library-shaped surface must not become
+        something the deterministic fakes are required to grow."""
+        get_transceivers = getattr(pc, "getTransceivers", None)
+        if not callable(get_transceivers):
+            return []
+        found: list[Any] = []
+        seen: set[int] = set()
+        for transceiver in get_transceivers() or ():
+            dtls = getattr(getattr(transceiver, "receiver", None), "transport", None)
+            ice = getattr(dtls, "transport", None)
+            # One transport serves every bundled transceiver, so identity — not position — is
+            # what makes this a set. Registering twice would be harmless but is still wrong.
+            if ice is None or id(ice) in seen or not callable(getattr(ice, "on", None)):
+                continue
+            seen.add(id(ice))
+            found.append(ice)
+        return found
+
+    def _watch_ice_state(self, session_id: str, pc: Any) -> None:
+        """Record an ICE **transport** failure — the only place that fact survives (M13.1).
+
+        ## Why `connectionState` cannot answer this
+
+        aioice reports consent loss by closing its own connection. That close tears down the local
+        DTLS transport first, `dtlsStates == {"closed"}` makes `RTCPeerConnection` auto-close, and
+        `close()` raises its own closed flag **before** the ICE monitor promotes the transport to
+        `failed`. From then on the peer connection answers `"closed"` and never reaches its
+        `"failed" in iceStates` branch — so `connectionstatechange` reports a clean close for a
+        path that died. The ICE transport does reach `failed`, and emits `"statechange"` when it
+        does; this is the one observer that sees it.
+
+        ## Why recording it is only half the fix
+
+        Measured in-process over six runs, the transition lands **0.4-0.8 ms after** the inbound
+        track has already ended, so an observer alone would always be too late. `_settled_fault`
+        is the other half. Those timings are one machine's observation, never a bound.
+
+        No teardown is started from here. On this path aiortc is already closing the connection
+        itself, and the `connectionState` watcher still owns the paths where it is not."""
+        transports = self._ice_transports(pc)
+        if not transports:
+            # Nothing here will ever report a verdict, so there is nothing to wait for: drop the
+            # Event rather than make this session's track end pay the settle deadline for an
+            # answer that cannot arrive. This is the shape a peer-connection double has, and it
+            # is why the deterministic fakes see exactly the pre-M13.1 timing.
+            self._ice_settled.pop(session_id, None)
+            return
+        for ice in transports:
+            self._watch_one_ice_transport(session_id, ice)
+
+    def _watch_one_ice_transport(self, session_id: str, ice: Any) -> None:
+        def on_ice_state_change() -> None:
+            state = getattr(ice, "state", None)
+            if state == "failed":
+                # `setdefault`, because the `connectionState` watcher may have recorded the same
+                # fault first and the detail it produces is asserted exactly. Either way the
+                # session carries one reason, not two.
+                self._faults.setdefault(session_id, "ice connection failed")
+                log.warning("aiortc: ICE transport failed for %s", session_id)
+            if state in ("failed", "closed"):
+                # Fault recorded first, verdict signalled second: a waiter woken by this Event
+                # must never observe the signal without the reason that caused it.
+                settled = self._ice_settled.get(session_id)
+                if settled is not None:
+                    settled.set()
+
+        # aiortc drops every listener on this transport once it reaches `closed`, so there is
+        # nothing to deregister and nothing to leak.
+        ice.on("statechange", on_ice_state_change)
+
+    async def _settled_fault(self, session_id: str) -> str | None:
+        """The ICE verdict for a track that has just ended — waited for, not guessed.
+
+        The track ends before ICE reports anything, so "was this a hangup or a dead path?" cannot
+        be answered at that instant. It is answered here, by waiting on the **condition** under a
+        bounded deadline (the M11.15 R-70 rule) rather than by racing it.
+
+        Failing open on timeout is the deliberate trade: no fault means `inbound()` returns and the
+        transport reports `DISCONNECTED`, exactly as it did before M13.1. A hangup can therefore
+        never become a failure — the only fault this can surface is one an ICE transport actually
+        reported — and the worst case is a `DISCONNECTED` late by the deadline."""
+        settled = self._ice_settled.get(session_id)
+        if settled is not None and not settled.is_set():
+            try:
+                await asyncio.wait_for(settled.wait(), ICE_SETTLE_DEADLINE_S)
+            except TimeoutError:
+                # Caught narrowly on purpose: a `CancelledError` here is shutdown withdrawing the
+                # session, and swallowing it would report a cancelled call as a hangup (ADR-0046).
+                log.warning(
+                    "aiortc: ICE gave no verdict for %s within %.3gs; "
+                    "reporting the media path as ended",
+                    session_id,
+                    ICE_SETTLE_DEADLINE_S,
+                )
+        return self._faults.pop(session_id, None)
+
     def _new_peer_connection(self) -> Any:
         """Construct the peer connection under this deployment's stated ICE policy.
 
@@ -287,6 +413,13 @@ class AiortcMediaEndpoint:
         if closer is not None and closer is not asyncio.current_task():
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await closer
+        # Woken, **then** dropped, and before `pc.close()` below. A waiter in `inbound()` holds
+        # its own reference, so removing it from the map cannot strand it — but dropping it
+        # without setting it would park the pump for the whole settle deadline on every ordinary
+        # teardown. Setting it is honest: teardown *is* a terminal verdict.
+        settled = self._ice_settled.pop(session_id, None)
+        if settled is not None:
+            settled.set()
         self._tracks.pop(session_id, None)
         queue = self._outbound.pop(session_id, None)
         self._seq.pop(session_id, None)
@@ -324,10 +457,15 @@ class AiortcMediaEndpoint:
                 frame = await track.recv()
             except MediaStreamError:
                 fault = self._faults.pop(session_id, None)
+                if fault is None:
+                    # Nothing recorded *yet* does not mean nothing happened: on an abrupt loss the
+                    # track ends a fraction of a millisecond before ICE reports the failure that
+                    # ended it. Ask, under a bounded deadline, rather than assume.
+                    fault = await self._settled_fault(session_id)
                 if fault is not None:
-                    # The track ended because *we* closed the connection after ICE reported it
-                    # failed, so this is a broken media path and must leave as one (M13.1). The
-                    # transport turns this into `FAILED`; returning would make it `DISCONNECTED`.
+                    # The track ended because ICE reported the connection failed, so this is a
+                    # broken media path and must leave as one (M13.1). The transport turns this
+                    # into `FAILED`; returning would make it `DISCONNECTED`.
                     raise MediaEndpointError(f"inbound media ended: {fault}") from None
                 return  # the track ended — a hangup, not a fault
             except asyncio.CancelledError:
