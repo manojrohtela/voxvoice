@@ -64,12 +64,59 @@ from dataclasses import dataclass
 _STUN_SCHEMES = ("stun:", "stuns:")
 _RELAY_SCHEMES = ("turn:", "turns:")
 
+#: The lowest port a media range may start at. Below 1024 a bind needs privilege the service
+#: deliberately does not have (`CAP_NET_BIND_SERVICE` covers the one TCP port it listens on).
+_MIN_MEDIA_PORT = 1024
+#: `hi` is **exclusive**, so the largest honest value is one past the last usable port.
+_MAX_MEDIA_PORT_EXCLUSIVE = 65536
+
 
 class IcePolicyError(ValueError):
     """An ICE policy was stated that this deployment cannot honour.
 
     A `ValueError` because it is a composition-time configuration fault, the same shape as an
     unknown provider profile — it should stop startup, not a call."""
+
+
+def parse_media_port_range(spec: str | None) -> tuple[int, int] | None:
+    """`"51000-51032"` -> `(51000, 51032)`, **half-open**: ports 51000..51031 inclusive.
+
+    `None` or empty means *unset*, which is the default and leaves media ports to the operating
+    system's ephemeral range — the behaviour every deployment had before M13.2.
+
+    This is the **only** place the specification is parsed. `api.webrtc.config` carries the raw
+    string and nothing else, so there is one source of truth rather than two that can drift."""
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    parts = text.split("-")
+    if len(parts) != 2:
+        raise IcePolicyError(
+            f"{spec!r} is not a port range; expected 'LOW-HIGH', e.g. '51000-51032'"
+        )
+    try:
+        lo, hi = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise IcePolicyError(
+            f"{spec!r} is not a port range; both bounds must be integers"
+        ) from None
+    if lo >= hi:
+        raise IcePolicyError(
+            f"{spec!r} is empty: the range is half-open, so LOW must be below HIGH"
+        )
+    if lo < _MIN_MEDIA_PORT:
+        raise IcePolicyError(
+            f"{spec!r} starts below {_MIN_MEDIA_PORT}; a privileged port cannot be bound by the "
+            "unprivileged service that carries media"
+        )
+    if hi > _MAX_MEDIA_PORT_EXCLUSIVE:
+        raise IcePolicyError(
+            f"{spec!r} ends above {_MAX_MEDIA_PORT_EXCLUSIVE}; HIGH is exclusive, so the largest "
+            f"accepted value is {_MAX_MEDIA_PORT_EXCLUSIVE}"
+        )
+    return (lo, hi)
 
 
 @dataclass(frozen=True)
@@ -80,14 +127,29 @@ class IcePolicy:
     to the library as an empty list rather than omitted."""
 
     stun_urls: tuple[str, ...] = ()
+    #: The half-open `[lo, hi)` range media sockets must bind inside, or `None` for the operating
+    #: system's ephemeral range (the default, and the pre-M13.2 behaviour). Stating it lets a
+    #: deployment on a shared host open a handful of UDP ports instead of the whole ephemeral
+    #: range — **without** touching the host-wide `net.ipv4.ip_local_port_range`, which belongs to
+    #: every other service on that host.
+    media_port_range: tuple[int, int] | None = None
 
     @property
     def uses_stun(self) -> bool:
         return bool(self.stun_urls)
 
+    @property
+    def bounds_media_ports(self) -> bool:
+        return self.media_port_range is not None
+
     @classmethod
-    def from_urls(cls, urls: Iterable[str] | None) -> IcePolicy:
-        """Validate and build. Refuses anything that is not a STUN URL."""
+    def from_urls(
+        cls, urls: Iterable[str] | None, *, media_port_range: str | None = None
+    ) -> IcePolicy:
+        """Validate and build. Refuses anything that is not a STUN URL.
+
+        `media_port_range` is the deployment's raw specification; it is parsed here so the policy
+        object is the single validated carrier of both decisions."""
         cleaned: list[str] = []
         for raw in urls or ():
             url = raw.strip()
@@ -106,17 +168,28 @@ class IcePolicy:
                 )
             if url not in cleaned:
                 cleaned.append(url)
-        return cls(stun_urls=tuple(cleaned))
+        return cls(
+            stun_urls=tuple(cleaned),
+            media_port_range=parse_media_port_range(media_port_range),
+        )
 
     def describe(self) -> str:
         """A log-safe one-liner. STUN URLs are hosts, not secrets, but the shape is what matters."""
-        if not self.stun_urls:
-            return "no ICE servers (explicit; host candidates only)"
-        return f"{len(self.stun_urls)} STUN server(s) (host + server-reflexive candidates)"
+        servers = (
+            "no ICE servers (explicit; host candidates only)"
+            if not self.stun_urls
+            else f"{len(self.stun_urls)} STUN server(s) (host + server-reflexive candidates)"
+        )
+        # Unchanged when no range is stated: this string is asserted verbatim elsewhere, and a
+        # feature that is off should not alter what the deployment logs about itself.
+        if self.media_port_range is None:
+            return servers
+        lo, hi = self.media_port_range
+        return f"{servers}; media UDP ports confined to [{lo},{hi})"
 
 
 #: The default: **explicitly** no ICE servers. Not the same thing as passing nothing (R-71).
 NO_ICE_SERVERS = IcePolicy()
 
 
-__all__ = ["NO_ICE_SERVERS", "IcePolicy", "IcePolicyError"]
+__all__ = ["NO_ICE_SERVERS", "IcePolicy", "IcePolicyError", "parse_media_port_range"]

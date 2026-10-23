@@ -124,10 +124,19 @@ def resolve_ice_policy(settings: WebRTCSettings) -> Any:
     Done **here**, at the composition root, because this is the layer allowed to know the provider
     plane exists (AR-14) — and because §4 of M11.16.6 requires the ICE policy to be stated where
     the deployment is assembled rather than inherited from a library three layers down (R-71)."""
-    from providers.transport.ice import IcePolicy, IcePolicyError
+    from providers.transport.ice import IcePolicy, IcePolicyError, parse_media_port_range
 
+    # Validated first, and separately, so a refusal names the variable that was actually wrong.
+    # Two settings reach this function; sniffing one exception's text to guess which would be
+    # exactly the kind of inference a startup error should never make.
     try:
-        return IcePolicy.from_urls(settings.ice_stun_urls)
+        parse_media_port_range(settings.media_udp_port_range)
+    except IcePolicyError as exc:
+        raise WebRTCConfigError(f"VOXVOICE_MEDIA_UDP_PORT_RANGE: {exc}") from exc
+    try:
+        return IcePolicy.from_urls(
+            settings.ice_stun_urls, media_port_range=settings.media_udp_port_range
+        )
     except IcePolicyError as exc:
         raise WebRTCConfigError(f"VOXVOICE_ICE_STUN_URLS: {exc}") from exc
 

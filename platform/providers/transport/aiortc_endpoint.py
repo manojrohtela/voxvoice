@@ -221,7 +221,7 @@ class AiortcMediaEndpoint:
         self._outbound[session_id] = queue
         try:
             pc.addTrack(_build_outbound_track(queue))
-            track = await self._signaller.negotiate(session_id, pc)
+            track = await self._negotiate(session_id, pc)
         except Exception as exc:  # noqa: BLE001 — library/transport errors are mapped here (AR-12)
             await self._safe_close(session_id)
             raise MediaEndpointError(f"negotiation failed: {exc}") from exc
@@ -235,6 +235,42 @@ class AiortcMediaEndpoint:
         self._watch_ice_state(session_id, pc)
         self._tracks[session_id] = track
         self._seq[session_id] = 0
+
+    async def _negotiate(self, session_id: str, pc: Any) -> Any:
+        """Negotiate, confining media sockets to the stated UDP range when one was stated (M13.2).
+
+        ## Why the check happens *after* negotiation rather than at the bind
+
+        `aioice` wraps each bind in `except OSError: ... continue` and only registers the sockets
+        it created **after** that loop (`aioice/ice.py:1009`), so an exception escaping the loop
+        would orphan every socket bound so far. `BoundedPortRangeExhausted` is therefore an
+        `OSError` the library is meant to catch, and exhaustion is reported here instead, from the
+        scope's own accounting — loud, and with every successful bind still owned by `aioice`.
+
+        **This is a detector, not a preventer**, and it inspects only the local description. A
+        bypassed bind has already happened by the time it fires; what it guarantees is that the
+        call is refused rather than proceeding on ports the deployment did not open."""
+        if not self._ice_policy.bounds_media_ports:
+            return await self._signaller.negotiate(session_id, pc)
+
+        from .udp_ports import bounded_ports, install, verify_host_candidate_ports
+
+        lo, hi = self._ice_policy.media_port_range
+        install(asyncio.get_running_loop())
+        async with bounded_ports(lo, hi) as scope:
+            track = await self._signaller.negotiate(session_id, pc)
+        description = getattr(pc, "localDescription", None)
+        problem = verify_host_candidate_ports(scope, getattr(description, "sdp", "") or "")
+        if problem is not None:
+            raise MediaEndpointError(f"media UDP port range not honoured: {problem}")
+        log.info(
+            "aiortc: %s bound %d media socket(s) inside [%d,%d)",
+            session_id,
+            scope.bound,
+            lo,
+            hi,
+        )
+        return track
 
     def _watch_connection_state(self, session_id: str, pc: Any) -> None:
         """Close the connection when ICE reports it **failed** (M13.1).

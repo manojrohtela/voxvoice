@@ -61,6 +61,13 @@ class WebRTCSettings:
     #: TURN is **not** implemented; a `turn:` URL is refused, not ignored.
     ice_stun_urls: tuple[str, ...] = ()
 
+    #: The half-open `[lo, hi)` UDP range media sockets must bind inside, as the raw
+    #: `"LOW-HIGH"` specification. Empty (the default) leaves media ports to the operating
+    #: system's ephemeral range, which is what every deployment had before M13.2. Carried as a
+    #: string and validated by the composition root, for the same AR-14 reason as the ICE URLs
+    #: above: parsing it here would mean `api.webrtc.config` importing `providers`.
+    media_udp_port_range: str | None = None
+
     @property
     def webrtc_enabled(self) -> bool:
         return self.transport == "webrtc"
@@ -91,8 +98,10 @@ class WebRTCSettings:
         source = os.environ if env is None else env
         raw = (source.get("WEBRTC_ALLOWED_ORIGINS") or "").strip()
         stun = (source.get("VOXVOICE_ICE_STUN_URLS") or "").strip()
+        ports = (source.get("VOXVOICE_MEDIA_UDP_PORT_RANGE") or "").strip()
         return cls(
             ice_stun_urls=tuple(u.strip() for u in stun.split(",") if u.strip()),
+            media_udp_port_range=ports or None,
             transport=source.get("RUNTIME_TRANSPORT", "local"),
             signalling=source.get("WEBRTC_SIGNALLING", "false").lower() == "true",
             allowed_origins=tuple(o.strip() for o in raw.split(",") if o.strip()),
