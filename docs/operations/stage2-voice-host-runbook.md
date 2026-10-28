@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Active v1.0 (M11.18) |
-| **Date** | 2026-10-19 |
+| **Status** | Active v1.1 (M13.2) |
+| **Date** | 2026-10-26 |
 | **Subject** | Deploying the **voice runtime + console** on one cloud VM so a real spoken call works |
 | **Supersedes** | `platform/DEPLOY.md`, `platform/ORACLE_DEPLOY.md`, `platform/scripts/oracle_setup.sh` (Dograh-era, removed at M11.18) |
 | **Authority** | [ADR-0054](../adr/ADR-0054-ice-server-policy-is-explicit-at-the-composition-root.md) (ICE) · [ADR-0049](../adr/ADR-0049-provider-credential-injection.md) (credentials) · [pre-live handoff](../releases/epic11-pre-live-handoff.md) (the checklists this operationalises) |
@@ -88,11 +88,47 @@ Open:
 
 * **TCP 443** — HTTPS. Required.
 * **TCP 80** — only if using ACME HTTP-01.
-* **UDP ephemeral range** — the media path. Narrow it first so the rule is small:
+* **UDP media range** — the media path. **Set `VOXVOICE_MEDIA_UDP_PORT_RANGE` (§5) and open
+  exactly those ports.** Nothing else about the host's networking changes.
 
-```bash
-sudo sysctl -w net.ipv4.ip_local_port_range="50000 50100"   # persist in /etc/sysctl.d/
-```
+> ### ⛔ Never modify `net.ipv4.ip_local_port_range`
+>
+> **Do not write this setting** — not with `sysctl`, not through `/proc/sys`, and not by
+> persisting it in `/etc/sysctl.d/`. Earlier versions of this runbook instructed exactly that, to
+> keep the firewall rule small. **That instruction was wrong and is withdrawn.** The setting is
+> **host-wide**: narrowing it re-pools the ephemeral ports of *every other service on the
+> machine*, which on a shared host means every co-tenant application at once. On the AgentHive
+> hub the measured baseline is **`32768 60999`** (the kernel default) and it **must remain
+> exactly that** — not narrowed, widened, re-ordered or otherwise changed, for any reason
+> (DL-0258). Reading it is fine and often useful; changing it is not.
+>
+> This **supersedes** the pre-live handoff's recommendation to narrow the sysctl first — both its
+> prose and its optional *"`ip_local_port_range` narrowed first (recommended)"* checklist item.
+> That document is a dated release record and is left as written; it must not be acted on.
+>
+> **Do this instead.** Since M13.2 VoxVoice confines its *own* media sockets in-process, so the
+> firewall rule is small without touching anything shared. Set the range in the service
+> environment (§5) and open only those ports:
+>
+> ```
+> VOXVOICE_MEDIA_UDP_PORT_RANGE=51000-51008      # half-open: ports 51000-51007
+> ```
+>
+> That is a **service environment variable, not a kernel setting**. A malformed range is a
+> startup error, never a silent fallback.
+>
+> **Sizing is an estimate, not a guarantee.** `aiortc` binds one socket per local IP address per
+> call and each may take a different port, so budget
+> `width ≳ (global IPv4 + global IPv6 addresses) × (concurrent calls + 1 for teardown overlap)`,
+> then add headroom: a call cancelled during ICE gathering can orphan a socket that holds one of
+> these ports until the process restarts (a pinned `aioice` limitation — see §8). Read the
+> address count with `ip -4 -o addr show scope global` and `ip -6 -o addr show scope global`; it
+> is not stable, because IPv6 privacy extensions rotate temporary addresses. A width below the
+> computed need is **logged as a warning, not prevented**.
+>
+> *Worked example — the AgentHive hub, measured 2026-10-26:* exactly **one** global address
+> (`10.0.0.140`, private IPv4; no global IPv6), so `1 × (1 + 1) = 2` ports plus six for orphan
+> headroom ⇒ **`51000-51008`**, and **no `ip6tables` media rule is needed at all**.
 
 **Oracle's Ubuntu images ship REJECT rules.** People open the Security List, see nothing work, and
 lose an afternoon. The handoff calls this *"the #1 Oracle gotcha — both layers are required"*.
@@ -326,3 +362,10 @@ decommissioned or was ever shared.
 | **Postgres** | Not an `E11` requirement and unexercised. SQLite is what is tested. |
 | **Multi-worker / scale** | The rendezvous registry is in-process (R-E12-5). One worker. |
 | **`E11-12`** | Still inconclusive. A live run produces the measurement; it does not by itself resolve ADR-0053, which is unratified. |
+
+## 11. Revision record
+
+| Version | Date | Change |
+|---|---|---|
+| v1.1 | 2026-10-26 | **§3: the host-wide `net.ipv4.ip_local_port_range` write instruction is withdrawn and now explicitly prohibited**, with the measured baseline `32768 60999` recorded as the value that must be preserved. It is replaced by VoxVoice's in-process `VOXVOICE_MEDIA_UDP_PORT_RANGE` (M13.2, commit `9cd4e5d`), which bounds the firewall opening without changing a setting shared with every other service on the host. Also supersedes the pre-live handoff's "narrowed first (recommended)" guidance, which is left as written in that dated release record. Authority: DL-0258; completion recorded in DL-0259. **No other section changed.** |
+| v1.0 | 2026-10-19 | First version (M11.18), superseding the Dograh-era `DEPLOY.md` / `ORACLE_DEPLOY.md` / `scripts/oracle_setup.sh`. |
